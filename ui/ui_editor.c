@@ -35,14 +35,16 @@ static const char *HELP_LINES[] =
         "",
         "  Navigation:",
         "    Arrows           Move cursor",
-        "    Home / End       Line start / end",
-        "    PgUp / PgDn      Page up / down",
+        "    Home / Ctrl+B    Line start",
+        "    End / Ctrl+E     Line end",
+        "    PgUp / Ctrl+U    Page up",
+        "    PgDn / Ctrl+D    Page down",
         "    Ctrl+Left/Right  Word left / right",
         "    Ctrl+G           Go to start of document",
         "    Ctrl+K           Go to end of document",
         "",
         "  Editing:",
-        "    Ctrl+Y  Delete line",
+        "    Ctrl+Y           Delete line",
         "    Ctrl+Z           Undo",
         "    Alt+Z            Redo",
         "    Ctrl+T           Delete word right",
@@ -60,9 +62,9 @@ static const char *HELP_LINES[] =
         "    Ctrl+O           Export block to file",
         "",
         "  Search:",
-        "    F5               Search (show all matches)",
+        "    F5 / Alt+F       Search (show all matches)",
         "    Ctrl+R           Find & replace",
-        "    Ctrl+G           Go to line",
+        "    Ctrl+Q           Go to line",
         "    Alt+G            Clear search highlights",
         "",
         "  Files:",
@@ -74,7 +76,8 @@ static const char *HELP_LINES[] =
         "    F1 / ?           This help",
         "",
         "  Other:",
-        "    F3               Choose output charset",
+        "    F3 / Alt+C       Choose output charset",
+        "    F4 / Alt+S       Setup / configuration",
 };
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
 
@@ -1194,8 +1197,8 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 
-    /* F3 : charset OR Previous match in search mode */
-    if (is_key && ch == KEY_F(3))
+    /* F3 / Alt+C : charset OR Previous match in search mode */
+    if ((is_key && ch == KEY_F(3)) || (ch == KEY_ALT('C')))
     {
         if (app->search.only_mode || (app->search.is_mode && app->search.count > 0))
             return search_prev(app);
@@ -1203,8 +1206,8 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
             return charset_select(app);
     }
 
-    /* F4 : Setup or Next match in search mode */
-    if (is_key && ch == KEY_F(4))
+    /* F4 / Alt+S : Setup or Next match in search mode */
+    if ((is_key && ch == KEY_F(4)) || (ch == KEY_ALT('S')))
     {
         if (app->search.only_mode || (app->search.is_mode && app->search.count > 0))
             return search_next(app);
@@ -1238,8 +1241,8 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         }
     }
 
-    /* F5 : search */
-    if (is_key && ch == KEY_F(5))
+    /* F5 / Alt+F : search */
+    if ((is_key && ch == KEY_F(5)) || (ch == KEY_ALT('F')))
     {
         if (app->search.is_mode && app->search.count > 0)
         {
