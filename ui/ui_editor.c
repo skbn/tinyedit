@@ -1828,12 +1828,24 @@ void ui_editor_run(TeApp *app)
         if (is_key)
         {
             if (handle_navigation_keys(app, ch, soft, width, body_rows, &preserve_desired))
+            {
+                /* Reset desired column unless this was a vertical move that
+                 * needs to preserve it (UP/DOWN/PgUp/PgDn set preserve_desired=1) */
+                if (!preserve_desired)
+                    soft_reset_desired();
+
                 continue;
+            }
         }
         else /* printable / control chars */
         {
             if (handle_editing_keys(app, ch, wch, soft, width, body_rows, &preserve_desired))
+            {
+                if (!preserve_desired)
+                    soft_reset_desired();
+
                 continue;
+            }
         }
 
         if (!preserve_desired)
