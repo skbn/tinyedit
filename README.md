@@ -47,6 +47,14 @@ Config file location:
 - AmigaOS: `ENVARC:tinyedit.cfg`
 - Windows: `tinyedit.cfg`
 
+=========
+Screenshots
+=========
+
+![AmigaOS 3.2](img/amiga.png)
+
+![Linux](img/linux.png)
+
 ## License
 
 GPL-2.0 - see LICENSE file for details
