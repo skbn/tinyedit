@@ -1396,14 +1396,6 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         ed_move_right(app->editor);
         return 1;
 
-    case KEY_CLEFT:
-        ed_word_left(app->editor);
-        return 1;
-
-    case KEY_CRIGHT:
-        ed_word_right(app->editor);
-        return 1;
-
     case KEY_HOME:
         if (soft)
             soft_move_home_visual(app, width);

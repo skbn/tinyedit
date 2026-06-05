@@ -173,6 +173,13 @@ int main(int argc, char **argv)
 
     if (define_key("\033[201~", KEY_PASTE_END) != OK)
         fprintf(stderr, "Warning: define_key(201~) failed\n");
+
+    /* Register Ctrl+arrow key sequences for word navigation */
+    if (define_key("\033[1;5D", KEY_CLEFT) != OK)
+        fprintf(stderr, "Warning: define_key(Ctrl+Left) failed\n");
+
+    if (define_key("\033[1;5C", KEY_CRIGHT) != OK)
+        fprintf(stderr, "Warning: define_key(Ctrl+Right) failed\n");
 #endif
 
     curs_set(1);
