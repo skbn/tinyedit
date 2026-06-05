@@ -985,27 +985,32 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
 
         if (key == '\n' || key == '\r' || key == KEY_ENTER)
         {
-            /* Convert wchar_t back to char for output */
-            wchar_to_char(dir_w, dir_input, sizeof(dir_input));
-            wchar_to_char(name_w, name_input, sizeof(name_input));
-
-            if (name_input[0])
+            /* Only save when NOT in the file list (field 2) */
+            if (field != 2)
             {
-                char tmp[UI_FILES_PATH_MAX];
-                strncpy(tmp, dir_input, sizeof(tmp) - 1);
-                tmp[sizeof(tmp) - 1] = '\0';
+                /* Convert wchar_t back to char for output */
+                wchar_to_char(dir_w, dir_input, sizeof(dir_input));
+                wchar_to_char(name_w, name_input, sizeof(name_input));
 
-                if (path_append(tmp, sizeof(tmp), name_input) == 0)
+                if (name_input[0])
                 {
-                    strncpy(out_path, tmp, (size_t)(out_path_sz - 1));
-                    out_path[out_path_sz - 1] = '\0';
-                    rc = 0;
+                    char tmp[UI_FILES_PATH_MAX];
+                    strncpy(tmp, dir_input, sizeof(tmp) - 1);
+                    tmp[sizeof(tmp) - 1] = '\0';
+
+                    if (path_append(tmp, sizeof(tmp), name_input) == 0)
+                    {
+                        strncpy(out_path, tmp, (size_t)(out_path_sz - 1));
+                        out_path[out_path_sz - 1] = '\0';
+                        rc = 0;
+                    }
+                    else
+                        rc = -2;
                 }
-                else
-                    rc = -2;
+
+                curs_set(0);
+                break;
             }
-            curs_set(0);
-            break;
         }
 
         if (key == '\t')
