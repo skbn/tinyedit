@@ -53,6 +53,8 @@ Screenshots
 
 ![AmigaOS 3.2](img/amiga.png)
 
+![BSD](img/bsd.png)
+
 ![Linux](img/linux.png)
 
 ## License
