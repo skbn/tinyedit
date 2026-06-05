@@ -1166,14 +1166,8 @@ static int do_save(TeApp *app)
     if (utf8)
         free(utf8);
 
-    /* Clear modified flag by reloading (or just reload content to clear flag) */
-    text = ed_to_string(app->editor);
-
-    if (text)
-    {
-        ed_load(app->editor, text);
-        free(text);
-    }
+    /* Clear modified flag */
+    ed_set_modified(app->editor, 0);
 
     te_status(app, "Saved: %s", app->filename);
 

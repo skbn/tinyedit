@@ -1557,6 +1557,8 @@ int ed_redo(Ed *ed)
     clamp(ed);
     ed_ensure_visible(ed);
 
+    ed->modified = 1;
+
     free(e->text);
     e->text = NULL;
 
@@ -1611,6 +1613,12 @@ void ed_toggle_insert(Ed *ed)
 {
     if (ed)
         ed->insert_mode = !ed->insert_mode;
+}
+
+void ed_set_modified(Ed *ed, int modified)
+{
+    if (ed)
+        ed->modified = modified;
 }
 
 void ed_get_info(const Ed *ed, EdInfo *info)

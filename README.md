@@ -22,18 +22,22 @@ make -f Makefile.unix
 
 ### AmigaOS
 ```bash
+Using bebbo gcc
+
 make -f Makefile.amiga
 ```
 
 ### Windows
 ```bash
+From msys2 with mingw x32 or x64
+
 make -f Makefile.win32
 ```
 
 ## Usage
 
 ```bash
-./tinyedit [filename]
+tinyedit [filename]
 ```
 
 ## Configuration

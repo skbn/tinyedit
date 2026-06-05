@@ -117,4 +117,7 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in);
 /* Export the current block selection (F6 to mark) to a text file */
 int ed_export_block_to_file(Ed *ed, const char *path, const char *charset_out);
 
+/* Set modified flag */
+void ed_set_modified(Ed *ed, int modified);
+
 #endif
