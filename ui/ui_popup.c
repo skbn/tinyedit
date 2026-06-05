@@ -87,7 +87,7 @@ int ui_popup_confirm(const char *title, const char *msg)
 
     for (;;)
     {
-        standend(); /* Clear any residual attributes from previous iteration */
+        standend();
         ui_draw_popup_frame(y, x, h, w, title ? title : "Confirm");
         attron(COLOR_PAIR(COL_POPUP));
 
@@ -104,10 +104,18 @@ int ui_popup_confirm(const char *title, const char *msg)
         ch = getch();
 
         if (ch == 'y' || ch == 'Y' || ch == '\n' || ch == '\r')
+        {
+            standend();
+            curs_set(0);
             return 1;
+        }
 
         if (ch == 'n' || ch == 'N' || ch == 27)
+        {
+            standend();
+            curs_set(0);
             return 0;
+        }
     }
 }
 
@@ -160,7 +168,7 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
         int visible = h - 4;
         int row;
 
-        standend(); /* Clear any residual attributes from previous iteration */
+        standend();
         ui_draw_popup_frame(y, x, h, w, title ? title : "Select");
         attron(COLOR_PAIR(COL_POPUP));
 
@@ -211,10 +219,18 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
             continue;
 
         if (wch == 27)
+        {
+            standend();
+            curs_set(0);
             return -1;
+        }
 
         if (wch == L'\n' || wch == L'\r' || (rc == KEY_CODE_YES && wch == KEY_ENTER))
+        {
+            standend();
+            curs_set(0);
             return sel;
+        }
 
         if ((rc == KEY_CODE_YES && wch == KEY_UP) || wch == 'k')
         {
@@ -316,6 +332,7 @@ int ui_popup_input_wcs(const char *title, const char *prompt, wchar_t *wbuf, int
 
         if (ch == 27)
         {
+            standend();
             curs_set(0);
             if (saved)
             {
@@ -329,6 +346,7 @@ int ui_popup_input_wcs(const char *title, const char *prompt, wchar_t *wbuf, int
 
         if (ch == '\n' || ch == '\r' || ch == KEY_ENTER)
         {
+            standend();
             curs_set(0);
             if (saved)
             {
@@ -556,7 +574,7 @@ int ui_popup_charset_pair(const char *view_in, const char *save_in, char *view_o
         const char *labels[2] = {"View charset:  ", "Save charset:  "};
         const char *cur_label = "Up/Down: field  Left/Right: change  Enter: ok";
 
-        standend(); /* Clear any residual attributes from previous iteration */
+        standend();
         ui_draw_popup_frame(y, x, h, w, "Charsets");
         attron(COLOR_PAIR(COL_POPUP));
 
@@ -605,10 +623,18 @@ int ui_popup_charset_pair(const char *view_in, const char *save_in, char *view_o
         ch = wrapper_getch();
 
         if (ch == 27)
+        {
+            standend();
+            curs_set(0);
             return -1;
+        }
 
         if (ch == '\n' || ch == '\r' || ch == KEY_ENTER)
+        {
+            standend();
+            curs_set(0);
             break;
+        }
 
         if (ch == KEY_UP)
             row = (row == 0) ? 1 : 0;
@@ -631,6 +657,8 @@ int ui_popup_charset_pair(const char *view_in, const char *save_in, char *view_o
         save_out[save_outsz - 1] = '\0';
     }
 
+    standend();
+    curs_set(0);
     return 0;
 }
 
@@ -684,7 +712,7 @@ int ui_popup_search_results(const char *title, const int *line_nums, const char 
         int row;
         int j;
 
-        standend(); /* Clear any residual attributes from previous iteration */
+        standend();
         ui_draw_popup_frame(y, x, h, w, title ? title : "Search Results");
         attron(COLOR_PAIR(COL_POPUP));
 
@@ -735,10 +763,18 @@ int ui_popup_search_results(const char *title, const int *line_nums, const char 
             continue;
 
         if (wch == 27)
+        {
+            standend();
+            curs_set(0);
             return -1;
+        }
 
         if (wch == L'\n' || wch == L'\r' || (rc == KEY_CODE_YES && wch == KEY_ENTER))
+        {
+            standend();
+            curs_set(0);
             return sel;
+        }
 
         if ((rc == KEY_CODE_YES && wch == KEY_UP) || wch == 'k')
         {
@@ -831,7 +867,7 @@ void ui_popup_help(const char *title, const char *const *lines, int n)
         int visible = h - 4;
         int row;
 
-        standend(); /* Clear any residual attributes from previous iteration */
+        standend();
         ui_draw_popup_frame(y, x, h, w, title ? title : "Help");
         attron(COLOR_PAIR(COL_POPUP));
 
@@ -863,7 +899,11 @@ void ui_popup_help(const char *title, const char *const *lines, int n)
             continue;
 
         if (wch == 27 || wch == 'q' || (rc == KEY_CODE_YES && (wch == KEY_F(1) || wch == KEY_ENTER)))
+        {
+            standend();
+            curs_set(0);
             break;
+        }
 
         if ((rc == KEY_CODE_YES && wch == KEY_UP) || wch == 'k')
         {
@@ -990,7 +1030,7 @@ int ui_popup_replace(const wchar_t *search_in, const wchar_t *replace_in, wchar_
         if (field == 2)
             attroff(COLOR_PAIR(COL_POPUP_SEL));
 
-        standend(); /* Clear attributes after checkbox */
+        standend();
 
         /* Clear the whole word row with popup background */
         attron(COLOR_PAIR(COL_POPUP));
@@ -1008,7 +1048,7 @@ int ui_popup_replace(const wchar_t *search_in, const wchar_t *replace_in, wchar_
         if (field == 3)
             attroff(COLOR_PAIR(COL_POPUP_SEL));
 
-        standend(); /* Clear attributes after checkbox */
+        standend();
 
         /* Status bar */
         attron(COLOR_PAIR(COL_STATUS));
