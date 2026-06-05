@@ -1,0 +1,2490 @@
+/*
+ * tinyedit - Text editor for AmigaOS
+ *
+ * Copyright (C) 2026 Tanausú M. 39:190/101@amiganet 2:341/207@fidonet
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
+/* ncursesw_amiga.c -- Complete ncursesw implementation for AmigaOS 3 */
+#ifdef PLATFORM_AMIGA
+
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "wrapper.h"
+
+#include <devices/inputevent.h>
+#include <exec/memory.h>
+#include <exec/types.h>
+#include <graphics/gfxmacros.h>
+#include <graphics/rastport.h>
+#include <graphics/text.h>
+#include <intuition/intuition.h>
+#include <intuition/screens.h>
+#include <libraries/keymap.h>
+
+#include <proto/diskfont.h>
+#include <proto/exec.h>
+#include <proto/graphics.h>
+#include <proto/intuition.h>
+#include <proto/keymap.h>
+
+#include "ncursesw_amiga.h"
+
+/* Global state */
+
+WINDOW *stdscr = NULL;
+WINDOW *curscr = NULL;
+int LINES = 25;
+int COLS = 80;
+int COLOR_PAIRS = 256;
+int COLORS = 8;
+
+static struct Window *ami_win = NULL;
+static struct Screen *ami_scr = NULL;
+static struct RastPort *ami_rp = NULL;
+static struct TextFont *ami_font = NULL;
+static struct TextFont *ami_font_normal = NULL;
+static struct TextFont *ami_font_ansi = NULL;
+
+#define AMI_FONT_NAME_MAX 256
+static char ami_font_name[AMI_FONT_NAME_MAX] = "topaz.font";
+static char ami_ansi_font_name[AMI_FONT_NAME_MAX] = "topaz.font";
+static int fw = 8, fh = 8, fb = 7; /* font width, height, baseline */
+static int bx = 0, by = 0;         /* border offsets */
+
+static int s_cursor_vis = 1;
+static int s_colors_on = 0;
+static int s_raw_mode = 0;
+static int s_echo_mode = 0;
+static int s_keypad_mode = 1;
+static int s_nodelay_mode = 0;
+
+/* Cursor outline pen (defaults to pen 1 = text). Configurable via
+ * amiga_set_cursor_pen() so the app can pick a contrasting color */
+static UBYTE s_cursor_pen = 1;
+
+/* Default fg/bg used when a cell has no color pair (pair == 0 or
+ * unitialized). Configurable via amiga_set_default_colors(). Stored as
+ * ncurses color indices (0..15), mapped to pens via s_pen[] in apply_colors */
+static short s_default_fg = COLOR_WHITE;
+static short s_default_bg = 0; /* Updated dynamically from config */
+
+/* Color pair table */
+static short s_pair_fg[256];
+static short s_pair_bg[256];
+static int s_pair_ok[256];
+
+/* Pushback for ungetch / unget_wch */
+static int s_ungetch = ERR;
+static wchar_t s_unget_wch_buf = 0;
+static int s_unget_wch_valid = 0;
+
+/* Pen mapping: ncurses color index -> Amiga pen */
+static UBYTE s_pen[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+
+/* Default background color for COLOR_PAIR(0) (from config) */
+static int s_default_bg_color = COLOR_BLACK; /* Gray in ncursesw */
+
+/* Shadow buffer of last rendered cells to skip unchanged cells */
+static Cell *s_shadow = NULL;
+static int s_shadow_w = 0, s_shadow_h = 0;
+static int s_shadow_dirty = 1; /* force full redraw on next render_all */
+
+static UBYTE s_key_queue[16];
+static int s_key_queue_len = 0;
+static int s_key_queue_pos = 0;
+
+/* Cell helpers */
+#define CELL(win, r, c) (&(win)->cells[(r) * (win)->_maxx + (c)])
+
+static int px(int col) { return bx + col * fw; }
+
+static int py(int row) { return by + row * fh; }
+
+/* Apply color pair + attributes to RastPort */
+static void apply_colors(int pair, int attrs)
+{
+    short fg_idx, bg_idx;
+    UBYTE fg_pen, bg_pen;
+
+    if (!s_colors_on || !ami_rp)
+        return;
+
+    fg_idx = (pair >= 0 && pair < COLOR_PAIRS && s_pair_ok[pair]) ? s_pair_fg[pair] : s_default_fg;
+    bg_idx = (pair >= 0 && pair < COLOR_PAIRS && s_pair_ok[pair]) ? s_pair_bg[pair] : s_default_bg;
+
+    if (fg_idx < 0 || fg_idx > 15)
+        fg_idx = s_default_fg;
+
+    if (bg_idx < 0 || bg_idx > 15)
+        bg_idx = s_default_bg;
+
+    if (attrs & A_REVERSE)
+    {
+        short tmp = fg_idx;
+        fg_idx = bg_idx;
+        bg_idx = tmp;
+    }
+
+    fg_pen = s_pen[fg_idx];
+    bg_pen = s_pen[bg_idx];
+
+    SetBPen(ami_rp, bg_pen);
+    SetAPen(ami_rp, fg_pen);
+    SetDrMd(ami_rp, JAM2);
+}
+
+/* Render one cell to screen */
+static void render_cell(int row, int col, chtype ch, int attrs)
+{
+    int x, y, pair;
+    char buf[2];
+    UBYTE saved;
+
+    if (!ami_rp || row < 0 || row >= LINES || col < 0 || col >= COLS)
+        return;
+
+    x = px(col);
+    y = py(row);
+    pair = (attrs & A_COLOR) >> 8;
+
+    apply_colors(pair, attrs);
+
+    /* Clear cell bg */
+    saved = ami_rp->FgPen;
+    SetAPen(ami_rp, ami_rp->BgPen);
+    RectFill(ami_rp, x, y, x + fw - 1, y + fh - 1);
+    SetAPen(ami_rp, saved);
+
+    /* Draw char (unsigned compare so 0x80-0xFF works) */
+    buf[0] = (char)(ch & 0xFF);
+
+    if ((unsigned char)buf[0] >= 0x20)
+    {
+        Move(ami_rp, x, y + fb);
+        Text(ami_rp, (STRPTR)buf, 1);
+    }
+}
+
+static void shadow_invalidate(void) { s_shadow_dirty = 1; }
+
+/* Full screen redraw from cell buffer (diff against
+ * shadow buffer to minimise expensive AmigaOS RectFill+Text per cell)
+ * Run-length: groups contiguous changed cells with same color/attrs into one
+ * RectFill+Text instead of per-cell -- ~10x fewer graphics calls on 68k */
+static void render_all(void);
+
+/* Force complete redraw (call after font change) */
+void amiga_force_redraw(void)
+{
+    render_all();
+}
+
+static void render_all(void)
+{
+    int r, c;
+    Cell *cell;
+    int last_pair = -1;
+    int last_attrs = -1;
+    UBYTE saved;
+    int i;
+    static int s_last_cur_y, s_last_cur_x;
+    int cy_cell;
+    int cx_cell;
+    int prev_y, prev_x;
+
+    if (!ami_win || !ami_rp || !stdscr || !stdscr->cells)
+        return;
+
+    /* (Re)allocate shadow on size change */
+    if (!s_shadow || s_shadow_w != COLS || s_shadow_h != LINES)
+    {
+        free(s_shadow);
+
+        s_shadow = (Cell *)calloc((size_t)(LINES * COLS), sizeof(Cell));
+        s_shadow_w = COLS;
+        s_shadow_h = LINES;
+        s_shadow_dirty = 1;
+    }
+
+    for (r = 0; r < LINES; r++)
+    {
+        c = 0;
+
+        while (c < COLS)
+        {
+            int run_start, run_pair, run_attrs;
+            char run_buf[512]; /* >= any Amiga COLS */
+            int run_len;
+            int x, y, rx;
+
+            cell = CELL(stdscr, r, c);
+
+            /* Skip unchanged cells (shadow diff) */
+            if (s_shadow && !s_shadow_dirty)
+            {
+                Cell *sh = &s_shadow[r * COLS + c];
+
+                if (sh->ch == cell->ch && sh->attrs == cell->attrs)
+                {
+                    c++;
+                    continue;
+                }
+            }
+
+            /* Start a run of contiguous changed cells with same color/attrs */
+            run_start = c;
+            run_pair = (cell->attrs & A_COLOR) >> 8;
+            run_attrs = cell->attrs;
+            run_len = 0;
+
+            /* If A_REVERSE is present, render cell-by-cell to avoid grouping issues */
+            /*if (run_attrs & A_REVERSE)
+            {
+                render_cell(r, c, cell->ch, cell->attrs);
+
+                if (s_shadow)
+                    s_shadow[r * COLS + c] = *cell;
+
+                c++;
+
+                continue;
+            }*/
+
+            while (c < COLS && run_len < (int)sizeof(run_buf))
+            {
+                Cell *cc = CELL(stdscr, r, c);
+                int changed = 1;
+                int p;
+
+                if (s_shadow && !s_shadow_dirty)
+                {
+                    Cell *sh = &s_shadow[r * COLS + c];
+
+                    if (sh->ch == cc->ch && sh->attrs == cc->attrs)
+                        changed = 0;
+                }
+
+                if (!changed)
+                    break;
+
+                p = (cc->attrs & A_COLOR) >> 8;
+
+                /* Compare color pair and A_REVERSE specifically, ignore other attrs */
+                if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
+                    break;
+
+                run_buf[run_len++] = (char)(cc->ch & 0xFF);
+
+                if (s_shadow)
+                    s_shadow[r * COLS + c] = *cc;
+
+                c++;
+            }
+
+            if (run_len <= 0)
+            {
+                c = run_start + 1;
+                continue;
+            }
+
+            if (run_pair != last_pair || run_attrs != last_attrs)
+            {
+                apply_colors(run_pair, run_attrs);
+                last_pair = run_pair;
+                last_attrs = run_attrs;
+            }
+
+            x = px(run_start);
+            y = py(r);
+            rx = px(run_start + run_len) - 1;
+
+            /* One wide RectFill for the whole run background */
+            saved = ami_rp->FgPen;
+            SetAPen(ami_rp, ami_rp->BgPen);
+            RectFill(ami_rp, x, y, rx, y + fh - 1);
+            SetAPen(ami_rp, saved);
+
+            /* One Text() for the whole run (control chars < 0x20 -> space) */
+            for (i = 0; i < run_len; i++)
+            {
+                if ((unsigned char)run_buf[i] < 0x20)
+                    run_buf[i] = ' ';
+            }
+
+            Move(ami_rp, x, y + fb);
+            Text(ami_rp, (STRPTR)run_buf, run_len);
+        }
+
+        /* Reset color tracking between lines */
+        last_pair = -1;
+        last_attrs = -1;
+    }
+
+    s_shadow_dirty = 0;
+
+    /* Cursor handling -- track previous cursor cell so we can redraw it
+     * cleanly when the cursor moves. Forces redraw of (a) previous cell
+     * to wipe the old outline, and (b) current cell so the outline
+     * reappears on top */
+    s_last_cur_y = -1;
+    s_last_cur_x = -1;
+    cy_cell = stdscr ? stdscr->_cury : -1;
+    cx_cell = stdscr ? stdscr->_curx : -1;
+    prev_y = s_last_cur_y;
+    prev_x = s_last_cur_x;
+
+    /* If the cursor was at a different cell, redraw that cell from
+     * the live buffer so the outline disappears */
+    if (s_shadow && prev_y >= 0 && prev_x >= 0 && prev_y < LINES && prev_x < COLS && (prev_y != cy_cell || prev_x != cx_cell))
+    {
+        Cell *cell = CELL(stdscr, prev_y, prev_x);
+        render_cell(prev_y, prev_x, cell->ch, cell->attrs);
+        s_shadow[prev_y * COLS + prev_x] = *cell;
+    }
+
+    if (s_cursor_vis && cy_cell >= 0 && cy_cell < LINES && cx_cell >= 0 && cx_cell < COLS)
+    {
+        int cx = bx + cx_cell * fw;
+        int cy = by + cy_cell * fh;
+        SetAPen(ami_rp, s_cursor_pen);
+        Move(ami_rp, cx, cy);
+        Draw(ami_rp, cx + fw - 1, cy);
+        Move(ami_rp, cx, cy + fh - 1);
+        Draw(ami_rp, cx + fw - 1, cy + fh - 1);
+        Move(ami_rp, cx, cy);
+        Draw(ami_rp, cx, cy + fh - 1);
+        Move(ami_rp, cx + fw - 1, cy);
+        Draw(ami_rp, cx + fw - 1, cy + fh - 1);
+
+        /* Force the next render to redraw under the cursor */
+        if (s_shadow)
+            s_shadow[cy_cell * COLS + cx_cell].ch ^= 0x10000;
+
+        s_last_cur_y = cy_cell;
+        s_last_cur_x = cx_cell;
+    }
+    else
+    {
+        s_last_cur_y = -1;
+        s_last_cur_x = -1;
+    }
+}
+
+/* Initialization */
+WINDOW *initscr(void)
+{
+    struct TextAttr ta;
+    ULONG idcmp, wfl;
+    int dw, dh, sw, sh;
+
+    /* Font - load both normal and ANSI fonts at startup */
+    ta.ta_Name = (STRPTR)ami_font_name;
+    ta.ta_YSize = 8;
+    ta.ta_Style = 0;
+    ta.ta_Flags = 0;
+
+    ami_font_normal = OpenDiskFont(&ta);
+
+    if (!ami_font_normal && strcmp(ami_font_name, "topaz.font") != 0)
+    {
+        /* Fallback to topaz.font if configured font failed */
+        fprintf(stderr, "Warning: Failed to load font '%s', falling back to topaz.font\n", ami_font_name);
+        ta.ta_Name = (STRPTR) "topaz.font";
+        ami_font_normal = OpenDiskFont(&ta);
+    }
+
+    /* Load ANSI font */
+    ta.ta_Name = (STRPTR)ami_ansi_font_name;
+    ami_font_ansi = OpenDiskFont(&ta);
+
+    if (!ami_font_ansi && strcmp(ami_ansi_font_name, "topaz.font") != 0)
+    {
+        /* Fallback to topaz.font if configured font failed */
+        fprintf(stderr, "Warning: Failed to load ANSI font '%s', falling back to topaz.font\n", ami_ansi_font_name);
+        ta.ta_Name = (STRPTR) "topaz.font";
+        ami_font_ansi = OpenDiskFont(&ta);
+    }
+
+    /* If ANSI font failed, use normal font */
+    if (!ami_font_ansi && ami_font_normal)
+        ami_font_ansi = ami_font_normal;
+
+    /* Set default font to normal */
+    ami_font = ami_font_normal ? ami_font_normal : ami_font_ansi;
+
+    if (ami_font)
+    {
+        fw = ami_font->tf_XSize;
+        fh = ami_font->tf_YSize;
+        fb = ami_font->tf_Baseline;
+
+        fprintf(stderr, "Font loaded: %s (%dx%d)\n", ami_font_name, fw, fh);
+
+        if (ami_font_ansi && ami_font_ansi != ami_font_normal)
+            fprintf(stderr, "ANSI font loaded: %s (%dx%d)\n", ami_ansi_font_name, ami_font_ansi->tf_XSize, ami_font_ansi->tf_YSize);
+    }
+    else
+    {
+        /* If even topaz.font failed, use default 8x8 */
+        fw = 8;
+        fh = 8;
+        fb = 7;
+
+        fprintf(stderr, "Warning: Failed to load any font, using default 8x8\n");
+    }
+
+    ami_scr = LockPubScreen(NULL);
+
+    if (!ami_scr)
+        return NULL;
+
+    /* Window size with borders */
+    sw = ami_scr->Width;
+    sh = ami_scr->Height;
+    dw = 80 * fw + ami_scr->WBorLeft + ami_scr->WBorRight;
+    dh = 25 * fh + ami_scr->WBorTop + ami_scr->WBorBottom + ami_scr->Font->ta_YSize + 1;
+
+    if (dw > sw)
+        dw = sw;
+
+    if (dh > sh)
+        dh = sh;
+
+    idcmp = IDCMP_RAWKEY | IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE;
+    wfl = WFLG_SIZEGADGET | WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET | WFLG_ACTIVATE | WFLG_SIZEBBOTTOM | WFLG_SMART_REFRESH | WFLG_RMBTRAP;
+
+    ami_win = OpenWindowTags(
+        NULL,
+        WA_Left, (sw - dw) / 2,
+        WA_Top, (sh - dh) / 2,
+        WA_Width, dw,
+        WA_Height, dh,
+        WA_MinWidth, 40 * fw,
+        WA_MinHeight, 10 * fh,
+        WA_MaxWidth, sw,
+        WA_MaxHeight, sh,
+        WA_Flags, wfl,
+        WA_IDCMP, idcmp,
+        WA_PubScreen, (ULONG)ami_scr,
+        WA_Title, (ULONG)WRAPPER_PID,
+        TAG_DONE);
+
+    UnlockPubScreen(NULL, ami_scr);
+
+    ami_scr = NULL;
+
+    if (!ami_win)
+        return NULL;
+
+    ami_rp = ami_win->RPort;
+
+    bx = ami_win->BorderLeft;
+    by = ami_win->BorderTop;
+
+    if (ami_font)
+        SetFont(ami_rp, ami_font);
+
+    COLS = (ami_win->Width - ami_win->BorderLeft - ami_win->BorderRight) / fw;
+    LINES = (ami_win->Height - ami_win->BorderTop - ami_win->BorderBottom) / fh;
+
+    if (COLS < 20)
+        COLS = 20;
+
+    if (LINES < 5)
+        LINES = 5;
+
+    /* Create stdscr */
+    stdscr = (WINDOW *)malloc(sizeof(WINDOW));
+
+    if (!stdscr)
+    {
+        CloseWindow(ami_win);
+        ami_win = NULL;
+
+        if (ami_font)
+        {
+            CloseFont(ami_font);
+            ami_font = NULL;
+        }
+
+        return NULL;
+    }
+
+    memset(stdscr, 0, sizeof(WINDOW));
+
+    stdscr->_maxy = LINES;
+    stdscr->_maxx = COLS;
+    stdscr->cells = (Cell *)calloc((size_t)(LINES * COLS), sizeof(Cell));
+
+    if (!stdscr->cells)
+    {
+        free(stdscr);
+        stdscr = NULL;
+        CloseWindow(ami_win);
+        ami_win = NULL;
+        return NULL;
+    }
+
+    curscr = stdscr;
+
+    /* Default color pair */
+    memset(s_pair_ok, 0, sizeof(s_pair_ok));
+
+    s_pair_fg[0] = COLOR_WHITE;
+    s_pair_bg[0] = s_default_bg_color; /* Use default background color from config */
+    s_pair_ok[0] = 1;
+
+    /* Set default window attributes with color pair 0 BEFORE erase() */
+    stdscr->attrs = COLOR_PAIR(0);
+
+    erase();
+    refresh();
+
+    return stdscr;
+}
+
+int endwin(void)
+{
+    if (stdscr)
+    {
+        free(stdscr->cells);
+        free(stdscr);
+        stdscr = NULL;
+    }
+
+    curscr = NULL;
+
+    if (ami_win)
+    {
+        CloseWindow(ami_win);
+        ami_win = NULL;
+        ami_rp = NULL;
+    }
+
+    if (ami_font_normal)
+    {
+        CloseFont(ami_font_normal);
+        ami_font_normal = NULL;
+    }
+
+    if (ami_font_ansi && ami_font_ansi != ami_font_normal)
+    {
+        CloseFont(ami_font_ansi);
+        ami_font_ansi = NULL;
+    }
+
+    ami_font = NULL;
+
+    return OK;
+}
+
+bool isendwin(void) { return stdscr == NULL; }
+
+/* Window management */
+WINDOW *newwin(int nl, int nc, int beg_y, int beg_x)
+{
+    WINDOW *w;
+
+    if (nl <= 0)
+        nl = LINES - beg_y;
+
+    if (nc <= 0)
+        nc = COLS - beg_x;
+
+    if (beg_y < 0 || beg_x < 0 || beg_y + nl > LINES || beg_x + nc > COLS)
+        return NULL;
+
+    w = (WINDOW *)malloc(sizeof(WINDOW));
+
+    if (!w)
+        return NULL;
+
+    memset(w, 0, sizeof(WINDOW));
+
+    w->_maxy = nl;
+    w->_maxx = nc;
+    w->_begy = beg_y;
+    w->_begx = beg_x;
+    w->cells = (Cell *)calloc((size_t)(nl * nc), sizeof(Cell));
+
+    if (!w->cells)
+    {
+        free(w);
+        return NULL;
+    }
+
+    return w;
+}
+
+int delwin(WINDOW *w)
+{
+    if (!w)
+        return ERR;
+
+    free(w->cells);
+    free(w);
+
+    return OK;
+}
+
+WINDOW *subwin(WINDOW *o, int nl, int nc, int beg_y, int beg_x)
+{
+    WINDOW *w = newwin(nl, nc, beg_y, beg_x);
+
+    if (w)
+        w->_parent = o;
+
+    return w;
+}
+
+WINDOW *derwin(WINDOW *o, int nl, int nc, int dy, int dx)
+{
+    if (!o)
+        return NULL;
+
+    return subwin(o, nl, nc, o->_begy + dy, o->_begx + dx);
+}
+
+int mvwin(WINDOW *w, int y, int x)
+{
+    if (!w)
+        return ERR;
+
+    w->_begy = y;
+    w->_begx = x;
+
+    return OK;
+}
+
+int mvderwin(WINDOW *w, int py, int px)
+{
+    if (!w || !w->_parent)
+        return ERR;
+
+    w->_begy = w->_parent->_begy + py;
+    w->_begx = w->_parent->_begx + px;
+
+    return OK;
+}
+
+WINDOW *dupwin(WINDOW *w)
+{
+    WINDOW *d;
+    size_t sz;
+
+    if (!w)
+        return NULL;
+
+    d = newwin(w->_maxy, w->_maxx, w->_begy, w->_begx);
+
+    if (!d)
+        return NULL;
+
+    d->_cury = w->_cury;
+    d->_curx = w->_curx;
+    d->attrs = w->attrs;
+    d->color_pair = w->color_pair;
+
+    if (w->cells && d->cells)
+    {
+        sz = (size_t)(w->_maxy * w->_maxx) * sizeof(Cell);
+        memcpy(d->cells, w->cells, sz);
+    }
+
+    return d;
+}
+
+/* Refresh */
+int wrefresh(WINDOW *w)
+{
+    if (!w || !ami_win || !w->cells)
+        return ERR;
+
+    /* Non-stdscr windows: copy cells into stdscr at begy/begx, then render */
+    if (w != stdscr && stdscr && stdscr->cells)
+    {
+        int r, c;
+
+        for (r = 0; r < w->_maxy; r++)
+        {
+            int dr = w->_begy + r;
+
+            if (dr < 0 || dr >= LINES)
+                continue;
+
+            for (c = 0; c < w->_maxx; c++)
+            {
+                int dc = w->_begx + c;
+
+                if (dc < 0 || dc >= COLS)
+                    continue;
+
+                *CELL(stdscr, dr, dc) = *CELL(w, r, c);
+            }
+        }
+    }
+
+    render_all();
+
+    return OK;
+}
+
+int refresh(void) { return wrefresh(stdscr); }
+
+/* TODO */
+int wnoutrefresh(WINDOW *w)
+{
+    return OK;
+}
+
+int doupdate(void) { return refresh(); }
+
+int redrawwin(WINDOW *w) { return wrefresh(w); }
+
+int wredrawln(WINDOW *w, int bl, int nl)
+{
+    return OK;
+}
+
+/* Clear */
+int wclear(WINDOW *w)
+{
+    int i, n;
+
+    if (!w || !w->cells)
+        return ERR;
+
+    n = w->_maxy * w->_maxx;
+
+    for (i = 0; i < n; i++)
+    {
+        w->cells[i].ch = ' ';
+        w->cells[i].attrs = w->attrs;
+    }
+
+    w->_cury = 0;
+    w->_curx = 0;
+
+    return OK;
+}
+
+int clear(void) { return wclear(stdscr); }
+
+int erase(void) { return wclear(stdscr); }
+
+int werase(WINDOW *w) { return wclear(w); }
+
+int wclrtobot(WINDOW *w)
+{
+    int r, c;
+
+    if (!w || !w->cells)
+        return ERR;
+
+    if (w->_cury >= w->_maxy)
+        return OK; /* cursor past end, nothing to clear */
+
+    for (c = w->_curx; c < w->_maxx; c++)
+    {
+        CELL(w, w->_cury, c)->ch = ' ';
+        CELL(w, w->_cury, c)->attrs = w->attrs;
+    }
+
+    for (r = w->_cury + 1; r < w->_maxy; r++)
+    {
+        for (c = 0; c < w->_maxx; c++)
+        {
+            CELL(w, r, c)->ch = ' ';
+            CELL(w, r, c)->attrs = w->attrs;
+        }
+    }
+
+    return OK;
+}
+
+int clrtobot(void) { return wclrtobot(stdscr); }
+
+int wclrtoeol(WINDOW *w)
+{
+    int c;
+
+    if (!w || !w->cells)
+        return ERR;
+
+    if (w->_cury >= w->_maxy)
+        return OK;
+
+    for (c = w->_curx; c < w->_maxx; c++)
+    {
+        CELL(w, w->_cury, c)->ch = ' ';
+        CELL(w, w->_cury, c)->attrs = w->attrs;
+    }
+
+    return OK;
+}
+
+int clrtoeol(void) { return wclrtoeol(stdscr); }
+
+/* Cursor */
+int wmove(WINDOW *w, int y, int x)
+{
+    if (!w || y < 0 || y >= w->_maxy || x < 0 || x >= w->_maxx)
+        return ERR;
+
+    w->_cury = y;
+    w->_curx = x;
+
+    return OK;
+}
+
+int move(int y, int x) { return wmove(stdscr, y, x); }
+
+int curs_set(int v)
+{
+    int old = s_cursor_vis;
+    s_cursor_vis = v;
+    return old;
+}
+
+/* Character output */
+int waddch(WINDOW *w, const chtype ch)
+{
+    Cell *cell;
+
+    if (!w || !w->cells)
+        return ERR;
+
+    if (w->_cury < 0 || w->_cury >= w->_maxy || w->_curx < 0 || w->_curx >= w->_maxx)
+        return ERR;
+
+    cell = CELL(w, w->_cury, w->_curx);
+    cell->ch = ch & A_CHARTEXT;
+    cell->attrs = w->attrs | (ch & A_ATTRIBUTES);
+    w->_curx++;
+
+    if (w->_curx >= w->_maxx)
+    {
+        w->_curx = 0;
+
+        if (w->_cury < w->_maxy - 1)
+            w->_cury++;
+
+        /* At bottom-right: cursor stays at last row, col 0 */
+    }
+
+    return OK;
+}
+
+int addch(const chtype ch) { return waddch(stdscr, ch); }
+
+int mvaddch(int y, int x, const chtype ch)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return addch(ch);
+}
+
+int mvwaddch(WINDOW *w, int y, int x, const chtype ch)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return waddch(w, ch);
+}
+
+/* Read character at position (for cursor XOR, backing store) */
+chtype mvinch(int y, int x)
+{
+    Cell *cell;
+
+    if (!stdscr || !stdscr->cells || y < 0 || y >= LINES || x < 0 || x >= COLS)
+        return ' ';
+
+    cell = CELL(stdscr, y, x);
+
+    return (chtype)(cell->ch | cell->attrs);
+}
+
+chtype mvwinch(WINDOW *w, int y, int x)
+{
+    Cell *cell;
+
+    if (!w || !w->cells || y < 0 || y >= w->_maxy || x < 0 || x >= w->_maxx)
+        return ' ';
+
+    cell = CELL(w, y, x);
+
+    return (chtype)(cell->ch | cell->attrs);
+}
+
+/* String output */
+
+/* UTF-8 aware string output: decode multibyte -> codepoint -> Latin-1 cell */
+int waddnstr(WINDOW *w, const char *s, int n)
+{
+    const char *p, *end;
+
+    if (!w || !s)
+        return ERR;
+
+    if (n < 0)
+        n = (int)strlen(s);
+
+    p = s;
+    end = s + n;
+
+    while (p < end && *p)
+    {
+        const unsigned char *u = (const unsigned char *)p;
+        uint32_t cp;
+        int seqlen;
+
+        /* Decode one UTF-8 character */
+        if (*u < 0x80)
+        {
+            cp = *u;
+            seqlen = 1;
+        }
+        else if ((*u & 0xE0) == 0xC0 && p + 1 < end && (u[1] & 0xC0) == 0x80)
+        {
+            cp = ((uint32_t)(u[0] & 0x1F) << 6) | (u[1] & 0x3F);
+            seqlen = 2;
+        }
+        else if ((*u & 0xF0) == 0xE0 && p + 2 < end && (u[1] & 0xC0) == 0x80 && (u[2] & 0xC0) == 0x80)
+        {
+            cp = ((uint32_t)(u[0] & 0x0F) << 12) | ((uint32_t)(u[1] & 0x3F) << 6) | (u[2] & 0x3F);
+            seqlen = 3;
+        }
+        else if ((*u & 0xF8) == 0xF0 && p + 3 < end && (u[1] & 0xC0) == 0x80 && (u[2] & 0xC0) == 0x80 && (u[3] & 0xC0) == 0x80)
+        {
+            cp = ((uint32_t)(u[0] & 0x07) << 18) | ((uint32_t)(u[1] & 0x3F) << 12) | ((uint32_t)(u[2] & 0x3F) << 6) | (u[3] & 0x3F);
+            seqlen = 4;
+        }
+        else
+        {
+            /* Invalid or truncated: skip one byte */
+            cp = '?';
+            seqlen = 1;
+        }
+
+        /* Map codepoint to cell character (Topaz = Latin-1 range) */
+        if (cp <= 0xFF)
+            waddch(w, (chtype)cp);
+        else
+            waddch(w, (chtype)'?');
+
+        p += seqlen;
+    }
+
+    return OK;
+}
+
+int waddstr(WINDOW *w, const char *s) { return waddnstr(w, s, -1); }
+
+int addstr(const char *s) { return waddstr(stdscr, s); }
+
+int addnstr(const char *s, int n) { return waddnstr(stdscr, s, n); }
+
+int mvaddstr(int y, int x, const char *s)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return addstr(s);
+}
+
+int mvaddnstr(int y, int x, const char *s, int n)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return addnstr(s, n);
+}
+
+int mvwaddstr(WINDOW *w, int y, int x, const char *s)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return waddstr(w, s);
+}
+
+int mvwaddnstr(WINDOW *w, int y, int x, const char *s, int n)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return waddnstr(w, s, n);
+}
+
+/* Wide character output */
+int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
+{
+    int i;
+
+    if (!w || !ws)
+        return ERR;
+
+    if (n < 0)
+    {
+        for (n = 0; ws[n]; n++)
+        {
+        }
+    }
+
+    for (i = 0; i < n && ws[i]; i++)
+    {
+        /* Map wide char to Latin-1 range; beyond -> '?' */
+        chtype ch = (ws[i] <= 0xFF) ? (chtype)ws[i] : (chtype)'?';
+        waddch(w, ch);
+    }
+
+    return OK;
+}
+
+int waddwstr(WINDOW *w, const wchar_t *ws) { return waddnwstr(w, ws, -1); }
+
+int addwstr(const wchar_t *ws) { return waddwstr(stdscr, ws); }
+
+int addnwstr(const wchar_t *ws, int n) { return waddnwstr(stdscr, ws, n); }
+
+int mvaddwstr(int y, int x, const wchar_t *ws)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return addwstr(ws);
+}
+
+int mvaddnwstr(int y, int x, const wchar_t *ws, int n)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return addnwstr(ws, n);
+}
+
+int mvwaddwstr(WINDOW *w, int y, int x, const wchar_t *ws)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return waddwstr(w, ws);
+}
+
+int mvwaddnwstr(WINDOW *w, int y, int x, const wchar_t *ws, int n)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return waddnwstr(w, ws, n);
+}
+
+/* Printf */
+int vw_printw(WINDOW *w, const char *fmt, va_list ap)
+{
+    char buf[2048]; /* Increased from 512 to reduce truncation of long lines */
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    return waddstr(w, buf);
+}
+
+int wprintw(WINDOW *w, const char *fmt, ...)
+{
+    va_list ap;
+    int r;
+
+    va_start(ap, fmt);
+    r = vw_printw(w, fmt, ap);
+    va_end(ap);
+
+    return r;
+}
+
+int printw(const char *fmt, ...)
+{
+    va_list ap;
+    int r;
+
+    va_start(ap, fmt);
+    r = vw_printw(stdscr, fmt, ap);
+    va_end(ap);
+
+    return r;
+}
+
+int mvprintw(int y, int x, const char *fmt, ...)
+{
+    va_list ap;
+    int r;
+
+    if (move(y, x) == ERR)
+        return ERR;
+
+    va_start(ap, fmt);
+    r = vw_printw(stdscr, fmt, ap);
+    va_end(ap);
+
+    return r;
+}
+
+int mvwprintw(WINDOW *w, int y, int x, const char *fmt, ...)
+{
+    va_list ap;
+    int r;
+
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    va_start(ap, fmt);
+    r = vw_printw(w, fmt, ap);
+    va_end(ap);
+
+    return r;
+}
+
+/* Attributes */
+
+int wattrset(WINDOW *w, int a)
+{
+    if (!w)
+        return ERR;
+
+    w->attrs = a;
+
+    return OK;
+}
+
+int wattron(WINDOW *w, int a)
+{
+    if (!w)
+        return ERR;
+
+    w->attrs |= a;
+
+    return OK;
+}
+
+int wattroff(WINDOW *w, int a)
+{
+    if (!w)
+        return ERR;
+
+    w->attrs &= ~a;
+
+    return OK;
+}
+
+int attrset(int a) { return wattrset(stdscr, a); }
+
+int attron(int a) { return wattron(stdscr, a); }
+
+int attroff(int a) { return wattroff(stdscr, a); }
+
+chtype getattrs(WINDOW *w) { return w ? (chtype)w->attrs : 0; }
+
+int wcolor_set(WINDOW *w, short cp, void *o)
+{
+    if (!w)
+        return ERR;
+
+    w->attrs = (w->attrs & ~A_COLOR) | COLOR_PAIR(cp);
+
+    return OK;
+}
+
+int color_set(short cp, void *o) { return wcolor_set(stdscr, cp, o); }
+
+int attr_on(attr_t a, void *o)
+{
+    return attron((int)a);
+}
+
+int attr_off(attr_t a, void *o)
+{
+    return attroff((int)a);
+}
+
+int attr_set(attr_t a, short cp, void *o)
+{
+    if (!stdscr)
+        return ERR;
+
+    stdscr->attrs = (int)(a | COLOR_PAIR(cp));
+
+    return OK;
+}
+
+int wattr_get(WINDOW *w, attr_t *a, short *cp, void *o)
+{
+    if (!w)
+        return ERR;
+
+    if (a)
+        *a = (attr_t)w->attrs;
+
+    if (cp)
+        *cp = (short)PAIR_NUMBER(w->attrs);
+
+    return OK;
+}
+
+/* Colors */
+bool has_colors(void) { return 1; }
+
+bool can_change_color(void) { return 0; }
+
+int start_color(void)
+{
+    s_colors_on = 1;
+    s_pair_fg[0] = COLOR_WHITE;
+    s_pair_bg[0] = s_default_bg_color; /* Use default background color from config */
+    s_pair_ok[0] = 1;
+
+    return OK;
+}
+
+int init_pair(short p, short fg, short bg)
+{
+    if (p < 0 || p >= COLOR_PAIRS)
+        return ERR;
+
+    s_pair_fg[p] = fg;
+    s_pair_bg[p] = bg;
+    s_pair_ok[p] = 1;
+
+    return OK;
+}
+
+int init_color(short c, short r, short g, short b)
+{
+    return ERR;
+}
+
+int use_default_colors(void) { return OK; }
+
+int pair_content(short p, short *fg, short *bg)
+{
+    if (p < 0 || p >= COLOR_PAIRS || !s_pair_ok[p])
+        return ERR;
+
+    if (fg)
+        *fg = s_pair_fg[p];
+
+    if (bg)
+        *bg = s_pair_bg[p];
+
+    return OK;
+}
+
+int color_content(short c, short *r, short *g, short *b)
+{
+    if (r)
+        *r = 0;
+
+    if (g)
+        *g = 0;
+
+    if (b)
+        *b = 0;
+
+    return OK;
+}
+
+int assume_default_colors(int fg, int bg)
+{
+    s_pair_fg[0] = (short)fg;
+    s_pair_bg[0] = (short)bg;
+
+    return OK;
+}
+
+/* Amiga-specific extensions */
+
+/* Set the pen used to draw the cursor outline. Accepts a raw Amiga pen
+ * index (0..255). Returns previous pen so the caller can restore it */
+int amiga_set_cursor_pen(int pen)
+{
+    int old = s_cursor_pen;
+
+    if (pen < 0)
+        pen = 0;
+
+    if (pen > 255)
+        pen = 255;
+
+    s_cursor_pen = (UBYTE)pen;
+
+    return old;
+}
+
+/* Set the default fg/bg used by apply_colors when a cell has no color
+ * pair (pair == 0 or uninitialized). fg/bg are ncurses color indices
+ * (COLOR_BLACK..COLOR_WHITE, 0..15). Forces a full redraw so existing
+ * unattributed cells get repainted with the new background */
+int amiga_set_default_colors(short fg, short bg)
+{
+    if (fg < 0 || fg > 15 || bg < 0 || bg > 15)
+        return ERR;
+
+    s_default_fg = fg;
+    s_default_bg = bg;
+    s_shadow_dirty = 1;
+
+    return OK;
+}
+
+/* Set the default background color for COLOR_PAIR(0). Must be called
+ * before initscr(). color is an ncurses color index (COLOR_BLACK..COLOR_WHITE)
+ * Returns previous color so the caller can restore it */
+int amiga_set_default_bg_color(int color)
+{
+    int old = s_default_bg_color;
+
+    if (color < 0)
+        color = 0;
+
+    if (color > 15)
+        color = 15;
+
+    s_default_bg_color = color;
+    s_default_bg = (short)color; /* Update also s_default_bg for cells without color pair */
+    s_shadow_dirty = 1;          /* Force redraw */
+
+    return old;
+}
+
+/* Set the font name for Amiga. Must be called before initscr()
+ * If font_name is NULL or empty, uses "topaz.font" as default */
+int amiga_set_font_name(const char *font_name)
+{
+    if (font_name && font_name[0])
+    {
+        strncpy(ami_font_name, font_name, AMI_FONT_NAME_MAX - 1);
+        ami_font_name[AMI_FONT_NAME_MAX - 1] = '\0';
+    }
+    else
+    {
+        strncpy(ami_font_name, "topaz.font", AMI_FONT_NAME_MAX - 1);
+        ami_font_name[AMI_FONT_NAME_MAX - 1] = '\0';
+    }
+
+    return 0;
+}
+
+/* Set the ANSI font name for Amiga. Used when ANSI mode is active.
+ * If font_name is NULL or empty, uses "topaz.font" as default */
+int amiga_set_ansi_font_name(const char *font_name)
+{
+    if (font_name && font_name[0])
+    {
+        strncpy(ami_ansi_font_name, font_name, AMI_FONT_NAME_MAX - 1);
+        ami_ansi_font_name[AMI_FONT_NAME_MAX - 1] = '\0';
+    }
+    else
+    {
+        strncpy(ami_ansi_font_name, "topaz.font", AMI_FONT_NAME_MAX - 1);
+        ami_ansi_font_name[AMI_FONT_NAME_MAX - 1] = '\0';
+    }
+
+    return 0;
+}
+
+/* Switch font (call after toggling ANSI mode).
+ * use_ansi: 1 = use ANSI font, 0 = use regular font */
+int amiga_change_font(int use_ansi)
+{
+    struct TextFont *target_font = use_ansi ? ami_font_ansi : ami_font_normal;
+
+    if (!ami_win)
+        return -1; /* Window not initialized yet */
+
+    if (!target_font)
+        return -1; /* Font not loaded */
+
+    /* Switch to the pre-loaded font */
+    ami_font = target_font;
+    fw = ami_font->tf_XSize;
+    fh = ami_font->tf_YSize;
+    fb = ami_font->tf_Baseline;
+
+    /* Update RastPort to use the new font */
+    if (ami_rp)
+        SetFont(ami_rp, ami_font);
+
+    /* Force full redraw */
+    s_shadow_dirty = 1;
+
+    return 0;
+}
+
+/* Keyboard input */
+
+/* Pending bytes from a single MapRawKey() call (dead-key + vowel can
+ * generate up to a handful of Latin-1 bytes that we must deliver one
+ * at a time to the caller) */
+static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
+{
+    struct InputEvent ie;
+    UBYTE buf[16];
+    LONG actual;
+    int first;
+
+    if (code & IECODE_UP_PREFIX)
+        return ERR;
+
+    /* Modified arrows MUST be checked before the bare-arrow switch below,
+     * otherwise modified keys would fall through and return bare KEY_LEFT/RIGHT */
+    if (qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT))
+    {
+        if (code == 0x4F)
+            return KEY_SLEFT;
+
+        if (code == 0x4E)
+            return KEY_SRIGHT;
+    }
+
+    if (qual & IEQUALIFIER_CONTROL)
+    {
+        if (code == 0x4F)
+            return KEY_CLEFT;
+
+        if (code == 0x4E)
+            return KEY_CRIGHT;
+    }
+
+    if (qual & (IEQUALIFIER_LALT | IEQUALIFIER_RALT))
+    {
+        if (code == 0x4F)
+            return KEY_ALEFT;
+
+        if (code == 0x4E)
+            return KEY_ARIGHT;
+    }
+
+    /* Special keys - return ncurses KEY_* values, not raw Amiga codes */
+    switch (code)
+    {
+    case 0x4C:
+        return KEY_UP;
+    case 0x4D:
+        return KEY_DOWN;
+    case 0x4F:
+        return KEY_LEFT;
+    case 0x4E:
+        return KEY_RIGHT;
+    case 0x46:
+        return KEY_DC;
+    case 0x41:
+        return KEY_BACKSPACE;
+    case 0x70:
+        return KEY_HOME;
+    case 0x71:
+        return KEY_END;
+    case 0x72:
+        return KEY_PPAGE;
+    case 0x73:
+        return KEY_NPAGE;
+    case 0x3F:
+        return KEY_F(10); /* Help key */
+    case 0x50:
+        return KEY_F(1);
+    case 0x51:
+        return KEY_F(2);
+    case 0x52:
+        return KEY_F(3);
+    case 0x53:
+        return KEY_F(4);
+    case 0x54:
+        return KEY_F(5);
+    case 0x55:
+        return KEY_F(6);
+    case 0x56:
+        return KEY_F(7);
+    case 0x57:
+        return KEY_F(8);
+    case 0x58:
+        return KEY_F(9);
+    case 0x59:
+        return KEY_F(10);
+    }
+
+    /* TODO Check */
+    /* Right-Amiga + V = paste from clipboard. Amiga keyboards lack an
+     * Insert key, so the editor's "Shift+Insert" shortcut is unreachable
+     * Right-Amiga is the user-app modifier (left-Amiga is reserved for
+     * Workbench menu shortcuts), so RAmiga+V is the idiomatic paste
+     * chord. We synthesise a Ctrl-V byte (0x16) so the existing global
+     * paste handler in ui_editor.c picks it up unchanged */
+    if ((qual & IEQUALIFIER_RCOMMAND) && code == 0x34) /* 0x34 = V */
+        return 0x16;
+
+    /* Map printable via MapRawKey
+     *
+     * Alt handling is keymap-dependent and tricky:
+     *   - On English/US layouts Alt is typically a "meta" modifier
+     *     (Alt+letter sends ESC+letter to apps), and the keymap does
+     *     NOT map Alt+key to any character
+     *   - On Spanish (and many other non-English) layouts, Alt is the
+     *     ONLY way to type characters like @ # | \ [ ] { } EUR - the
+     *     keymap maps Alt+2 -> @, Alt+1 -> |, Alt+E -> €, etc
+     *
+     * So we MUST try MapRawKey with the original qualifiers first
+     * If that yields a different printable result from the bare-key
+     * mapping, Alt was needed to TYPE the character: emit those bytes
+     * directly. If both yield the same byte, Alt was a meta modifier:
+     * fall through to the "ESC + bare" convention
+     *
+     * MapRawKey can return MORE THAN ONE byte (dead-key composition,
+     * multibyte locale output). Extra bytes are queued and drained on
+     * subsequent wgetch() calls
+     *
+     * Per AmigaOS keymap.library autodoc, for IDCMP_RAWKEY events
+     * im->IAddress is a POINTER TO POINTER to the dead-key prefix
+     * data. Without dereferencing it MapRawKey loses dead-key state
+     * and accent composition (´+a -> á, ¨+u -> ü) silently fails */
+    memset(&ie, 0, sizeof(ie));
+
+    ie.ie_Class = IECLASS_RAWKEY;
+    ie.ie_Code = code;
+
+    /* COMMAND qualifiers are always stripped (they're for the app's
+     * own use, never produce text). ALT is kept on the first pass */
+    ie.ie_Qualifier = qual & ~(IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND);
+
+    if (iaddr)
+        ie.ie_EventAddress = (APTR)(*((ULONG *)iaddr));
+    else
+        ie.ie_EventAddress = NULL;
+
+    actual = MapRawKey(&ie, (STRPTR)buf, (LONG)sizeof(buf), NULL);
+
+    /* When Alt is pressed, decide between:
+     *   - chord  (returns KEY_ALT(letter))  for letters; the keymap
+     *            may produce a character, nothing, or something
+     *            different -- we ignore it because the user expects
+     *            Alt+letter to be a hotkey
+     *   - text   (passes the keymap's result through)  for everything
+     *            else, so Alt+2='@', Alt+1='|', Alt+e='€', dead-key
+     *            composition, etc. all keep working
+     *
+     * The base key (without Alt) is queried with a second MapRawKey:
+     * if it's a single A-Z letter we return the chord. Otherwise we
+     * fall through to the original Alt-modified result */
+    if (qual & (IEQUALIFIER_LALT | IEQUALIFIER_RALT))
+    {
+        struct InputEvent ie2;
+        unsigned char buf2[16];
+        LONG actual2;
+
+        memset(&ie2, 0, sizeof(ie2));
+        ie2.ie_Class = IECLASS_RAWKEY;
+        ie2.ie_Code = code;
+        ie2.ie_Qualifier = qual & ~(IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND | IEQUALIFIER_LALT | IEQUALIFIER_RALT);
+
+        if (iaddr)
+            ie2.ie_EventAddress = (APTR)(*((ULONG *)iaddr));
+        else
+            ie2.ie_EventAddress = NULL;
+
+        actual2 = MapRawKey(&ie2, (STRPTR)buf2, (LONG)sizeof(buf2), NULL);
+
+        if (actual2 == 1 && ((buf2[0] >= 'a' && buf2[0] <= 'z') || (buf2[0] >= 'A' && buf2[0] <= 'Z')))
+        {
+            /* Pure Alt+letter chord. Normalise case so callers write
+             * KEY_ALT('L') uniformly (matches the editor's case
+             * labels) */
+            int letter = (int)buf2[0];
+
+            if (letter >= 'a' && letter <= 'z')
+                letter = letter - 'a' + 'A';
+
+            return KEY_ALT(letter);
+        }
+
+        /* Not a letter -- the keymap is the authority. Fall through
+         * to the Alt-modified result (which gives '@', '|', '€', dead
+         * keys etc) */
+    }
+
+    if (actual <= 0)
+        return ERR;
+
+    first = (int)(unsigned char)buf[0];
+
+    if (actual > 1)
+    {
+        int i, n = (int)actual - 1;
+
+        if (n > (int)sizeof(s_key_queue))
+            n = (int)sizeof(s_key_queue);
+
+        for (i = 0; i < n; i++)
+            s_key_queue[i] = buf[1 + i];
+
+        s_key_queue_len = n;
+        s_key_queue_pos = 0;
+    }
+
+    return first;
+}
+
+int wgetch(WINDOW *w)
+{
+    struct IntuiMessage *imsg;
+    ULONG cls;
+    UWORD code, qual;
+    APTR iaddr;
+    int key = ERR;
+
+    if (!ami_win)
+        return ERR;
+
+    /* Drain any extra bytes from a previous MapRawKey() call. This is
+     * what makes dead-key sequences (´+a = á, ¨+u = ü, ...) work when
+     * the keymap returns multiple bytes at once */
+    if (s_key_queue_pos < s_key_queue_len)
+    {
+        key = (int)s_key_queue[s_key_queue_pos++];
+
+        if (s_key_queue_pos >= s_key_queue_len)
+        {
+            s_key_queue_pos = 0;
+            s_key_queue_len = 0;
+        }
+
+        return key;
+    }
+
+    /* Pushback */
+    if (s_ungetch != ERR)
+    {
+        key = s_ungetch;
+        s_ungetch = ERR;
+        return key;
+    }
+
+    while (key == ERR)
+    {
+        if (s_nodelay_mode)
+        {
+            imsg = (struct IntuiMessage *)GetMsg(ami_win->UserPort);
+
+            if (!imsg)
+                return ERR;
+        }
+        else
+        {
+            WaitPort(ami_win->UserPort);
+
+            imsg = (struct IntuiMessage *)GetMsg(ami_win->UserPort);
+
+            if (!imsg)
+                continue;
+        }
+
+        cls = imsg->Class;
+        code = imsg->Code;
+        qual = imsg->Qualifier;
+        iaddr = imsg->IAddress;
+
+        /* DEAD KEYS: for IDCMP_RAWKEY, IAddress points to dead-key prefix
+         * data that becomes invalid after ReplyMsg. We MUST call
+         * MapRawKey (inside xlat_rawkey) BEFORE replying the message,
+         * otherwise dead-key sequences (accented chars: á é í ó ú ñ ...)
+         * cannot be composed */
+        if (cls == IDCMP_RAWKEY)
+            key = xlat_rawkey(code, qual, iaddr);
+
+        ReplyMsg((struct Message *)imsg);
+
+        switch (cls)
+        {
+        case IDCMP_RAWKEY:
+            /* already translated above */
+            break;
+        case IDCMP_CLOSEWINDOW:
+            key = KEY_F(12);
+            break;
+        case IDCMP_REFRESHWINDOW:
+            BeginRefresh(ami_win);
+            shadow_invalidate(); /* OS asked us to redraw everything */
+            render_all();
+            EndRefresh(ami_win, TRUE);
+            break;
+        case IDCMP_NEWSIZE:
+        {
+            int nc = (ami_win->Width - ami_win->BorderLeft - ami_win->BorderRight) / fw;
+            int nl = (ami_win->Height - ami_win->BorderTop - ami_win->BorderBottom) / fh;
+
+            if (nc < 20)
+                nc = 20;
+
+            if (nl < 5)
+                nl = 5;
+
+            bx = ami_win->BorderLeft;
+            by = ami_win->BorderTop;
+
+            if (stdscr && (nc != COLS || nl != LINES))
+            {
+                Cell *nc_cells = (Cell *)calloc((size_t)(nl * nc), sizeof(Cell));
+
+                if (nc_cells)
+                {
+                    /* Copy old content that fits into new size */
+                    int copy_r = nl < LINES ? nl : LINES;
+                    int copy_c = nc < COLS ? nc : COLS;
+                    int rr, cc;
+
+                    for (rr = 0; rr < copy_r; rr++)
+                    {
+                        for (cc = 0; cc < copy_c; cc++)
+                            nc_cells[rr * nc + cc] = stdscr->cells[rr * COLS + cc];
+                    }
+
+                    free(stdscr->cells);
+
+                    stdscr->cells = nc_cells;
+                    COLS = nc;
+                    LINES = nl;
+                    stdscr->_maxx = COLS;
+                    stdscr->_maxy = LINES;
+
+                    if (stdscr->_curx >= COLS)
+                        stdscr->_curx = COLS - 1;
+
+                    if (stdscr->_cury >= LINES)
+                        stdscr->_cury = LINES - 1;
+                }
+            }
+
+            key = KEY_RESIZE;
+            break;
+        }
+        case IDCMP_SIZEVERIFY:
+            break;
+        }
+    }
+
+    return key;
+}
+
+int getch(void) { return wgetch(stdscr); }
+
+int mvgetch(int y, int x)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+    return getch();
+}
+
+int mvwgetch(WINDOW *w, int y, int x)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+    return wgetch(w);
+}
+
+int ungetch(int ch)
+{
+    s_ungetch = ch;
+    return OK;
+}
+
+int flushinp(void)
+{
+    s_ungetch = ERR;
+    s_unget_wch_valid = 0;
+    s_key_queue_len = 0;
+    s_key_queue_pos = 0;
+
+    return OK;
+}
+
+/* Wide char input */
+int wget_wch(WINDOW *w, wint_t *wch)
+{
+    int key;
+
+    if (!wch)
+        return ERR;
+
+    /* Pushback */
+    if (s_unget_wch_valid)
+    {
+        *wch = (wint_t)s_unget_wch_buf;
+        s_unget_wch_valid = 0;
+        return OK;
+    }
+
+    key = wgetch(w);
+
+    if (key == ERR)
+        return ERR;
+
+    /* Special keys (>= KEY_MIN) return KEY_CODE_YES */
+    if (key >= KEY_MIN)
+    {
+        *wch = (wint_t)key;
+
+        return KEY_CODE_YES;
+    }
+
+    *wch = (wint_t)key;
+
+    return OK;
+}
+
+int get_wch(wint_t *wch) { return wget_wch(stdscr, wch); }
+
+int mvget_wch(int y, int x, wint_t *wch)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return get_wch(wch);
+}
+
+int mvwget_wch(WINDOW *w, int y, int x, wint_t *wch)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return wget_wch(w, wch);
+}
+
+int unget_wch(const wchar_t wch)
+{
+    s_unget_wch_buf = wch;
+    s_unget_wch_valid = 1;
+
+    return OK;
+}
+
+/* String input (basic) */
+int wgetnstr(WINDOW *w, char *s, int n)
+{
+    int i = 0, ch;
+
+    if (!s || n <= 0)
+        return ERR;
+
+    while (i < n - 1)
+    {
+        ch = wgetch(w);
+
+        if (ch == ERR || ch == '\n' || ch == '\r')
+            break;
+
+        if (ch == KEY_BACKSPACE && i > 0)
+        {
+            i--;
+
+            continue;
+        }
+
+        if (ch >= 0x20)
+            s[i++] = (char)ch; /* accept UTF-8 bytes */
+    }
+
+    s[i] = '\0';
+
+    return OK;
+}
+
+int wgetstr(WINDOW *w, char *s) { return wgetnstr(w, s, 256); }
+
+int getstr(char *s) { return wgetstr(stdscr, s); }
+
+int getnstr(char *s, int n) { return wgetnstr(stdscr, s, n); }
+
+int mvgetstr(int y, int x, char *s)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return getstr(s);
+}
+
+int mvwgetstr(WINDOW *w, int y, int x, char *s)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return wgetstr(w, s);
+}
+
+int mvgetnstr(int y, int x, char *s, int n)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return getnstr(s, n);
+}
+
+int mvwgetnstr(WINDOW *w, int y, int x, char *s, int n)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+    return wgetnstr(w, s, n);
+}
+
+/* Mode settings */
+
+int nodelay(WINDOW *w, bool bf)
+{
+    s_nodelay_mode = bf;
+
+    return OK;
+}
+
+int notimeout(WINDOW *w, bool bf)
+{
+    return OK;
+}
+
+int timeout(int d)
+{
+    s_nodelay_mode = (d == 0);
+
+    return OK;
+}
+
+int wtimeout(WINDOW *w, int d)
+{
+    s_nodelay_mode = (d == 0);
+
+    return OK;
+}
+
+int cbreak(void)
+{
+    s_raw_mode = 0;
+
+    return OK;
+}
+
+int nocbreak(void) { return OK; }
+
+int echo(void)
+{
+    s_echo_mode = 1;
+
+    return OK;
+}
+
+int noecho(void)
+{
+    s_echo_mode = 0;
+
+    return OK;
+}
+
+int halfdelay(int t)
+{
+    return OK;
+}
+
+int intrflush(WINDOW *w, bool bf)
+{
+    return OK;
+}
+
+int keypad(WINDOW *w, bool bf)
+{
+    s_keypad_mode = bf;
+
+    return OK;
+}
+
+int meta(WINDOW *w, bool bf)
+{
+    return OK;
+}
+
+int raw(void)
+{
+    s_raw_mode = 1;
+
+    return OK;
+}
+
+int noraw(void)
+{
+    s_raw_mode = 0;
+
+    return OK;
+}
+
+int nl(void) { return OK; }
+
+int nonl(void) { return OK; }
+
+/* Beep / Flash */
+
+int beep(void)
+{
+    if (ami_win)
+        DisplayBeep(NULL);
+
+    return OK;
+}
+
+int flash(void) { return beep(); }
+
+/* Border / Lines */
+
+int wborder(WINDOW *w, chtype ls, chtype rs, chtype ts, chtype bs, chtype tl, chtype tr, chtype bl, chtype br)
+{
+    int r, c;
+
+    if (!w || !w->cells)
+        return ERR;
+
+    if (!ls)
+        ls = '|';
+
+    if (!rs)
+        rs = '|';
+
+    if (!ts)
+        ts = '-';
+
+    if (!bs)
+        bs = '-';
+
+    if (!tl)
+        tl = '+';
+
+    if (!tr)
+        tr = '+';
+
+    if (!bl)
+        bl = '+';
+
+    if (!br)
+        br = '+';
+
+    for (r = 1; r < w->_maxy - 1; r++)
+    {
+        CELL(w, r, 0)->ch = ls;
+        CELL(w, r, 0)->attrs = w->attrs;
+        CELL(w, r, w->_maxx - 1)->ch = rs;
+        CELL(w, r, w->_maxx - 1)->attrs = w->attrs;
+    }
+
+    for (c = 1; c < w->_maxx - 1; c++)
+    {
+        CELL(w, 0, c)->ch = ts;
+        CELL(w, 0, c)->attrs = w->attrs;
+        CELL(w, w->_maxy - 1, c)->ch = bs;
+        CELL(w, w->_maxy - 1, c)->attrs = w->attrs;
+    }
+
+    CELL(w, 0, 0)->ch = tl;
+    CELL(w, 0, 0)->attrs = w->attrs;
+    CELL(w, 0, w->_maxx - 1)->ch = tr;
+    CELL(w, 0, w->_maxx - 1)->attrs = w->attrs;
+    CELL(w, w->_maxy - 1, 0)->ch = bl;
+    CELL(w, w->_maxy - 1, 0)->attrs = w->attrs;
+    CELL(w, w->_maxy - 1, w->_maxx - 1)->ch = br;
+    CELL(w, w->_maxy - 1, w->_maxx - 1)->attrs = w->attrs;
+
+    return OK;
+}
+
+int border(chtype ls, chtype rs, chtype ts, chtype bs, chtype tl, chtype tr, chtype bl, chtype br)
+{
+    return wborder(stdscr, ls, rs, ts, bs, tl, tr, bl, br);
+}
+
+int box(WINDOW *w, chtype v, chtype h)
+{
+    return wborder(w, v, v, h, h, 0, 0, 0, 0);
+}
+
+int whline(WINDOW *w, chtype ch, int n)
+{
+    int i;
+
+    if (!w || !w->cells)
+        return ERR;
+
+    if (!ch)
+        ch = '-';
+
+    for (i = 0; i < n && w->_curx + i < w->_maxx; i++)
+    {
+        CELL(w, w->_cury, w->_curx + i)->ch = ch;
+        CELL(w, w->_cury, w->_curx + i)->attrs = w->attrs;
+    }
+
+    return OK;
+}
+
+int wvline(WINDOW *w, chtype ch, int n)
+{
+    int i;
+
+    if (!w || !w->cells)
+        return ERR;
+
+    if (!ch)
+        ch = '|';
+
+    for (i = 0; i < n && w->_cury + i < w->_maxy; i++)
+    {
+        CELL(w, w->_cury + i, w->_curx)->ch = ch;
+        CELL(w, w->_cury + i, w->_curx)->attrs = w->attrs;
+    }
+
+    return OK;
+}
+
+int hline(chtype ch, int n) { return whline(stdscr, ch, n); }
+
+int vline(chtype ch, int n) { return wvline(stdscr, ch, n); }
+
+int mvhline(int y, int x, chtype ch, int n)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return hline(ch, n);
+}
+
+int mvwhline(WINDOW *w, int y, int x, chtype ch, int n)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return whline(w, ch, n);
+}
+
+int mvvline(int y, int x, chtype ch, int n)
+{
+    if (move(y, x) == ERR)
+        return ERR;
+
+    return vline(ch, n);
+}
+
+int mvwvline(WINDOW *w, int y, int x, chtype ch, int n)
+{
+    if (wmove(w, y, x) == ERR)
+        return ERR;
+
+    return wvline(w, ch, n);
+}
+
+/* Background */
+
+int bkgd(chtype ch)
+{
+    if (!stdscr)
+        return ERR;
+
+    stdscr->attrs = (int)ch;
+
+    return OK;
+}
+
+void bkgdset(chtype ch)
+{
+    if (stdscr)
+        stdscr->attrs = (int)ch;
+}
+
+void wbkgd(WINDOW *w, chtype ch)
+{
+    if (w)
+        w->attrs = (int)ch;
+}
+
+void wbkgdset(WINDOW *w, chtype ch)
+{
+    if (w)
+        w->attrs = (int)ch;
+}
+
+chtype getbkgd(WINDOW *w) { return w ? (chtype)w->attrs : 0; }
+
+/* Scroll */
+int wscrl(WINDOW *w, int n)
+{
+    int r, c;
+
+    if (!w || !w->cells || n == 0)
+        return ERR;
+
+    /* Clamp: if |n| >= height, just clear everything */
+    if (n >= w->_maxy || n <= -(w->_maxy))
+    {
+        for (r = 0; r < w->_maxy; r++)
+        {
+            for (c = 0; c < w->_maxx; c++)
+            {
+                CELL(w, r, c)->ch = ' ';
+                CELL(w, r, c)->attrs = w->attrs;
+            }
+        }
+
+        return OK;
+    }
+
+    if (n > 0)
+    {
+        /* scroll up: row 0 gets content of row n */
+        for (r = 0; r < w->_maxy - n; r++)
+            memcpy(&w->cells[r * w->_maxx], &w->cells[(r + n) * w->_maxx], (size_t)w->_maxx * sizeof(Cell));
+
+        for (r = w->_maxy - n; r < w->_maxy; r++)
+        {
+            for (c = 0; c < w->_maxx; c++)
+            {
+                CELL(w, r, c)->ch = ' ';
+                CELL(w, r, c)->attrs = w->attrs;
+            }
+        }
+    }
+    else
+    {
+        /* scroll down: last row gets content of row _maxy+n-1 */
+        int an = -n;
+
+        for (r = w->_maxy - 1; r >= an; r--)
+            memcpy(&w->cells[r * w->_maxx], &w->cells[(r - an) * w->_maxx], (size_t)w->_maxx * sizeof(Cell));
+
+        for (r = 0; r < an; r++)
+        {
+            for (c = 0; c < w->_maxx; c++)
+            {
+                CELL(w, r, c)->ch = ' ';
+                CELL(w, r, c)->attrs = w->attrs;
+            }
+        }
+    }
+
+    return OK;
+}
+
+int scroll(WINDOW *w) { return wscrl(w, 1); }
+
+int scrl(int n) { return wscrl(stdscr, n); }
+
+int setscrreg(int t, int b)
+{
+    return OK;
+}
+
+int wsetscrreg(WINDOW *w, int t, int b)
+{
+    return OK;
+}
+
+/* Overlay / Copy */
+
+int overlay(const WINDOW *s, WINDOW *d)
+{
+    return copywin(s, d, 0, 0, 0, 0, d->_maxy - 1, d->_maxx - 1, 1);
+}
+
+int overwrite(const WINDOW *s, WINDOW *d)
+{
+    return copywin(s, d, 0, 0, 0, 0, d->_maxy - 1, d->_maxx - 1, 0);
+}
+
+int copywin(const WINDOW *s, WINDOW *d, int sr, int sc, int dr, int dc, int dmr, int dmc, int ovl)
+{
+    int r, c;
+
+    if (!s || !d || !s->cells || !d->cells)
+        return ERR;
+
+    for (r = 0; dr + r <= dmr && sr + r < s->_maxy && dr + r < d->_maxy; r++)
+    {
+        for (c = 0; dc + c <= dmc && sc + c < s->_maxx && dc + c < d->_maxx; c++)
+        {
+            Cell *src = &((WINDOW *)s)->cells[(sr + r) * s->_maxx + (sc + c)];
+            Cell *dst = &d->cells[(dr + r) * d->_maxx + (dc + c)];
+
+            if (!ovl || (src->ch & 0xFF) != ' ')
+                *dst = *src;
+        }
+    }
+
+    return OK;
+}
+
+/* Touch (stubs) */
+
+void wtouchln(WINDOW *w, int y, int n, int c)
+{
+}
+
+int is_linetouched(WINDOW *w, int l)
+{
+    return 1;
+}
+
+int is_wintouched(WINDOW *w)
+{
+    return 1;
+}
+
+void untouchwin(WINDOW *w) {}
+
+/* Mouse (stubs) */
+
+unsigned long getmouse(void) { return 0; }
+
+int ungetmouse(unsigned long m)
+{
+    return ERR;
+}
+
+/* string.h helpers (Amiga libc has bugs with control chars) */
+
+/* Undefine libc versions first, then provide our implementation */
+#ifdef snprintf
+#undef snprintf
+#endif
+
+/* snprintf that handles SOH correctly - manual implementation */
+int snprintf(char *str, size_t size, const char *format, ...)
+{
+    va_list ap;
+    char buf[4096]; /* temp buffer - increased from 1024 to handle long strings */
+    int len;
+    size_t i;
+
+    if (size == 0)
+        return 0; /* avoid underflow in loop */
+
+    va_start(ap, format);
+    len = vsnprintf(buf, sizeof(buf), format, ap); /* use vsnprintf to limit write */
+    va_end(ap);
+
+    /* Copy with bounds checking - preserve ALL chars including SOH */
+    for (i = 0; i < size - 1 && i < (size_t)len; i++)
+        str[i] = buf[i];
+
+    str[i] = '\0';
+
+    return len;
+}
+
+/* wchar_t string helpers (missing from Amiga libc) */
+wchar_t *wcsstr(const wchar_t *haystack, const wchar_t *needle)
+{
+    const wchar_t *h, *n;
+
+    if (!needle || !needle[0])
+        return (wchar_t *)haystack;
+
+    for (; *haystack; haystack++)
+    {
+        h = haystack;
+        n = needle;
+
+        while (*h && *n && *h == *n)
+        {
+            h++;
+            n++;
+        }
+
+        if (!*n)
+            return (wchar_t *)haystack;
+    }
+
+    return NULL;
+}
+
+int wcsncmp(const wchar_t *s1, const wchar_t *s2, size_t n)
+{
+    if (n == 0)
+        return 0;
+    while (n-- && *s1 && *s1 == *s2)
+    {
+        s1++;
+        s2++;
+    }
+    return n == (size_t)-1 ? 0 : (int)(*s1 - *s2);
+}
+
+wchar_t *wcsncpy(wchar_t *dst, const wchar_t *src, size_t n)
+{
+    wchar_t *d = dst;
+    size_t i;
+
+    for (i = 0; i < n && src[i]; i++)
+        d[i] = src[i];
+
+    for (; i < n; i++)
+        d[i] = L'\0';
+
+    return dst;
+}
+
+int iswalpha(wint_t wc)
+{
+    return (wc >= L'A' && wc <= L'Z') || (wc >= L'a' && wc <= L'z') || (wc >= 0xC0 && wc <= 0xFF && wc != 0xD7 && wc != 0xF7);
+}
+
+int wmemcmp(const wchar_t *s1, const wchar_t *s2, size_t n)
+{
+    while (n--)
+    {
+        if (*s1 != *s2)
+            return (*s1 < *s2) ? -1 : 1;
+
+        s1++;
+        s2++;
+    }
+
+    return 0;
+}
+
+wchar_t *wmemcpy(wchar_t *dst, const wchar_t *src, size_t n)
+{
+    wchar_t *d = dst;
+
+    while (n--)
+        *d++ = *src++;
+
+    return dst;
+}
+
+wchar_t *wmemmove(wchar_t *dst, const wchar_t *src, size_t n)
+{
+    wchar_t *d = dst;
+    const wchar_t *s = src;
+
+    if (d < s)
+    {
+        while (n--)
+            *d++ = *s++;
+    }
+    else if (d > s)
+    {
+        d += n;
+        s += n;
+
+        while (n--)
+            *--d = *--s;
+    }
+
+    return dst;
+}
+
+#endif /* PLATFORM_AMIGA */

@@ -1,0 +1,129 @@
+#
+# tinyedit - Text editor for AmigaOS
+#
+# Copyright (C) 2026 Tanausú M. 39:190/101@amiganet 2:341/207@fidonet
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# Makefile.unix -- Build tinyedit for Linux/BSD/macOS
+#
+# Position-independent: anchored to the directory containing this Makefile,
+# so it works regardless of the CWD it is invoked from
+# (e.g. `make -f path/to/Makefile.unix` or `make -C path/to ...`).
+
+# Directory of this Makefile (with trailing slash)
+HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
+# Detect OS and warn if BSD make is used instead of gmake
+OS := $(shell uname -s)
+BSD_OS := $(filter FreeBSD NetBSD OpenBSD,$(OS))
+ifneq ($(BSD_OS),)
+    ifeq ($(MAKE),make)
+        $(warning On BSD systems, use 'gmake' instead of 'make' for this Makefile)
+    endif
+endif
+
+CC = gcc
+#CFLAGS = -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
+CFLAGS = -Wall -Wextra -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
+AR = ar
+
+# Platform define
+CDEFS = -DPLATFORM_UNIX
+
+# ncurses library detection:
+#   Linux, FreeBSD, NetBSD, OpenBSD  -> -lncursesw   (wide-char variant)
+#   macOS (Darwin)                   -> -lncurses     (system curses is wide-capable)
+# Override by passing NCURSES_LIB=... on the command line if needed.
+ifeq ($(OS),Darwin)
+    NCURSES_LIB ?= -lncurses
+else ifeq ($(BSD_OS),)
+    NCURSES_LIB ?= -lncursesw
+else
+    # BSD: default to ncursesw, but can be overridden
+    NCURSES_LIB ?= -lncursesw
+endif
+TARGET = $(HERE)libtinyedit-unix.a
+
+# Directories -- separate obj dir from Amiga build so .o files don't collide
+OBJDIR = $(HERE)objs.unix
+COREDIR = $(HERE)core
+COMPDIR = $(HERE)components
+UIDIR = $(HERE)ui
+
+# Object files in objs/
+CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
+            $(OBJDIR)/search.o $(OBJDIR)/utf8.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o
+UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
+            $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS)
+
+all: $(TARGET) tinyedit
+
+$(TARGET): $(ALL_OBJS)
+	$(AR) rcs $@ $(ALL_OBJS)
+
+# Create obj directory
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
+
+# Core library objects
+$(OBJDIR)/charset.o: $(COREDIR)/charset.c $(COREDIR)/charset.h $(COREDIR)/utf8.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/clipboard.o: $(COREDIR)/clipboard.c $(COREDIR)/clipboard.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/keys.o: $(COREDIR)/keys.c $(COREDIR)/keys.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/search.o: $(COREDIR)/search.c $(COREDIR)/search.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/utf8.o: $(COREDIR)/utf8.c $(COREDIR)/utf8.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# Component objects
+$(OBJDIR)/editor.o: $(COMPDIR)/editor.c $(COMPDIR)/editor.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/config.o: $(COMPDIR)/config.c $(COMPDIR)/config.h $(COREDIR)/charset.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# UI objects
+$(OBJDIR)/te_app.o: $(UIDIR)/te_app.c $(UIDIR)/te.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_editor.o: $(UIDIR)/ui_editor.c $(UIDIR)/te.h $(UIDIR)/ui_editor_helper.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_editor_helper.o: $(UIDIR)/ui_editor_helper.c $(UIDIR)/te.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_popup.o: $(UIDIR)/ui_popup.c $(UIDIR)/te.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_files.o: $(UIDIR)/ui_files.c $(UIDIR)/ui_files.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_setup.o: $(UIDIR)/ui_setup.c $(UIDIR)/ui_setup.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# Application
+TINYEDIT = $(HERE)tinyedit
+
+tinyedit: $(TINYEDIT)
+
+$(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
+	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
+	      -o $@ $(NCURSES_LIB)
+
+clean:
+	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)
+
+.PHONY: all clean
+
