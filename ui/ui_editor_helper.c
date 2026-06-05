@@ -591,6 +591,8 @@ int replace_all(TeApp *app)
         }
         return 1;
     }
+
+    return 0;
 }
 
 int insert_file(TeApp *app)

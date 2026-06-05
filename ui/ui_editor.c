@@ -641,7 +641,7 @@ static void draw_body(TeApp *app)
     int body_rows = body_bot - body_top;
     int width = COLS;
     int soft = !app->hard_wrap;
-    int li, b_r1 = -1, b_c1 = 0, b_r2 = -1, b_c2 = 0;
+    int b_r1 = -1, b_c1 = 0, b_r2 = -1, b_c2 = 0;
     int screen_row;
 
     if (body_rows < 1)
@@ -893,8 +893,6 @@ static void position_cursor(TeApp *app)
     int body_rows = LINES - 2;
     int width = COLS;
     int soft = !app->hard_wrap;
-    const wchar_t *l;
-    int len, pos;
 
     if (body_rows < 1)
         body_rows = 1;
@@ -1000,37 +998,6 @@ static char *collect_bracketed_paste(void)
     free(wbuf);
 
     return out;
-}
-
-/* Find & replace */
-static int do_replace(TeApp *app, const wchar_t *needle, const wchar_t *repl)
-{
-    int count = 0;
-    int nlen = (int)wcslen(needle);
-    int rlen = (int)wcslen(repl);
-
-    /* Rewind to start */
-    ed_set_pos(app->editor, 0, 0);
-
-    while (ed_search_forward(app->editor, needle) == 0)
-    {
-        EdInfo info;
-        int i;
-
-        ed_get_info(app->editor, &info);
-
-        /* Delete needle */
-        for (i = 0; i < nlen; i++)
-            ed_delete(app->editor);
-
-        /* Insert replacement */
-        for (i = 0; i < rlen; i++)
-            ed_insert_char(app->editor, repl[i]);
-
-        count++;
-    }
-
-    return count;
 }
 
 /* Save */
@@ -1312,9 +1279,11 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     if (!is_key && ch == CTRL('N'))
     {
         EdInfo info;
-        int has_content = info.modified || info.line_count > 1;
+        int has_content;
 
         ed_get_info(app->editor, &info);
+
+        has_content = info.modified || info.line_count > 1;
 
         if (!has_content && info.line_count == 1)
         {

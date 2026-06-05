@@ -288,7 +288,8 @@ int latin1_to_utf8(const char *src, int srclen, char *dst, int dstmax)
 
 int utf8_to_latin1(const char *src, int srclen, char *dst, int dstmax)
 {
-    const char *p = src, *end = src + srclen;
+    const char *p;
+    const char *end;
     int di = 0;
 
     if (!src || !dst || dstmax <= 0)
@@ -298,6 +299,9 @@ int utf8_to_latin1(const char *src, int srclen, char *dst, int dstmax)
 
         return 0;
     }
+
+    p = src;
+    end = src + srclen;
     while (p < end && di < dstmax - 1)
     {
         uint32_t cp = utf8_next(&p);
@@ -482,7 +486,8 @@ static int cp_to_utf8(const uint16_t *map, const char *src, int sl, char *dst, i
 
 static int utf8_to_cp(const uint16_t *map, const char *src, int sl, char *dst, int dm)
 {
-    const char *p = src, *end = src + sl;
+    const char *p;
+    const char *end;
     int di = 0, i;
 
     if (!src || !dst || dm <= 0)
@@ -492,6 +497,9 @@ static int utf8_to_cp(const uint16_t *map, const char *src, int sl, char *dst, i
 
         return 0;
     }
+
+    p = src;
+    end = src + sl;
 
     while (p < end && di < dm - 1)
     {

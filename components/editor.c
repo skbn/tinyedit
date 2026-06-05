@@ -1821,7 +1821,10 @@ int ed_rewrap_paragraph(Ed *ed, int width)
 
     prefix_len = detect_quote_prefix(line);
 
-    if (prefix_len > 0 && prefix_len < (int)(sizeof(prefix) / sizeof(prefix[0])))
+    if (prefix_len >= (int)(sizeof(prefix) / sizeof(prefix[0])))
+        prefix_len = (int)(sizeof(prefix) / sizeof(prefix[0])) - 1;
+
+    if (prefix_len > 0)
         wmemcpy(prefix, line, (size_t)prefix_len);
 
     prefix[prefix_len] = L'\0';
@@ -2310,10 +2313,12 @@ int search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int who
     int count = 0;
     int capacity = 1024;
     int i, j;
-    int needle_len = (int)wcslen(needle);
+    int needle_len;
 
-    if (!needle || needle_len == 0)
+    if (!needle || !needle[0])
         return 0;
+
+    needle_len = (int)wcslen(needle);
 
     *out_rows = malloc(capacity * sizeof(int));
     *out_cols = malloc(capacity * sizeof(int));
