@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #ifdef PLATFORM_AMIGA
 #include "ncursesw_amiga.h"
@@ -116,27 +118,50 @@ int main(int argc, char **argv)
     static char cfg_path_buf[512];
     const char *cfg_path;
     FILE *tty;
+    const char *home;
+    char dir_path[512];
+    const char *last_sep;
 
     setlocale(LC_ALL, "");
 
     /* Resolve config path */
-#if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
-    {
-        const char *home = getenv("HOME");
+#if defined(PLATFORM_WIN32)
 
-        if (home && home[0])
-            snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s/.tinyedit.conf", home);
-        else
-            snprintf(cfg_path_buf, sizeof(cfg_path_buf), ".tinyedit.conf");
-    }
+    home = getenv("APPDATA");
+
+    if (home && home[0])
+        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s\\tinyedit\\tinyedit.cfg", home);
+    else
+        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "tinyedit.cfg");
 
 #elif defined(PLATFORM_AMIGA)
     snprintf(cfg_path_buf, sizeof(cfg_path_buf), "ENVARC:tinyedit.cfg");
 #else
-    snprintf(cfg_path_buf, sizeof(cfg_path_buf), "tinyedit.cfg");
+
+    home = getenv("HOME");
+
+    if (home && home[0])
+        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s/.tinyedit.conf", home);
+    else
+        snprintf(cfg_path_buf, sizeof(cfg_path_buf), ".tinyedit.conf");
+
 #endif
 
     cfg_path = cfg_path_buf;
+
+#ifdef PLATFORM_WIN32
+    /* Create config directory if it doesn't exist */
+    last_sep = strrchr(cfg_path, '\\');
+
+    if (last_sep)
+    {
+        size_t len = last_sep - cfg_path;
+        strncpy(dir_path, cfg_path, len);
+        dir_path[len] = '\0';
+        mkdir(dir_path);
+    }
+
+#endif
 
     /* Load config (creates default file if missing) */
     te_cfg_load(&cfg, cfg_path);

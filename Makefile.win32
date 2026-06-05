@@ -54,9 +54,9 @@ UIDIR = $(HERE)ui
 # Object files in objs/
 CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
             $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/ncursesw_win32.o
-COMP_OBJS = $(OBJDIR)/editor.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
-            $(OBJDIR)/ui_files.o
+            $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o
 ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS)
 
 all: $(TARGET) tinyedit
@@ -91,6 +91,9 @@ $(OBJDIR)/ncursesw_win32.o: $(HERE)ncursesw_win32.c $(HERE)ncursesw_win32.h | $(
 $(OBJDIR)/editor.o: $(COMPDIR)/editor.c $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/config.o: $(COMPDIR)/config.c $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 # UI objects
 $(OBJDIR)/te_app.o: $(UIDIR)/te_app.c $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -105,6 +108,9 @@ $(OBJDIR)/ui_popup.o: $(UIDIR)/ui_popup.c $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_files.o: $(UIDIR)/ui_files.c $(UIDIR)/ui_files.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_setup.o: $(UIDIR)/ui_setup.c $(UIDIR)/ui_setup.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 # Application
