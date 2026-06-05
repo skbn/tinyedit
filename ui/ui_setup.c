@@ -81,11 +81,8 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
     {
     case FT_STR:
     {
-        const wchar_t *s = (const wchar_t *)(base + fld->off);
-        char tmp[TE_CFG_STR_MAX];
-
-        wcstombs(tmp, s, sizeof(tmp));
-        snprintf(buf, bufsz, "%s", tmp[0] ? tmp : "(empty)");
+        const char *s = (const char *)(base + fld->off);
+        snprintf(buf, bufsz, "%s", s[0] ? s : "(empty)");
         break;
     }
     case FT_INT:
@@ -108,11 +105,8 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
     }
     case FT_CHARSET:
     {
-        const wchar_t *s = (const wchar_t *)(base + fld->off);
-        char tmp[CHARSET_NAME_MAX];
-
-        wcstombs(tmp, s, sizeof(tmp));
-        snprintf(buf, bufsz, "%s", tmp[0] ? tmp : "(empty)");
+        const char *s = (const char *)(base + fld->off);
+        snprintf(buf, bufsz, "%s", s[0] ? s : "(empty)");
         break;
     }
     }
@@ -127,18 +121,20 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
     {
     case FT_STR:
     {
-        wchar_t *s = (wchar_t *)(base + fld->off);
+        char *s = (char *)(base + fld->off);
         wchar_t tmp[TE_CFG_STR_MAX];
 
         int cap = (fld->maxlen > 0 && fld->maxlen < (int)sizeof(tmp)) ? fld->maxlen : (int)sizeof(tmp);
 
-        wcsncpy(tmp, s, cap - 1);
+        /* Convert char to wchar_t correctly using mbstowcs */
+        mbstowcs(tmp, s, cap - 1);
         tmp[cap - 1] = L'\0';
 
         if (ui_popup_input_wcs(fld->label, "New value:", tmp, cap) == 0)
         {
-            wcsncpy(s, tmp, cap - 1);
-            s[cap - 1] = L'\0';
+            /* Convert wchar_t back to char correctly using wcstombs */
+            wcstombs(s, tmp, cap - 1);
+            s[cap - 1] = '\0';
         }
 
         break;
@@ -184,12 +180,9 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
     case FT_CHARSET:
     {
         /* Cycle through available charsets */
-        wchar_t *s = (wchar_t *)(base + fld->off);
+        char *s = (char *)(base + fld->off);
         const char **charsets;
         int count, i, current = -1;
-        char tmp[CHARSET_NAME_MAX];
-
-        wcstombs(tmp, s, sizeof(tmp));
 
         charsets = charset_get_list(&count);
 
@@ -198,7 +191,7 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
             /* Find current charset in list */
             for (i = 0; i < count; i++)
             {
-                if (strcasecmp(tmp, charsets[i]) == 0)
+                if (strcasecmp(s, charsets[i]) == 0)
                 {
                     current = i;
                     break;
@@ -211,7 +204,8 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
             if (current >= count)
                 current = 0;
 
-            mbstowcs(s, charsets[current], CHARSET_NAME_MAX - 1);
+            strncpy(s, charsets[current], CHARSET_NAME_MAX - 1);
+            s[CHARSET_NAME_MAX - 1] = '\0';
         }
 
         break;
@@ -338,6 +332,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
             mvaddch(LINES - 1, i, ' ');
 
         mvprintw(LINES - 1, 1, "Up/Dn field  Left/Right tab  Enter/Spc edit  F10/S save  ESC cancel");
+        move(0, 0);
 
         attroff(COLOR_PAIR(COL_STATUS));
 

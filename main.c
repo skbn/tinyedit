@@ -227,7 +227,7 @@ int main(int argc, char **argv)
     app->charset_in[sizeof(app->charset_in) - 1] = '\0';
 
     /* Save charset comes from config */
-    strncpy(app->charset_out, cfg.charset[0] ? cfg.charset : "UTF-8", sizeof(app->charset_out) - 1);
+    strncpy(app->charset_out, cfg.charset[0] ? cfg.charset : L"UTF-8", sizeof(app->charset_out) - 1);
     app->charset_out[sizeof(app->charset_out) - 1] = '\0';
 
     /* Load file if given */

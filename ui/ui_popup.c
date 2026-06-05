@@ -82,6 +82,7 @@ int ui_popup_confirm(const char *title, const char *msg)
     if (want_w > COLS)
         want_w = COLS;
 
+    curs_set(0);
     ui_popup_center(7, want_w, &y, &x, &h, &w);
 
     for (;;)
@@ -145,6 +146,7 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
     if (want_w > COLS)
         want_w = COLS;
 
+    curs_set(0);
     ui_popup_center(want_h, want_w, &y, &x, &h, &w);
 
     sel = (initial >= 0 && initial < count) ? initial : 0;
@@ -412,11 +414,8 @@ void input_draw(InputState *state, int y, int x, int width, int is_active)
     if (!state || !state->buf)
         return;
 
-    /* Set background color for the input field */
-    if (is_active)
-        attron(COLOR_PAIR(COL_POPUP_SEL));
-    else
-        attron(COLOR_PAIR(COL_POPUP));
+    /* Always use COL_POPUP for the input field - let terminal cursor be the only indicator */
+    attron(COLOR_PAIR(COL_POPUP));
 
     mvaddch(y, x, '[');
 
@@ -445,10 +444,7 @@ void input_draw(InputState *state, int y, int x, int width, int is_active)
 
     mvaddch(y, x + 1 + avail, ']');
 
-    if (is_active)
-        attroff(COLOR_PAIR(COL_POPUP_SEL));
-    else
-        attroff(COLOR_PAIR(COL_POPUP));
+    attroff(COLOR_PAIR(COL_POPUP));
 }
 
 void input_move_cursor(InputState *state, int y, int x, int width)
@@ -552,6 +548,7 @@ int ui_popup_charset_pair(const char *view_in, const char *save_in, char *view_o
         }
     }
 
+    curs_set(0);
     ui_popup_center(8, 48, &y, &x, &h, &w);
 
     for (;;)
@@ -672,6 +669,7 @@ int ui_popup_search_results(const char *title, const int *line_nums, const char 
     if (want_w > COLS)
         want_w = COLS;
 
+    curs_set(0);
     ui_popup_center(want_h, want_w, &y, &x, &h, &w);
 
     sel = (initial >= 0 && initial < count) ? initial : 0;
@@ -728,6 +726,7 @@ int ui_popup_search_results(const char *title, const int *line_nums, const char 
         mvaddnstr(y + h - 2, x + 2, "Enter=Jump  ESC=Cancel", w - 4);
 
         attroff(COLOR_PAIR(COL_STATUS));
+        move(y, x); /* Move cursor outside the popup */
         refresh();
 
         rc = wrapper_read_key(&wch);
@@ -824,6 +823,7 @@ void ui_popup_help(const char *title, const char *const *lines, int n)
     if (want_w > COLS)
         want_w = COLS;
 
+    curs_set(0);
     ui_popup_center(want_h, want_w, &y, &x, &h, &w);
 
     for (;;)
@@ -854,6 +854,7 @@ void ui_popup_help(const char *title, const char *const *lines, int n)
         mvaddnstr(y + h - 2, x + 2, "Up/Dn/PgUp/PgDn  ESC=Close", w - 4);
 
         attroff(COLOR_PAIR(COL_STATUS));
+        move(y, x); /* Move cursor outside the popup */
         refresh();
 
         rc = wrapper_read_key(&wch);
