@@ -172,9 +172,17 @@ int main(int argc, char **argv)
     amiga_set_font_name(cfg.font[0] ? cfg.font : NULL);
     amiga_set_cursor_pen(cfg.cursor_color);
 
-    /* Optional TrueType (ignored if path empty or ttengine.library missing) */
-    amiga_set_ttf(cfg.ttf_font, cfg.ttf_size, cfg.ttf_antialias);
-    amiga_set_ttf_encoding(cfg.ttf_use_utf8);
+    /* Optional TrueType (ignored if ttf_enabled=0 or path empty or ttengine.library missing) */
+    if (cfg.ttf_enabled)
+    {
+        amiga_set_ttf(cfg.ttf_font, cfg.ttf_size, cfg.ttf_antialias);
+        amiga_set_ttf_encoding(cfg.ttf_use_utf8);
+    }
+    else
+    {
+        /* Explicitly disable TTF when ttf_enabled=0 */
+        amiga_set_ttf(NULL, 0, 0);
+    }
 #endif
 
 #ifdef PLATFORM_WIN32

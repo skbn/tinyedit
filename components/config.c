@@ -282,6 +282,7 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->font[sizeof(cfg->font) - 1] = '\0';
 
     /* TTF defaults: disabled (empty path) — bitmap font is used */
+    cfg->ttf_enabled = 0;
     cfg->ttf_font[0] = '\0';
     cfg->ttf_size = 14;
     cfg->ttf_antialias = 0; /* auto */
@@ -434,6 +435,10 @@ int te_cfg_load(TeConfig *cfg, const char *path)
             strncpy(cfg->font, tmp, sizeof(cfg->font) - 1);
 
             cfg->font[sizeof(cfg->font) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "TTF_ENABLED") == 0)
+        {
+            cfg->ttf_enabled = parse_yesno(rest);
         }
         else if (strcasecmp(word, "TTF_FONT") == 0)
         {
@@ -699,8 +704,11 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(f, "FONT       %s\n\n", cfg->font[0] ? cfg->font : "topaz.font");
 
     fprintf(f, "# TrueType font (Amiga only, via ttengine.library v6+)\n");
-    fprintf(f, "# Empty = disabled, falls back to bitmap FONT above.\n");
-    fprintf(f, "# Recommended: a monospace TTF (DejaVu Sans Mono, Inconsolata, JetBrains Mono).\n");
+    fprintf(f, "# TTF_ENABLED = YES to use TTF, NO to use bitmap font\n");
+    fprintf(f, "TTF_ENABLED  %s\n", cfg->ttf_enabled ? "YES" : "NO");
+
+    fprintf(f, "# TTF_FONT path (only used if TTF_ENABLED = YES)\n");
+    fprintf(f, "# Recommended: a monospace TTF (DejaVu Sans Mono, Inconsolata, JetBrains Mono)\n");
 
     if (cfg->ttf_font[0])
         fprintf(f, "TTF_FONT      %s\n", cfg->ttf_font);

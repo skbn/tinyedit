@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "wrapper.h"
+#include "core/utf8.h"
 
 #include <devices/inputevent.h>
 #include <exec/memory.h>
@@ -642,7 +643,7 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
         iwidth = TT_TextLength(rp, probe_i, 1);
     }
 
-    /* Prefer TTengine's own answer; fall back to heuristic. */
+    /* Prefer TTengine's own answer; fall back to heuristic*/
     if (is_fixed)
         s_ttf_proportional = 0;
     else if (mwidth > 0 && iwidth > 0 && (mwidth - iwidth) > 1)
@@ -651,15 +652,14 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
         s_ttf_proportional = 0;
 
     /* Prefer FontWidth (the canonical monospace advance) over our 'M'
-     * measurement when available, otherwise use mwidth. */
+     * measurement when available, otherwise use mwidth*/
     if (!s_ttf_proportional && fwidth >= 4 && fwidth <= 64)
         fw = (int)fwidth;
     else if (mwidth >= 4 && mwidth <= 64)
         fw = (int)mwidth;
 
     /*
-    fprintf(stderr, "TTF: fixed=%lu fw_native=%lu M=%lu i=%lu -> fw=%d proportional=%d\n",
-            (unsigned long)is_fixed, (unsigned long)fwidth, (unsigned long)mwidth, (unsigned long)iwidth, fw, s_ttf_proportional);
+    fprintf(stderr, "TTF: fixed=%lu fw_native=%lu M=%lu i=%lu -> fw=%d proportional=%d\n", (unsigned long)is_fixed, (unsigned long)fwidth, (unsigned long)mwidth, (unsigned long)iwidth, fw, s_ttf_proportional);
 */
 
     TT_GetAttrs(rp,
@@ -671,19 +671,19 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
 
     if (max_top > 0 && max_bot >= 0)
     {
-        /* Full-face bounds — guarantees no glyph clips the cell. */
+        /* Full-face bounds — guarantees no glyph clips the cell*/
         fb = (int)max_top;
         fh = (int)max_top + (int)max_bot + 1;
     }
     else if (asc_acc > 0)
     {
-        /* AccentedAscender + RealDescender: tighter but covers accents. */
+        /* AccentedAscender + RealDescender: tighter but covers accents */
         fb = (int)asc_acc;
         fh = (int)asc_acc + (int)desc_real + 1;
     }
     else
     {
-        /* Legacy fallback: design ascender/descender (no accent room). */
+        /* Legacy fallback: design ascender/descender (no accent room) */
         asc = 0;
         desc = 0;
         TT_GetAttrs(rp, TT_FontAscender, (ULONG)&asc, TT_FontDescender, (ULONG)&desc, TAG_END);
@@ -699,8 +699,7 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
         fh = 6;
 
     /*
-    fprintf(stderr, "TTF: maxTop=%lu maxBot=%lu accAsc=%lu realDesc=%lu -> fb=%d fh=%d\n",
-            (unsigned long)max_top, (unsigned long)max_bot, (unsigned long)asc_acc, (unsigned long)desc_real, fb, fh);
+    fprintf(stderr, "TTF: maxTop=%lu maxBot=%lu accAsc=%lu realDesc=%lu -> fb=%d fh=%d\n", (unsigned long)max_top, (unsigned long)max_bot, (unsigned long)asc_acc, (unsigned long)desc_real, fb, fh);
     */
 }
 
@@ -1301,13 +1300,51 @@ chtype mvwinch(WINDOW *w, int y, int x)
 /* UTF-8 aware string output: decode multibyte -> codepoint -> Latin-1 cell */
 int waddnstr(WINDOW *w, const char *s, int n)
 {
-    const char *p, *end;
+    const char *p;
+    const char *end;
 
     if (!w || !s)
         return ERR;
 
     if (n < 0)
         n = (int)strlen(s);
+
+    /* When TTF is active, use waddnwstr() which supports full Unicode */
+    if (s_use_ttf)
+    {
+        wchar_t *wcs;
+        int wcs_len;
+        char *temp_buf;
+
+        if (!w || !s)
+            return ERR;
+
+        if (n < 0)
+            n = (int)strlen(s);
+
+        /* Create null-terminated temporary buffer for utf8_to_wcs() */
+        temp_buf = (char *)malloc((size_t)n + 1);
+
+        if (!temp_buf)
+            return ERR;
+
+        memcpy(temp_buf, s, (size_t)n);
+
+        temp_buf[n] = '\0';
+
+        /* Convert UTF-8 to wchar_t */
+        wcs = utf8_to_wcs(temp_buf, &wcs_len);
+
+        free(temp_buf);
+
+        if (!wcs)
+            return ERR;
+
+        waddnwstr(w, wcs, wcs_len);
+        free(wcs);
+
+        return OK;
+    }
 
     p = s;
     end = s + n;
@@ -1767,7 +1804,7 @@ int amiga_set_font_name(const char *font_name)
     return 0;
 }
 
-/* Set the ANSI font name for Amiga. Used when ANSI mode is active.
+/* Set the ANSI font name for Amiga. Used when ANSI mode is active
  * If font_name is NULL or empty, uses "topaz.font" as default */
 int amiga_set_ansi_font_name(const char *font_name)
 {
@@ -1815,7 +1852,7 @@ int amiga_set_ttf(const char *ttf_file, int size, int antialias)
     return 0;
 }
 
-/* Set TTF encoding mode. Must be called BEFORE initscr().
+/* Set TTF encoding mode. Must be called BEFORE initscr()
  * use_utf8: 0 = UTF-16 BE (BMP only, 0x0000-0xFFFF)
  *           1 = UTF-8 (full Unicode, 0x000000-0x10FFFF, supports emojis)
  * Default is UTF-8 for full Unicode support */

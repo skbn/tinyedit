@@ -61,6 +61,7 @@ static const SetupField st_fields[] =
         {1, "Font", FT_STR, F_OFF(font), TE_CFG_STR_MAX},
 #endif
 #ifdef PLATFORM_AMIGA
+        {1, "TTF Enabled", FT_BOOL, F_OFF(ttf_enabled), 0},
         {1, "TTF Font", FT_STR, F_OFF(ttf_font), TE_CFG_STR_MAX},
         {1, "TTF Size", FT_INT, F_OFF(ttf_size), 0},
         {1, "TTF Antialias", FT_CYCLE, F_OFF(ttf_antialias), 0},
@@ -327,6 +328,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
     TeConfig work;
     int tab = 0;
     int sel = 0;
+    int scroll_offset = 0;
     int key;
     int dirty = 0;
     int i;
@@ -371,6 +373,11 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
         }
 
         /* Fields */
+        int visible_fields = LINES - 6;
+
+        if (visible_fields < 1)
+            visible_fields = 1;
+
         row = 4;
         c = 0;
 
@@ -381,6 +388,12 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
 
             if (st_fields[i].tab != tab)
                 continue;
+
+            if (c < scroll_offset || c >= scroll_offset + visible_fields)
+            {
+                c++;
+                continue;
+            }
 
             st_format_value(&work, &st_fields[i], val, sizeof(val));
 
@@ -401,6 +414,11 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
 
             row++;
             c++;
+        }
+
+        if (nfields > visible_fields && scroll_offset + visible_fields < nfields)
+        {
+            mvprintw(LINES - 2, COLS - 2, "↓");
         }
 
         /* Status bar */
@@ -433,6 +451,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
                 ui_popup_confirm("Setup", "No config path; cannot save.");
                 continue;
             }
+
             if (te_cfg_save(&work, cfg_path) != 0)
             {
                 ui_popup_confirm("Setup", "Save failed.");
@@ -447,6 +466,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
         {
             tab = (tab > 0) ? tab - 1 : ST_TAB_COUNT - 1;
             sel = 0;
+            scroll_offset = 0;
 
             continue;
         }
@@ -455,6 +475,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
         {
             tab = (tab + 1) % ST_TAB_COUNT;
             sel = 0;
+            scroll_offset = 0;
 
             continue;
         }
@@ -462,7 +483,12 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
         if (key == KEY_UP)
         {
             if (sel > 0)
+            {
                 sel--;
+
+                if (sel < scroll_offset)
+                    scroll_offset = sel;
+            }
 
             continue;
         }
@@ -470,7 +496,12 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
         if (key == KEY_DOWN)
         {
             if (sel < nfields - 1)
+            {
                 sel++;
+
+                if (sel >= scroll_offset + visible_fields)
+                    scroll_offset = sel - visible_fields + 1;
+            }
 
             continue;
         }

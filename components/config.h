@@ -38,6 +38,7 @@ typedef struct
 
     /* TrueType font support (Amiga via ttengine.library; ignored elsewhere)
      * Empty ttf_font[] means use the bitmap `font` above */
+    int ttf_enabled;               /* 0=disabled, 1=enabled */
     char ttf_font[TE_CFG_STR_MAX]; /* e.g. "FONTS:_ttf/DejaVuSansMono.ttf" */
     int ttf_size;                  /* point size, default 14 */
     int ttf_antialias;             /* 0=auto, 1=off, 2=on */
