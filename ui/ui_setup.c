@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include "te.h"
 #include "ui_setup.h"
+#include "ui_files.h"
 #include "../components/config.h"
 #include "../core/charset.h"
 #include "../core/keys.h"
@@ -32,7 +33,8 @@ typedef enum
     FT_INT,      /* integer */
     FT_BOOL,     /* yes/no toggle */
     FT_COLORMAP, /* integer 0-255, edit also marks color_map_initialized */
-    FT_CHARSET   /* cycle through available charsets */
+    FT_CHARSET,  /* cycle through available charsets */
+    FT_CYCLE     /* cycle through predefined string options */
 } FieldType;
 
 typedef struct
@@ -57,6 +59,12 @@ static const SetupField st_fields[] =
 /* Colour/Font */
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "Font", FT_STR, F_OFF(font), TE_CFG_STR_MAX},
+#endif
+#ifdef PLATFORM_AMIGA
+        {1, "TTF Font", FT_STR, F_OFF(ttf_font), TE_CFG_STR_MAX},
+        {1, "TTF Size", FT_INT, F_OFF(ttf_size), 0},
+        {1, "TTF Antialias", FT_CYCLE, F_OFF(ttf_antialias), 0},
+        {1, "TTF Encoding", FT_CYCLE, F_OFF(ttf_use_utf8), 0},
 #endif
         {1, "Pen 0 (black)", FT_COLORMAP, F_OFF(color_map) + 0 * sizeof(int), 0},
         {1, "Pen 1 (red)", FT_COLORMAP, F_OFF(color_map) + 1 * sizeof(int), 0},
@@ -109,6 +117,33 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
         snprintf(buf, bufsz, "%s", s[0] ? s : "(empty)");
         break;
     }
+    case FT_CYCLE:
+    {
+        int v = *(const int *)(base + fld->off);
+        const char *label = "";
+
+        if (strcmp(fld->label, "TTF Encoding") == 0)
+        {
+            /* TTF encoding: 0=UTF-16 BE (BMP only), 1=UTF-8 (full Unicode) */
+            if (v == 0)
+                label = "UTF-16";
+            else
+                label = "UTF-8";
+        }
+        else
+        {
+            /* TTF antialias: 0=AUTO, 1=OFF, 2=ON */
+            if (v == 0)
+                label = "AUTO";
+            else if (v == 1)
+                label = "OFF";
+            else if (v == 2)
+                label = "ON";
+        }
+
+        snprintf(buf, bufsz, "%s", label);
+        break;
+    }
     }
 }
 
@@ -122,19 +157,37 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
     case FT_STR:
     {
         char *s = (char *)(base + fld->off);
-        wchar_t tmp[TE_CFG_STR_MAX];
 
-        int cap = (fld->maxlen > 0 && fld->maxlen < (int)sizeof(tmp)) ? fld->maxlen : (int)sizeof(tmp);
-
-        /* Convert char to wchar_t correctly using mbstowcs */
-        mbstowcs(tmp, s, cap - 1);
-        tmp[cap - 1] = L'\0';
-
-        if (ui_popup_input_wcs(fld->label, "New value:", tmp, cap) == 0)
+        /* Special case: TTF Font uses file picker */
+        if ((strcmp(fld->label, "TTF Font") == 0) || (strcmp(fld->label, "Font") == 0))
         {
-            /* Convert wchar_t back to char correctly using wcstombs */
-            wcstombs(s, tmp, cap - 1);
-            s[cap - 1] = '\0';
+            char tmp[TE_CFG_STR_MAX];
+
+            strncpy(tmp, s, sizeof(tmp) - 1);
+            tmp[sizeof(tmp) - 1] = '\0';
+
+            if (ui_files_pick(fld->label, "", tmp, sizeof(tmp)) == 0)
+            {
+                strncpy(s, tmp, TE_CFG_STR_MAX - 1);
+                s[TE_CFG_STR_MAX - 1] = '\0';
+            }
+        }
+        else
+        {
+            wchar_t tmp[TE_CFG_STR_MAX];
+
+            int cap = (fld->maxlen > 0 && fld->maxlen < (int)sizeof(tmp)) ? fld->maxlen : (int)sizeof(tmp);
+
+            /* Convert char to wchar_t correctly using mbstowcs */
+            mbstowcs(tmp, s, cap - 1);
+            tmp[cap - 1] = L'\0';
+
+            if (ui_popup_input_wcs(fld->label, "New value:", tmp, cap) == 0)
+            {
+                /* Convert wchar_t back to char correctly using wcstombs */
+                wcstombs(s, tmp, cap - 1);
+                s[cap - 1] = '\0';
+            }
         }
 
         break;
@@ -147,7 +200,18 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
         swprintf(tmp, sizeof(tmp) / sizeof(wchar_t), L"%d", *v);
 
         if (ui_popup_input_wcs(fld->label, "New value (integer):", tmp, sizeof(tmp) / sizeof(wchar_t)) == 0)
-            *v = (int)wcstol(tmp, NULL, 10);
+        {
+            int parsed = (int)wcstol(tmp, NULL, 10);
+
+            /* Special validation for TTF_SIZE (6-96) */
+            if (fld->off == F_OFF(ttf_size))
+            {
+                if (parsed < 6 || parsed > 96)
+                    parsed = 14;
+            }
+
+            *v = parsed;
+        }
 
         break;
     }
@@ -207,6 +271,20 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
             strncpy(s, charsets[current], CHARSET_NAME_MAX - 1);
             s[CHARSET_NAME_MAX - 1] = '\0';
         }
+
+        break;
+    }
+    case FT_CYCLE:
+    {
+        /* Cycle through predefined options */
+        int *v = (int *)(base + fld->off);
+
+        if (strcmp(fld->label, "TTF Encoding") == 0)
+            /* TTF encoding: 0=UTF-16, 1=UTF-8 (toggle between 2 options) */
+            *v = (*v == 0) ? 1 : 0;
+        else
+            /* TTF antialias: 0=AUTO, 1=OFF, 2=ON (cycle through 3 options) */
+            *v = (*v + 1) % 3;
 
         break;
     }

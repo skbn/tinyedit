@@ -171,6 +171,10 @@ int main(int argc, char **argv)
     amiga_set_default_bg_color(cfg.default_bg_color);
     amiga_set_font_name(cfg.font[0] ? cfg.font : NULL);
     amiga_set_cursor_pen(cfg.cursor_color);
+
+    /* Optional TrueType (ignored if path empty or ttengine.library missing) */
+    amiga_set_ttf(cfg.ttf_font, cfg.ttf_size, cfg.ttf_antialias);
+    amiga_set_ttf_encoding(cfg.ttf_use_utf8);
 #endif
 
 #ifdef PLATFORM_WIN32

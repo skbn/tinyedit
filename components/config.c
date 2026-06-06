@@ -281,6 +281,12 @@ void te_cfg_defaults(TeConfig *cfg)
     strncpy(cfg->font, "topaz.font", sizeof(cfg->font) - 1);
     cfg->font[sizeof(cfg->font) - 1] = '\0';
 
+    /* TTF defaults: disabled (empty path) — bitmap font is used */
+    cfg->ttf_font[0] = '\0';
+    cfg->ttf_size = 14;
+    cfg->ttf_antialias = 0; /* auto */
+    cfg->ttf_use_utf8 = 1;  /* UTF-8 for full Unicode/emoji support */
+
     /* White-on-black fallback */
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
     {
@@ -428,6 +434,52 @@ int te_cfg_load(TeConfig *cfg, const char *path)
             strncpy(cfg->font, tmp, sizeof(cfg->font) - 1);
 
             cfg->font[sizeof(cfg->font) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "TTF_FONT") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+            strncpy(cfg->ttf_font, tmp, sizeof(cfg->ttf_font) - 1);
+
+            cfg->ttf_font[sizeof(cfg->ttf_font) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "TTF_SIZE") == 0)
+        {
+            char val[16];
+
+            get_token(rest, val, sizeof(val));
+            cfg->ttf_size = atoi(val);
+
+            if (cfg->ttf_size < 6 || cfg->ttf_size > 96)
+                cfg->ttf_size = 14;
+        }
+        else if (strcasecmp(word, "TTF_ANTIALIAS") == 0)
+        {
+            char val[16];
+
+            get_token(rest, val, sizeof(val));
+
+            if (strcasecmp(val, "ON") == 0 || strcasecmp(val, "YES") == 0)
+                cfg->ttf_antialias = 2;
+            else if (strcasecmp(val, "OFF") == 0 || strcasecmp(val, "NO") == 0)
+                cfg->ttf_antialias = 1;
+            else
+                cfg->ttf_antialias = 0; /* auto */
+        }
+        else if (strcasecmp(word, "TTF_USE_UTF8") == 0)
+        {
+            char val[16];
+
+            get_token(rest, val, sizeof(val));
+
+            if (strcasecmp(val, "ON") == 0 || strcasecmp(val, "YES") == 0 || strcasecmp(val, "1") == 0)
+                cfg->ttf_use_utf8 = 1;
+            else if (strcasecmp(val, "OFF") == 0 || strcasecmp(val, "NO") == 0 || strcasecmp(val, "0") == 0)
+                cfg->ttf_use_utf8 = 0;
+            else
+                cfg->ttf_use_utf8 = 1; /* default to UTF-8 */
         }
         else if (strcasecmp(word, "DEFAULT_BG_COLOR") == 0)
         {
@@ -645,6 +697,20 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
     fprintf(f, "# UI font (Amiga/Windows only, e.g. topaz.font)\n");
     fprintf(f, "FONT       %s\n\n", cfg->font[0] ? cfg->font : "topaz.font");
+
+    fprintf(f, "# TrueType font (Amiga only, via ttengine.library v6+)\n");
+    fprintf(f, "# Empty = disabled, falls back to bitmap FONT above.\n");
+    fprintf(f, "# Recommended: a monospace TTF (DejaVu Sans Mono, Inconsolata, JetBrains Mono).\n");
+
+    if (cfg->ttf_font[0])
+        fprintf(f, "TTF_FONT      %s\n", cfg->ttf_font);
+    else
+        fprintf(f, "# TTF_FONT      FONTS:_ttf/DejaVuSansMono.ttf\n");
+
+    fprintf(f, "TTF_SIZE      %d\n", cfg->ttf_size);
+    fprintf(f, "TTF_ANTIALIAS %s\n", cfg->ttf_antialias == 2 ? "ON" : cfg->ttf_antialias == 1 ? "OFF"
+                                                                                              : "AUTO");
+    fprintf(f, "TTF_USE_UTF8 %s\n\n", cfg->ttf_use_utf8 ? "ON" : "OFF");
 
     fprintf(f, "# Default background color for COLOR_PAIR(0) (Amiga, 0-7)\n");
     fprintf(f, "DEFAULT_BG_COLOR %d\n\n", cfg->default_bg_color);

@@ -302,6 +302,7 @@ int utf8_to_latin1(const char *src, int srclen, char *dst, int dstmax)
 
     p = src;
     end = src + srclen;
+
     while (p < end && di < dstmax - 1)
     {
         uint32_t cp = utf8_next(&p);

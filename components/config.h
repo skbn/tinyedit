@@ -36,6 +36,13 @@ typedef struct
     /* UI font name (Amiga: "topaz.font"; unused on Linux) */
     char font[TE_CFG_STR_MAX];
 
+    /* TrueType font support (Amiga via ttengine.library; ignored elsewhere)
+     * Empty ttf_font[] means use the bitmap `font` above */
+    char ttf_font[TE_CFG_STR_MAX]; /* e.g. "FONTS:_ttf/DejaVuSansMono.ttf" */
+    int ttf_size;                  /* point size, default 14 */
+    int ttf_antialias;             /* 0=auto, 1=off, 2=on */
+    int ttf_use_utf8;              /* 0=UTF-16 BE (BMP only), 1=UTF-8 (full Unicode/emojis) */
+
     /* Default background color for COLOR_PAIR(0) on Amiga */
     int default_bg_color;
 

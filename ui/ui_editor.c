@@ -641,7 +641,10 @@ static void draw_body(TeApp *app)
     int body_rows = body_bot - body_top;
     int width = COLS;
     int soft = !app->hard_wrap;
-    int b_r1 = -1, b_c1 = 0, b_r2 = -1, b_c2 = 0;
+    int b_r1 = -1;
+    int b_c1 = 0;
+    int b_r2 = -1;
+    int b_c2 = 0;
     int screen_row;
 
     if (body_rows < 1)

@@ -37,6 +37,7 @@
 #include <proto/keymap.h>
 
 #include "ncursesw_amiga.h"
+#include "ttengine_amiga.h"
 
 /* Global state */
 
@@ -59,6 +60,23 @@ static char ami_font_name[AMI_FONT_NAME_MAX] = "topaz.font";
 static char ami_ansi_font_name[AMI_FONT_NAME_MAX] = "topaz.font";
 static int fw = 8, fh = 8, fb = 7; /* font width, height, baseline */
 static int bx = 0, by = 0;         /* border offsets */
+
+/* TTengine (TrueType) state */
+/* Live library base. NULL means library not opened (bitmap fallback) */
+struct Library *TTEngineBase = NULL;
+
+/* TTengine font handle. NULL means TTF not active */
+static APTR ami_ttf_font = NULL;
+
+/* Runtime flag — 1 = render via TT_Text(), 0 = render via Text() */
+static int s_use_ttf = 0;
+
+/* Configuration set from main BEFORE initscr() */
+static char s_ttf_file[512] = {0};
+static int s_ttf_size = 14;
+static int s_ttf_antialias = 0;    /* 0=auto, 1=off, 2=on */
+static int s_ttf_use_utf8 = 1;     /* 0=UTF-16 BE (BMP only), 1=UTF-8 (full Unicode) */
+static int s_ttf_proportional = 0; /* 1 = render per-cell (proportional font detected) */
 
 static int s_cursor_vis = 1;
 static int s_colors_on = 0;
@@ -109,6 +127,45 @@ static int px(int col) { return bx + col * fw; }
 
 static int py(int row) { return by + row * fh; }
 
+/* Convert UTF-32 codepoint to UTF-8 string. Returns number of bytes written (1-4)
+ * Buffer must have at least 5 bytes */
+static int utf32_to_utf8(uint32_t codepoint, char *buf)
+{
+    if (codepoint <= 0x7F)
+    {
+        buf[0] = (char)codepoint;
+        return 1;
+    }
+    else if (codepoint <= 0x7FF)
+    {
+        buf[0] = (char)(0xC0 | (codepoint >> 6));
+        buf[1] = (char)(0x80 | (codepoint & 0x3F));
+        return 2;
+    }
+    else if (codepoint <= 0xFFFF)
+    {
+        buf[0] = (char)(0xE0 | (codepoint >> 12));
+        buf[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (codepoint & 0x3F));
+        return 3;
+    }
+    else if (codepoint <= 0x10FFFF)
+    {
+        buf[0] = (char)(0xF0 | (codepoint >> 18));
+        buf[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (codepoint & 0x3F));
+        return 4;
+    }
+
+    /* Invalid codepoint - replace with replacement character */
+    buf[0] = (char)0xEF;
+    buf[1] = (char)0xBF;
+    buf[2] = (char)0xBD;
+
+    return 3;
+}
+
 /* Apply color pair + attributes to RastPort */
 static void apply_colors(int pair, int attrs)
 {
@@ -147,6 +204,7 @@ static void render_cell(int row, int col, chtype ch, int attrs)
 {
     int x, y, pair;
     char buf[2];
+    char utf8_buf[5]; /* UTF-8 buffer for TTF (max 4 bytes + null) */
     UBYTE saved;
 
     if (!ami_rp || row < 0 || row >= LINES || col < 0 || col >= COLS)
@@ -164,31 +222,59 @@ static void render_cell(int row, int col, chtype ch, int attrs)
     RectFill(ami_rp, x, y, x + fw - 1, y + fh - 1);
     SetAPen(ami_rp, saved);
 
-    /* Draw char (unsigned compare so 0x80-0xFF works) */
-    buf[0] = (char)(ch & 0xFF);
-
-    if ((unsigned char)buf[0] >= 0x20)
+    /* Draw char. Bitmap path: 8-bit only. TTF path: UTF-16 BE or UTF-8 */
+    if (s_use_ttf)
     {
+        uint32_t wc = (uint32_t)(ch & 0xFFFFFFFF);
+
+        if (wc >= 0x20)
+        {
+            if (s_ttf_use_utf8)
+            {
+                int utf8_len = utf32_to_utf8(wc, utf8_buf);
+
+                utf8_buf[utf8_len] = '\0';
+                Move(ami_rp, x, y + fb);
+
+                /* TT_Text count is CHARACTERS, not bytes — single cell = 1 char */
+                TT_Text(ami_rp, utf8_buf, 1);
+            }
+            else
+            {
+                UWORD ubuf[2];
+
+                ubuf[0] = (UWORD)(wc & 0xFFFF);
+                ubuf[1] = 0;
+
+                Move(ami_rp, x, y + fb);
+                TT_Text(ami_rp, ubuf, 1);
+            }
+        }
+    }
+    else if ((unsigned char)buf[0] >= 0x20)
+    {
+        buf[0] = (char)(ch & 0xFF);
+
         Move(ami_rp, x, y + fb);
         Text(ami_rp, (STRPTR)buf, 1);
     }
 }
 
-static void shadow_invalidate(void) { s_shadow_dirty = 1; }
+static void shadow_invalidate() { s_shadow_dirty = 1; }
 
 /* Full screen redraw from cell buffer (diff against
  * shadow buffer to minimise expensive AmigaOS RectFill+Text per cell)
  * Run-length: groups contiguous changed cells with same color/attrs into one
  * RectFill+Text instead of per-cell -- ~10x fewer graphics calls on 68k */
-static void render_all(void);
+static void render_all();
 
 /* Force complete redraw (call after font change) */
-void amiga_force_redraw(void)
+void amiga_force_redraw()
 {
     render_all();
 }
 
-static void render_all(void)
+static void render_all()
 {
     int r, c;
     Cell *cell;
@@ -246,19 +332,6 @@ static void render_all(void)
             run_attrs = cell->attrs;
             run_len = 0;
 
-            /* If A_REVERSE is present, render cell-by-cell to avoid grouping issues */
-            /*if (run_attrs & A_REVERSE)
-            {
-                render_cell(r, c, cell->ch, cell->attrs);
-
-                if (s_shadow)
-                    s_shadow[r * COLS + c] = *cell;
-
-                c++;
-
-                continue;
-            }*/
-
             while (c < COLS && run_len < (int)sizeof(run_buf))
             {
                 Cell *cc = CELL(stdscr, r, c);
@@ -282,6 +355,9 @@ static void render_all(void)
                 if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
                     break;
 
+                /* run_buf is used in bitmap mode (8-bit only). For TTF mode
+                 * we ALSO build urun[] below from cc->ch directly, preserving
+                 * the full BMP codepoint */
                 run_buf[run_len++] = (char)(cc->ch & 0xFF);
 
                 if (s_shadow)
@@ -321,7 +397,97 @@ static void render_all(void)
             }
 
             Move(ami_rp, x, y + fb);
-            Text(ami_rp, (STRPTR)run_buf, run_len);
+
+            if (s_use_ttf)
+            {
+                if (s_ttf_proportional)
+                {
+                    int u;
+                    for (u = 0; u < run_len; u++)
+                    {
+                        Cell *cc = CELL(stdscr, r, run_start + u);
+                        uint32_t wc = (uint32_t)(cc->ch & 0xFFFFFFFF);
+                        int cx = px(run_start + u);
+                        UBYTE saved2;
+
+                        if (wc < 0x20)
+                            wc = (uint32_t)' ';
+
+                        /* Re-clear this cell's exact rectangle so any spillover
+                         * from a wider neighbor glyph in the previous frame is
+                         * erased before we render the current glyph */
+                        saved2 = ami_rp->FgPen;
+                        SetAPen(ami_rp, ami_rp->BgPen);
+                        RectFill(ami_rp, cx, y, cx + fw - 1, y + fh - 1);
+                        SetAPen(ami_rp, saved2);
+
+                        Move(ami_rp, cx, y + fb);
+
+                        if (s_ttf_use_utf8)
+                        {
+                            char ubuf[5];
+                            utf32_to_utf8(wc, ubuf);
+                            TT_Text(ami_rp, ubuf, 1);
+                        }
+                        else
+                        {
+                            UWORD ubuf[2];
+                            ubuf[0] = (UWORD)(wc & 0xFFFF);
+                            ubuf[1] = 0;
+                            TT_Text(ami_rp, ubuf, 1);
+                        }
+                    }
+                }
+                else if (s_ttf_use_utf8)
+                {
+                    /* MONOSPACE + UTF-8: batched render of all cells in one
+                     * TT_Text call. Build UTF-8 buffer from the original cell
+                     * ch values (not from run_buf which is truncated to 8 bits)
+                     * to preserve full Unicode codepoints */
+                    static char urun[2048]; /* 512 chars * 4 bytes max UTF-8 */
+                    int u;
+                    int urun_len = 0;
+
+                    for (u = 0; u < run_len; u++)
+                    {
+                        Cell *cc = CELL(stdscr, r, run_start + u);
+                        uint32_t wc = (uint32_t)(cc->ch & 0xFFFFFFFF);
+
+                        /* Replace control chars < 0x20 with space (same as bitmap path) */
+                        if (wc < 0x20)
+                            wc = (uint32_t)' ';
+
+                        urun_len += utf32_to_utf8(wc, urun + urun_len);
+                    }
+
+                    /* TT_Text's count is the number of CHARACTERS to render */
+                    TT_Text(ami_rp, urun, (ULONG)run_len);
+                }
+                else
+                {
+                    /* MONOSPACE + UTF-16 BE (BMP only) */
+                    static UWORD urun[512];
+                    int u;
+
+                    for (u = 0; u < run_len; u++)
+                    {
+                        Cell *cc = CELL(stdscr, r, run_start + u);
+                        UWORD wc = (UWORD)(cc->ch & 0xFFFF);
+
+                        /* Replace control chars < 0x20 with space (same as bitmap path) */
+                        if (wc < 0x20)
+                            wc = (UWORD)' ';
+
+                        urun[u] = wc;
+                    }
+
+                    TT_Text(ami_rp, urun, (ULONG)run_len);
+                }
+            }
+            else
+            {
+                Text(ami_rp, (STRPTR)run_buf, run_len);
+            }
         }
 
         /* Reset color tracking between lines */
@@ -379,67 +545,264 @@ static void render_all(void)
     }
 }
 
+/* TTengine init / shutdown */
+static int ami_ttf_try_open()
+{
+    ULONG asc = 0, desc = 0;
+    UWORD probe[2];
+    int aa_value;
+    int measured;
+
+    if (!s_ttf_file[0])
+        return 0; /* TTF disabled in config */
+
+    /* Open ttengine.library; minimum version 6 (= TTENGINEMINVERSION) */
+    if (!TTEngineBase)
+        TTEngineBase = OpenLibrary("ttengine.library", 6);
+
+    if (!TTEngineBase)
+    {
+        fprintf(stderr, "TTF: ttengine.library v6+ not found; using bitmap font\n");
+        return 0;
+    }
+
+    /* Map config antialias mode to TTengine tag value */
+    aa_value = (s_ttf_antialias == 2) ? TT_Antialias_On : (s_ttf_antialias == 1) ? TT_Antialias_Off
+                                                                                 : TT_Antialias_Auto;
+
+    ami_ttf_font = TT_OpenFont(
+        TT_FontFile, (ULONG)s_ttf_file,
+        TT_FontSize, (ULONG)s_ttf_size,
+        TT_FontWeight, TT_FontWeight_Normal,
+        TT_Antialias, (ULONG)aa_value,
+        TAG_END);
+
+    if (!ami_ttf_font)
+    {
+        fprintf(stderr, "TTF: cannot open '%s' at %dpt; using bitmap\n", s_ttf_file, s_ttf_size);
+
+        CloseLibrary(TTEngineBase);
+        TTEngineBase = NULL;
+
+        return 0;
+    }
+
+    fw = (s_ttf_size * 5) / 9;
+
+    if (fw < 4)
+        fw = 4;
+
+    fh = s_ttf_size + 2;
+    fb = s_ttf_size;
+
+    return 1;
+}
+
+/* Apply TTF to a RastPort and re-measure cell dimensions accurately
+ * Called once we have ami_rp (after window open) */
+static void ami_ttf_apply_to_rastport(struct RastPort *rp)
+{
+    ULONG asc = 0;
+    LONG desc = 0;
+    UWORD probe[2];
+    ULONG mwidth;
+    ULONG iwidth = 0;
+    ULONG max_top = 0;
+    ULONG max_bot = 0;
+    ULONG asc_acc = 0;
+    ULONG desc_real = 0;
+    ULONG is_fixed = 0;
+    ULONG fwidth = 0;
+
+    if (!s_use_ttf || !ami_ttf_font || !rp)
+        return;
+
+    if (!TT_SetFont(rp, ami_ttf_font))
+    {
+        fprintf(stderr, "TTF: TT_SetFont failed; reverting to bitmap\n");
+        s_use_ttf = 0;
+        return;
+    }
+
+    TT_SetAttrs(rp, TT_Window, (ULONG)ami_win, TT_Encoding, s_ttf_use_utf8 ? TT_Encoding_UTF8 : TT_Encoding_UTF16_BE, TAG_END);
+    TT_GetAttrs(rp, TT_FontFixedWidth, (ULONG)&is_fixed, TT_FontWidth, (ULONG)&fwidth, TAG_END);
+
+    if (s_ttf_use_utf8)
+    {
+        char probe_M[2] = "M";
+        char probe_i[2] = "i";
+        mwidth = TT_TextLength(rp, probe_M, 1);
+        iwidth = TT_TextLength(rp, probe_i, 1);
+    }
+    else
+    {
+        UWORD probe_M[2] = {'M', 0};
+        UWORD probe_i[2] = {'i', 0};
+        mwidth = TT_TextLength(rp, probe_M, 1);
+        iwidth = TT_TextLength(rp, probe_i, 1);
+    }
+
+    /* Prefer TTengine's own answer; fall back to heuristic. */
+    if (is_fixed)
+        s_ttf_proportional = 0;
+    else if (mwidth > 0 && iwidth > 0 && (mwidth - iwidth) > 1)
+        s_ttf_proportional = 1;
+    else
+        s_ttf_proportional = 0;
+
+    /* Prefer FontWidth (the canonical monospace advance) over our 'M'
+     * measurement when available, otherwise use mwidth. */
+    if (!s_ttf_proportional && fwidth >= 4 && fwidth <= 64)
+        fw = (int)fwidth;
+    else if (mwidth >= 4 && mwidth <= 64)
+        fw = (int)mwidth;
+
+    /*
+    fprintf(stderr, "TTF: fixed=%lu fw_native=%lu M=%lu i=%lu -> fw=%d proportional=%d\n",
+            (unsigned long)is_fixed, (unsigned long)fwidth, (unsigned long)mwidth, (unsigned long)iwidth, fw, s_ttf_proportional);
+*/
+
+    TT_GetAttrs(rp,
+                TT_FontMaxTop, (ULONG)&max_top,
+                TT_FontMaxBottom, (ULONG)&max_bot,
+                TT_FontAccentedAscender, (ULONG)&asc_acc,
+                TT_FontRealDescender, (ULONG)&desc_real,
+                TAG_END);
+
+    if (max_top > 0 && max_bot >= 0)
+    {
+        /* Full-face bounds — guarantees no glyph clips the cell. */
+        fb = (int)max_top;
+        fh = (int)max_top + (int)max_bot + 1;
+    }
+    else if (asc_acc > 0)
+    {
+        /* AccentedAscender + RealDescender: tighter but covers accents. */
+        fb = (int)asc_acc;
+        fh = (int)asc_acc + (int)desc_real + 1;
+    }
+    else
+    {
+        /* Legacy fallback: design ascender/descender (no accent room). */
+        asc = 0;
+        desc = 0;
+        TT_GetAttrs(rp, TT_FontAscender, (ULONG)&asc, TT_FontDescender, (ULONG)&desc, TAG_END);
+
+        if (asc > 0)
+        {
+            fb = (int)asc;
+            fh = (int)asc + (desc < 0 ? -(int)desc : (int)desc) + 1;
+        }
+    }
+
+    if (fh < 6)
+        fh = 6;
+
+    /*
+    fprintf(stderr, "TTF: maxTop=%lu maxBot=%lu accAsc=%lu realDesc=%lu -> fb=%d fh=%d\n",
+            (unsigned long)max_top, (unsigned long)max_bot, (unsigned long)asc_acc, (unsigned long)desc_real, fb, fh);
+    */
+}
+
+static void ami_ttf_close()
+{
+    if (ami_ttf_font && TTEngineBase)
+    {
+        if (ami_rp)
+            TT_DoneRastPort(ami_rp);
+
+        TT_CloseFont(ami_ttf_font);
+        ami_ttf_font = NULL;
+    }
+
+    if (TTEngineBase)
+    {
+        CloseLibrary(TTEngineBase);
+        TTEngineBase = NULL;
+    }
+
+    s_use_ttf = 0;
+}
+
 /* Initialization */
-WINDOW *initscr(void)
+WINDOW *initscr()
 {
     struct TextAttr ta;
     ULONG idcmp, wfl;
     int dw, dh, sw, sh;
 
-    /* Font - load both normal and ANSI fonts at startup */
-    ta.ta_Name = (STRPTR)ami_font_name;
-    ta.ta_YSize = 8;
-    ta.ta_Style = 0;
-    ta.ta_Flags = 0;
+    /* Try TrueType font first; on failure fall back to bitmap */
+    s_use_ttf = ami_ttf_try_open();
 
-    ami_font_normal = OpenDiskFont(&ta);
-
-    if (!ami_font_normal && strcmp(ami_font_name, "topaz.font") != 0)
+    if (!s_use_ttf)
     {
-        /* Fallback to topaz.font if configured font failed */
-        fprintf(stderr, "Warning: Failed to load font '%s', falling back to topaz.font\n", ami_font_name);
-        ta.ta_Name = (STRPTR) "topaz.font";
+        /* Font - load both normal and ANSI fonts at startup */
+        ta.ta_Name = (STRPTR)ami_font_name;
+        ta.ta_YSize = 8;
+        ta.ta_Style = 0;
+        ta.ta_Flags = 0;
+
         ami_font_normal = OpenDiskFont(&ta);
-    }
 
-    /* Load ANSI font */
-    ta.ta_Name = (STRPTR)ami_ansi_font_name;
-    ami_font_ansi = OpenDiskFont(&ta);
+        if (!ami_font_normal && strcmp(ami_font_name, "topaz.font") != 0)
+        {
+            /* Fallback to topaz.font if configured font failed */
+            fprintf(stderr, "Warning: Failed to load font '%s', falling back to topaz.font\n", ami_font_name);
 
-    if (!ami_font_ansi && strcmp(ami_ansi_font_name, "topaz.font") != 0)
-    {
-        /* Fallback to topaz.font if configured font failed */
-        fprintf(stderr, "Warning: Failed to load ANSI font '%s', falling back to topaz.font\n", ami_ansi_font_name);
-        ta.ta_Name = (STRPTR) "topaz.font";
+            ta.ta_Name = (STRPTR) "topaz.font";
+
+            ami_font_normal = OpenDiskFont(&ta);
+        }
+
+        /* Load ANSI font */
+        ta.ta_Name = (STRPTR)ami_ansi_font_name;
         ami_font_ansi = OpenDiskFont(&ta);
-    }
 
-    /* If ANSI font failed, use normal font */
-    if (!ami_font_ansi && ami_font_normal)
-        ami_font_ansi = ami_font_normal;
+        if (!ami_font_ansi && strcmp(ami_ansi_font_name, "topaz.font") != 0)
+        {
+            /* Fallback to topaz.font if configured font failed */
+            fprintf(stderr, "Warning: Failed to load ANSI font '%s', falling back to topaz.font\n", ami_ansi_font_name);
 
-    /* Set default font to normal */
-    ami_font = ami_font_normal ? ami_font_normal : ami_font_ansi;
+            ta.ta_Name = (STRPTR) "topaz.font";
 
-    if (ami_font)
-    {
-        fw = ami_font->tf_XSize;
-        fh = ami_font->tf_YSize;
-        fb = ami_font->tf_Baseline;
+            ami_font_ansi = OpenDiskFont(&ta);
+        }
 
-        fprintf(stderr, "Font loaded: %s (%dx%d)\n", ami_font_name, fw, fh);
+        /* If ANSI font failed, use normal font */
+        if (!ami_font_ansi && ami_font_normal)
+            ami_font_ansi = ami_font_normal;
 
-        if (ami_font_ansi && ami_font_ansi != ami_font_normal)
-            fprintf(stderr, "ANSI font loaded: %s (%dx%d)\n", ami_ansi_font_name, ami_font_ansi->tf_XSize, ami_font_ansi->tf_YSize);
+        /* Set default font to normal */
+        ami_font = ami_font_normal ? ami_font_normal : ami_font_ansi;
+
+        if (ami_font)
+        {
+            fw = ami_font->tf_XSize;
+            fh = ami_font->tf_YSize;
+            fb = ami_font->tf_Baseline;
+
+            fprintf(stderr, "Font loaded: %s (%dx%d)\n", ami_font_name, fw, fh);
+
+            if (ami_font_ansi && ami_font_ansi != ami_font_normal)
+                fprintf(stderr, "ANSI font loaded: %s (%dx%d)\n", ami_ansi_font_name, ami_font_ansi->tf_XSize, ami_font_ansi->tf_YSize);
+        }
+        else
+        {
+            /* If even topaz.font failed, use default 8x8 */
+            fw = 8;
+            fh = 8;
+            fb = 7;
+
+            fprintf(stderr, "Warning: Failed to load any font, using default 8x8\n");
+        }
     }
     else
     {
-        /* If even topaz.font failed, use default 8x8 */
-        fw = 8;
-        fh = 8;
-        fb = 7;
-
-        fprintf(stderr, "Warning: Failed to load any font, using default 8x8\n");
+        /* fw/fh/fb are provisional; refined after window opens (see below)
+         * Skip diskfont loading entirely — the RastPort will use TT_Text */
+        ami_font_normal = NULL;
+        ami_font_ansi = NULL;
+        ami_font = NULL;
     }
 
     ami_scr = LockPubScreen(NULL);
@@ -492,6 +855,9 @@ WINDOW *initscr(void)
 
     if (ami_font)
         SetFont(ami_rp, ami_font);
+
+    if (s_use_ttf)
+        ami_ttf_apply_to_rastport(ami_rp);
 
     COLS = (ami_win->Width - ami_win->BorderLeft - ami_win->BorderRight) / fw;
     LINES = (ami_win->Height - ami_win->BorderTop - ami_win->BorderBottom) / fh;
@@ -552,7 +918,7 @@ WINDOW *initscr(void)
     return stdscr;
 }
 
-int endwin(void)
+int endwin()
 {
     if (stdscr)
     {
@@ -562,6 +928,11 @@ int endwin(void)
     }
 
     curscr = NULL;
+
+    /* Close TTF (calls TT_DoneRastPort on ami_rp) BEFORE the window goes
+     * away, then close the library. ami_ttf_close() is a no-op if TTF
+     * was never opened, so it's safe to call unconditionally */
+    ami_ttf_close();
 
     if (ami_win)
     {
@@ -587,7 +958,7 @@ int endwin(void)
     return OK;
 }
 
-bool isendwin(void) { return stdscr == NULL; }
+bool isendwin() { return stdscr == NULL; }
 
 /* Window management */
 WINDOW *newwin(int nl, int nc, int beg_y, int beg_x)
@@ -738,7 +1109,7 @@ int wrefresh(WINDOW *w)
     return OK;
 }
 
-int refresh(void) { return wrefresh(stdscr); }
+int refresh() { return wrefresh(stdscr); }
 
 /* TODO */
 int wnoutrefresh(WINDOW *w)
@@ -746,7 +1117,7 @@ int wnoutrefresh(WINDOW *w)
     return OK;
 }
 
-int doupdate(void) { return refresh(); }
+int doupdate() { return refresh(); }
 
 int redrawwin(WINDOW *w) { return wrefresh(w); }
 
@@ -777,9 +1148,9 @@ int wclear(WINDOW *w)
     return OK;
 }
 
-int clear(void) { return wclear(stdscr); }
+int clear() { return wclear(stdscr); }
 
-int erase(void) { return wclear(stdscr); }
+int erase() { return wclear(stdscr); }
 
 int werase(WINDOW *w) { return wclear(w); }
 
@@ -811,7 +1182,7 @@ int wclrtobot(WINDOW *w)
     return OK;
 }
 
-int clrtobot(void) { return wclrtobot(stdscr); }
+int clrtobot() { return wclrtobot(stdscr); }
 
 int wclrtoeol(WINDOW *w)
 {
@@ -832,7 +1203,7 @@ int wclrtoeol(WINDOW *w)
     return OK;
 }
 
-int clrtoeol(void) { return wclrtoeol(stdscr); }
+int clrtoeol() { return wclrtoeol(stdscr); }
 
 /* Cursor */
 int wmove(WINDOW *w, int y, int x)
@@ -877,8 +1248,6 @@ int waddch(WINDOW *w, const chtype ch)
 
         if (w->_cury < w->_maxy - 1)
             w->_cury++;
-
-        /* At bottom-right: cursor stays at last row, col 0 */
     }
 
     return OK;
@@ -1035,18 +1404,35 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
     if (!w || !ws)
         return ERR;
 
-    if (n < 0)
-    {
-        for (n = 0; ws[n]; n++)
-        {
-        }
-    }
-
     for (i = 0; i < n && ws[i]; i++)
     {
-        /* Map wide char to Latin-1 range; beyond -> '?' */
-        chtype ch = (ws[i] <= 0xFF) ? (chtype)ws[i] : (chtype)'?';
-        waddch(w, ch);
+        chtype ch;
+        Cell *cell;
+
+        if (s_use_ttf)
+            ch = (ws[i] <= 0x10FFFF) ? (chtype)ws[i] : (chtype)'?';
+        else
+            ch = (ws[i] <= 0xFF) ? (chtype)ws[i] : (chtype)'?';
+
+        if (w->_cury < 0 || w->_cury >= w->_maxy || w->_curx < 0 || w->_curx >= w->_maxx)
+            continue;
+
+        cell = CELL(w, w->_cury, w->_curx);
+
+        /* Mask with 21-bit Unicode range so the value never collides with
+         * the attribute bits when later code does (cell->ch | cell->attrs) */
+        cell->ch = ch & 0x001FFFFFUL;
+        cell->attrs = w->attrs;
+
+        w->_curx++;
+
+        if (w->_curx >= w->_maxx)
+        {
+            w->_curx = 0;
+
+            if (w->_cury < w->_maxy - 1)
+                w->_cury++;
+        }
     }
 
     return OK;
@@ -1239,11 +1625,11 @@ int wattr_get(WINDOW *w, attr_t *a, short *cp, void *o)
 }
 
 /* Colors */
-bool has_colors(void) { return 1; }
+bool has_colors() { return 1; }
 
-bool can_change_color(void) { return 0; }
+bool can_change_color() { return 0; }
 
-int start_color(void)
+int start_color()
 {
     s_colors_on = 1;
     s_pair_fg[0] = COLOR_WHITE;
@@ -1270,7 +1656,7 @@ int init_color(short c, short r, short g, short b)
     return ERR;
 }
 
-int use_default_colors(void) { return OK; }
+int use_default_colors() { return OK; }
 
 int pair_content(short p, short *fg, short *bg)
 {
@@ -1399,11 +1785,62 @@ int amiga_set_ansi_font_name(const char *font_name)
     return 0;
 }
 
+/* Configure TrueType font. Must be called BEFORE initscr(). With ttf_file =
+ * NULL or empty, TTF is disabled and the bitmap font (amiga_set_font_name)
+ * is used. With a valid path, tinyedit will try to open ttengine.library
+ * v6+ and the TTF at initscr() time; on any failure it falls back to the
+ * bitmap font automatically */
+int amiga_set_ttf(const char *ttf_file, int size, int antialias)
+{
+    if (ttf_file && ttf_file[0])
+    {
+        strncpy(s_ttf_file, ttf_file, sizeof(s_ttf_file) - 1);
+        s_ttf_file[sizeof(s_ttf_file) - 1] = '\0';
+    }
+    else
+    {
+        s_ttf_file[0] = '\0';
+    }
+
+    if (size >= 6 && size <= 96)
+        s_ttf_size = size;
+    else
+        s_ttf_size = 14;
+
+    if (antialias >= 0 && antialias <= 2)
+        s_ttf_antialias = antialias;
+    else
+        s_ttf_antialias = 0;
+
+    return 0;
+}
+
+/* Set TTF encoding mode. Must be called BEFORE initscr().
+ * use_utf8: 0 = UTF-16 BE (BMP only, 0x0000-0xFFFF)
+ *           1 = UTF-8 (full Unicode, 0x000000-0x10FFFF, supports emojis)
+ * Default is UTF-8 for full Unicode support */
+int amiga_set_ttf_encoding(int use_utf8)
+{
+    if (s_ttf_use_utf8 != (use_utf8 ? 1 : 0))
+    {
+        s_ttf_use_utf8 = use_utf8 ? 1 : 0;
+        s_shadow_dirty = 1; /* Force full redraw when encoding changes */
+    }
+
+    return 0;
+}
+
 /* Switch font (call after toggling ANSI mode).
  * use_ansi: 1 = use ANSI font, 0 = use regular font */
 int amiga_change_font(int use_ansi)
 {
-    struct TextFont *target_font = use_ansi ? ami_font_ansi : ami_font_normal;
+    struct TextFont *target_font;
+
+    /* In TTF mode the bitmap ANSI font isn't used; ignore the toggle */
+    if (s_use_ttf)
+        return 0;
+
+    target_font = use_ansi ? ami_font_ansi : ami_font_normal;
 
     if (!ami_win)
         return -1; /* Window not initialized yet */
@@ -1713,7 +2150,8 @@ int wgetch(WINDOW *w)
             /* already translated above */
             break;
         case IDCMP_CLOSEWINDOW:
-            key = KEY_F(12);
+            /*key = KEY_F(12);*/
+            key = 27; /* ESC */
             break;
         case IDCMP_REFRESHWINDOW:
             BeginRefresh(ami_win);
@@ -1779,7 +2217,7 @@ int wgetch(WINDOW *w)
     return key;
 }
 
-int getch(void) { return wgetch(stdscr); }
+int getch() { return wgetch(stdscr); }
 
 int mvgetch(int y, int x)
 {
@@ -1801,7 +2239,7 @@ int ungetch(int ch)
     return OK;
 }
 
-int flushinp(void)
+int flushinp()
 {
     s_ungetch = ERR;
     s_unget_wch_valid = 0;
@@ -1967,23 +2405,23 @@ int wtimeout(WINDOW *w, int d)
     return OK;
 }
 
-int cbreak(void)
+int cbreak()
 {
     s_raw_mode = 0;
 
     return OK;
 }
 
-int nocbreak(void) { return OK; }
+int nocbreak() { return OK; }
 
-int echo(void)
+int echo()
 {
     s_echo_mode = 1;
 
     return OK;
 }
 
-int noecho(void)
+int noecho()
 {
     s_echo_mode = 0;
 
@@ -2012,27 +2450,27 @@ int meta(WINDOW *w, bool bf)
     return OK;
 }
 
-int raw(void)
+int raw()
 {
     s_raw_mode = 1;
 
     return OK;
 }
 
-int noraw(void)
+int noraw()
 {
     s_raw_mode = 0;
 
     return OK;
 }
 
-int nl(void) { return OK; }
+int nl() { return OK; }
 
-int nonl(void) { return OK; }
+int nonl() { return OK; }
 
 /* Beep / Flash */
 
-int beep(void)
+int beep()
 {
     if (ami_win)
         DisplayBeep(NULL);
@@ -2040,7 +2478,7 @@ int beep(void)
     return OK;
 }
 
-int flash(void) { return beep(); }
+int flash() { return beep(); }
 
 /* Border / Lines */
 
@@ -2346,7 +2784,7 @@ void untouchwin(WINDOW *w) {}
 
 /* Mouse (stubs) */
 
-unsigned long getmouse(void) { return 0; }
+unsigned long getmouse() { return 0; }
 
 int ungetmouse(unsigned long m)
 {

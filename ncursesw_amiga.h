@@ -242,9 +242,9 @@ extern int COLORS;
 #define COLOR_WHITE 7
 
 /* Init */
-WINDOW *initscr(void);
-int endwin(void);
-bool isendwin(void);
+WINDOW *initscr();
+int endwin();
+bool isendwin();
 
 /* Window create/destroy */
 WINDOW *newwin(int nlines, int ncols, int begin_y, int begin_x);
@@ -321,20 +321,20 @@ WINDOW *dupwin(WINDOW *win);
 
 /* Refresh functions */
 int wrefresh(WINDOW *win);
-int refresh(void);
+int refresh();
 int wnoutrefresh(WINDOW *win);
-int doupdate(void);
+int doupdate();
 int redrawwin(WINDOW *win);
 int wredrawln(WINDOW *win, int beg_line, int num_lines);
 
 /* Clear functions */
-int clear(void);
+int clear();
 int wclear(WINDOW *win);
-int erase(void);
+int erase();
 int werase(WINDOW *win);
-int clrtobot(void);
+int clrtobot();
 int wclrtobot(WINDOW *win);
-int clrtoeol(void);
+int clrtoeol();
 int wclrtoeol(WINDOW *win);
 
 /* Cursor movement */
@@ -405,12 +405,12 @@ int wattr_get(WINDOW *win, attr_t *attrs, short *color_pair, void *opts);
 #define touchwin(win) wtouchln(win, 0, (win)->_maxy, 1)
 
 /* Colors */
-bool has_colors(void);
-bool can_change_color(void);
-int start_color(void);
+bool has_colors();
+bool can_change_color();
+int start_color();
 int init_pair(short pair, short fg, short bg);
 int init_color(short color, short r, short g, short b);
-int use_default_colors(void);
+int use_default_colors();
 int pair_content(short pair, short *fg, short *bg);
 int color_content(short color, short *r, short *g, short *b);
 int assume_default_colors(int fg, int bg);
@@ -421,20 +421,33 @@ int amiga_set_default_colors(short fg, short bg);
 int amiga_set_default_bg_color(int color);
 int amiga_set_font_name(const char *font_name);
 int amiga_set_ansi_font_name(const char *font_name);
+
+/* TrueType font support (via ttengine.library v6+)
+ * Call BEFORE initscr(). If ttf_file is non-empty and ttengine.library is
+ * available at runtime, tinyedit will render text with the TTF instead of
+ * the bitmap font set by amiga_set_font_name(). Falls back automatically
+ * if either condition fails. Safe to call with NULL/empty path = disabled
+ *
+ *   ttf_file   : path to a .ttf file (e.g. "FONTS:_ttf/DejaVuSansMono.ttf")
+ *   size       : point size 6..96 (typically 12..16 for editing)
+ *   antialias  : 0=auto, 1=off, 2=on
+ */
+int amiga_set_ttf(const char *ttf_file, int size, int antialias);
+int amiga_set_ttf_encoding(int use_utf8);
 int amiga_change_font(int use_ansi);
-void amiga_force_redraw(void);
+void amiga_force_redraw();
 
 /* Control characters */
-int beep(void);
-int flash(void);
+int beep();
+int flash();
 
 /* Keyboard input */
-int getch(void);
+int getch();
 int wgetch(WINDOW *win);
 int mvgetch(int y, int x);
 int mvwgetch(WINDOW *win, int y, int x);
 int ungetch(int ch);
-int flushinp(void);
+int flushinp();
 
 /* Portable key modifier macros - ASCII control characters are 0-31, Ctrl+letter = letter - 64 */
 #define CTRL(ch) ((ch) - 64)
@@ -468,24 +481,24 @@ int timeout(int delay);
 int wtimeout(WINDOW *win, int delay);
 
 /* Keyboard mode */
-int cbreak(void);
-int nocbreak(void);
-int echo(void);
-int noecho(void);
+int cbreak();
+int nocbreak();
+int echo();
+int noecho();
 int halfdelay(int tenths);
 int intrflush(WINDOW *win, bool bf);
 int keypad(WINDOW *win, bool bf);
 int meta(WINDOW *win, bool bf);
-int raw(void);
-int noraw(void);
-int nl(void);
-int nonl(void);
+int raw();
+int noraw();
+int nl();
+int nonl();
 
 /* Cursor */
 int curs_set(int visibility);
 
 /* Special chars */
-unsigned long getmouse(void);
+unsigned long getmouse();
 int ungetmouse(unsigned long m);
 
 /* Border/line */

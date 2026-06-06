@@ -1,3 +1,20 @@
+tinyedit - Lightweight text editor for AmigaOS, Linux, and Windows
+
+Main features:
+- Full UTF-8 support with charset conversion (internal UTF-8, configurable output)
+- Multiple charsets: UTF-8, LATIN-1/2, CP437, CP850, CP865, CP866, CP1252
+- TTF rendering with full Unicode support (including emojis) on AmigaOS
+- Configurable colors and fonts
+- Auto-wrap and hard-wrap modes
+- Undo/redo support
+- Search functionality
+- Clipboard support
+- Bracketed paste support (Unix/Linux)
+- Configurable via file or menu
+
+Building
+AmigaOS requires ttengine.library from https://aminet.net/package/util/libs/ttengine-68k
+
 Getting Started
 
 Open tinyedit:
