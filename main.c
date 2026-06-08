@@ -9,6 +9,10 @@
  * (at your option) any later version.
  */
 
+#ifdef PLATFORM_AMIGA
+const char __attribute__((used)) binkd_stack_size[] = "$STACK:65536";
+#endif
+
 #ifndef _XOPEN_SOURCE_EXTENDED
 #define _XOPEN_SOURCE_EXTENDED 1
 #endif
@@ -156,8 +160,10 @@ int main(int argc, char **argv)
     if (last_sep)
     {
         size_t len = last_sep - cfg_path;
+
         strncpy(dir_path, cfg_path, len);
         dir_path[len] = '\0';
+
         mkdir(dir_path);
     }
 
@@ -258,7 +264,9 @@ int main(int argc, char **argv)
         ed_set_undo_levels(app->editor, cfg.undo_levels);
 
     app->hard_wrap = cfg.hard_wrap;
+    ed_set_hard_wrap(app->editor, cfg.hard_wrap);
     app->wrap_col = cfg.autowrap_col;
+    app->show_line_numbers = cfg.show_line_numbers;
 
     strncpy(app->cfg_path, cfg_path, sizeof(app->cfg_path) - 1);
 

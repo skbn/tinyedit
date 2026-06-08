@@ -111,6 +111,7 @@ int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols)
 int search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int whole_word, int **out_rows, int **out_cols);
 /* Re-flow with quote preservation */
 int ed_rewrap_paragraph(Ed *ed, int width);
+int ed_rewrap_document(Ed *ed, int width);
 
 /* Insert a text file at the cursor position (with undo) */
 int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in);
@@ -119,5 +120,9 @@ int ed_export_block_to_file(Ed *ed, const char *path, const char *charset_out);
 
 /* Set modified flag */
 void ed_set_modified(Ed *ed, int modified);
+
+/* Hard wrap mode */
+int ed_get_hard_wrap(const Ed *ed);
+void ed_set_hard_wrap(Ed *ed, int hard_wrap);
 
 #endif

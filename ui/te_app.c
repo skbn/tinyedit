@@ -46,6 +46,8 @@ TeApp *te_app_new(void)
     strncpy(app->charset_out, "UTF-8", sizeof(app->charset_out) - 1);
     app->charset_out[sizeof(app->charset_out) - 1] = '\0';
 
+    app->show_line_numbers = 0; /* Line numbers disabled by default */
+
     return app;
 }
 

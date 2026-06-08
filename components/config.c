@@ -268,7 +268,8 @@ void te_cfg_defaults(TeConfig *cfg)
 
     cfg->undo_levels = 50;
     cfg->autowrap_col = 75;
-    cfg->hard_wrap = 0; /* soft-wrap by default */
+    cfg->hard_wrap = 0;         /* soft-wrap by default */
+    cfg->show_line_numbers = 0; /* line numbers disabled by default */
     cfg->cursor_color = -1;
     cfg->default_bg_color = 0;
 
@@ -425,6 +426,10 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         else if (strcasecmp(word, "HARDWRAP") == 0)
         {
             cfg->hard_wrap = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "LINENUMBERS") == 0)
+        {
+            cfg->show_line_numbers = parse_yesno(rest);
         }
         else if (strcasecmp(word, "FONT") == 0)
         {
@@ -699,6 +704,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
     fprintf(f, "# Hard wrap: YES = insert CR at wrap column; NO = soft-wrap (visual only)\n");
     fprintf(f, "HARDWRAP   %s\n\n", cfg->hard_wrap ? "YES" : "NO");
+
+    fprintf(f, "# Show line numbers: YES = enabled, NO = disabled\n");
+    fprintf(f, "LINENUMBERS %s\n\n", cfg->show_line_numbers ? "YES" : "NO");
 
     fprintf(f, "# UI font (Amiga/Windows only, e.g. topaz.font)\n");
     fprintf(f, "FONT       %s\n\n", cfg->font[0] ? cfg->font : "topaz.font");

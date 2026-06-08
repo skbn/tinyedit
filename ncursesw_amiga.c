@@ -78,6 +78,9 @@ static int s_ttf_size = 14;
 static int s_ttf_antialias = 0;    /* 0=auto, 1=off, 2=on */
 static int s_ttf_use_utf8 = 1;     /* 0=UTF-16 BE (BMP only), 1=UTF-8 (full Unicode) */
 static int s_ttf_proportional = 0; /* 1 = render per-cell (proportional font detected) */
+static int s_ansi_mode = 0;        /* 1 = app is in ANSI-art viewing mode; draw block glyphs
+                                    * (U+2580..U+259F) via RectFill instead of TT_Text for
+                                    * pixel-perfect tiling */
 
 static int s_cursor_vis = 1;
 static int s_colors_on = 0;
@@ -200,6 +203,173 @@ static void apply_colors(int pair, int attrs)
     SetDrMd(ami_rp, JAM2);
 }
 
+/* Direct block-glyph rendering (Unicode U+2580..U+259F).
+ *
+ * These 32 codepoints are precisely-defined geometric blocks/shades that
+ * are MEANT to tile seamlessly to form solid shapes (ANSI art). TTF fonts
+ * render them as actual glyphs, but the glyph height = ascender+descender
+ * may be smaller than our cell height (which includes accent room for
+ * Á, É, Ñ, etc.), leaving 1-2 px gaps between rows
+ *
+ * In ANSI viewing mode we bypass the font and draw these blocks ourselves
+ * with RectFill / SetAfPt so they tile pixel-perfect, matching what topaz
+ * does on the bitmap path. Bonus: faster than rasterizing through TTengine
+ */
+static int is_block_glyph(uint32_t cp)
+{
+    return (cp >= 0x2580 && cp <= 0x259F);
+}
+
+static void draw_block_glyph(uint32_t cp, int x, int y, int cw, int ch_, UBYTE fg)
+{
+    /* Standard Amiga area-fill patterns (16-pixel wide, 2-row repeating)
+     * We feed these to SetAfPt() so RectFill paints them */
+    static UWORD pat_25[2] = {0x8888, 0x2222}; /* ░ light shade  */
+    static UWORD pat_50[2] = {0x5555, 0xAAAA}; /* ▒ medium shade (checker) */
+    static UWORD pat_75[2] = {0x7777, 0xDDDD}; /* ▓ dark shade   */
+    UBYTE saved;
+
+    int xm = x + cw / 2;  /* horizontal middle */
+    int ym = y + ch_ / 2; /* vertical middle */
+    int x1 = x + cw - 1;  /* right edge */
+    int y1 = y + ch_ - 1; /* bottom edge */
+
+    if (!ami_rp || cw < 2 || ch_ < 2)
+        return;
+
+    saved = ami_rp->FgPen;
+
+    SetAPen(ami_rp, fg);
+
+    switch (cp)
+    {
+    /* Half blocks */
+    case 0x2580: /* ▀ UPPER HALF */
+        RectFill(ami_rp, x, y, x1, ym - 1);
+        break;
+    case 0x2584: /* ▄ LOWER HALF */
+        RectFill(ami_rp, x, ym, x1, y1);
+        break;
+    case 0x2588: /* █ FULL BLOCK */
+        RectFill(ami_rp, x, y, x1, y1);
+        break;
+    case 0x258C: /* ▌ LEFT HALF */
+        RectFill(ami_rp, x, y, xm - 1, y1);
+        break;
+    case 0x2590: /* ▐ RIGHT HALF */
+        RectFill(ami_rp, xm, y, x1, y1);
+        break;
+
+    /* Lower-N-eighths blocks (▁ ▂ ▃ ▅ ▆ ▇) */
+    case 0x2581:
+        RectFill(ami_rp, x, y + ch_ * 7 / 8, x1, y1);
+        break;
+    case 0x2582:
+        RectFill(ami_rp, x, y + ch_ * 6 / 8, x1, y1);
+        break;
+    case 0x2583:
+        RectFill(ami_rp, x, y + ch_ * 5 / 8, x1, y1);
+        break;
+    case 0x2585:
+        RectFill(ami_rp, x, y + ch_ * 3 / 8, x1, y1);
+        break;
+    case 0x2586:
+        RectFill(ami_rp, x, y + ch_ * 2 / 8, x1, y1);
+        break;
+    case 0x2587:
+        RectFill(ami_rp, x, y + ch_ * 1 / 8, x1, y1);
+        break;
+
+    /* Left-N-eighths blocks (▉ ▊ ▋ ▍ ▎ ▏) */
+    case 0x2589:
+        RectFill(ami_rp, x, y, x + cw * 7 / 8 - 1, y1);
+        break;
+    case 0x258A:
+        RectFill(ami_rp, x, y, x + cw * 6 / 8 - 1, y1);
+        break;
+    case 0x258B:
+        RectFill(ami_rp, x, y, x + cw * 5 / 8 - 1, y1);
+        break;
+    case 0x258D:
+        RectFill(ami_rp, x, y, x + cw * 3 / 8 - 1, y1);
+        break;
+    case 0x258E:
+        RectFill(ami_rp, x, y, x + cw * 2 / 8 - 1, y1);
+        break;
+    case 0x258F:
+        RectFill(ami_rp, x, y, x + cw / 8 - 1, y1);
+        break;
+
+    /* One-eighth top and right (▔ ▕) */
+    case 0x2594:
+        RectFill(ami_rp, x, y, x1, y + ch_ / 8 - 1);
+        break;
+    case 0x2595:
+        RectFill(ami_rp, x + cw * 7 / 8, y, x1, y1);
+        break;
+
+    /* Shaded blocks (░ ▒ ▓) — patterned fills */
+    case 0x2591:
+        SetAfPt(ami_rp, pat_25, 1);
+        RectFill(ami_rp, x, y, x1, y1);
+        SetAfPt(ami_rp, NULL, 0);
+        break;
+    case 0x2592:
+        SetAfPt(ami_rp, pat_50, 1);
+        RectFill(ami_rp, x, y, x1, y1);
+        SetAfPt(ami_rp, NULL, 0);
+        break;
+    case 0x2593:
+        SetAfPt(ami_rp, pat_75, 1);
+        RectFill(ami_rp, x, y, x1, y1);
+        SetAfPt(ami_rp, NULL, 0);
+        break;
+
+    /* Quadrants (▖ ▗ ▘ ▙ ▚ ▛ ▜ ▝ ▞ ▟) */
+    case 0x2596: /* ▖ lower left */
+        RectFill(ami_rp, x, ym, xm - 1, y1);
+        break;
+    case 0x2597: /* ▗ lower right */
+        RectFill(ami_rp, xm, ym, x1, y1);
+        break;
+    case 0x2598: /* ▘ upper left */
+        RectFill(ami_rp, x, y, xm - 1, ym - 1);
+        break;
+    case 0x2599: /* ▙ upper left + lower */
+        RectFill(ami_rp, x, y, xm - 1, ym - 1);
+        RectFill(ami_rp, x, ym, x1, y1);
+        break;
+    case 0x259A: /* ▚ upper left + lower right */
+        RectFill(ami_rp, x, y, xm - 1, ym - 1);
+        RectFill(ami_rp, xm, ym, x1, y1);
+        break;
+    case 0x259B: /* ▛ upper + lower left */
+        RectFill(ami_rp, x, y, x1, ym - 1);
+        RectFill(ami_rp, x, ym, xm - 1, y1);
+        break;
+    case 0x259C: /* ▜ upper + lower right */
+        RectFill(ami_rp, x, y, x1, ym - 1);
+        RectFill(ami_rp, xm, ym, x1, y1);
+        break;
+    case 0x259D: /* ▝ upper right */
+        RectFill(ami_rp, xm, y, x1, ym - 1);
+        break;
+    case 0x259E: /* ▞ upper right + lower left */
+        RectFill(ami_rp, xm, y, x1, ym - 1);
+        RectFill(ami_rp, x, ym, xm - 1, y1);
+        break;
+    case 0x259F: /* ▟ upper right + lower */
+        RectFill(ami_rp, xm, y, x1, ym - 1);
+        RectFill(ami_rp, x, ym, x1, y1);
+        break;
+
+    default:
+        break;
+    }
+
+    SetAPen(ami_rp, saved);
+}
+
 /* Render one cell to screen */
 static void render_cell(int row, int col, chtype ch, int attrs)
 {
@@ -230,7 +400,14 @@ static void render_cell(int row, int col, chtype ch, int attrs)
 
         if (wc >= 0x20)
         {
-            if (s_ttf_use_utf8)
+            /* ANSI mode + block glyph → draw directly with RectFill so the
+             * block tiles seamlessly to its neighbors. Outside ANSI mode (or
+             * for any non-block char), fall through to normal TT_Text path */
+            if (s_ansi_mode && is_block_glyph(wc))
+            {
+                draw_block_glyph(wc, x, y, fw, fh, saved);
+            }
+            else if (s_ttf_use_utf8)
             {
                 int utf8_len = utf32_to_utf8(wc, utf8_buf);
 
@@ -401,7 +578,9 @@ static void render_all()
 
             if (s_use_ttf)
             {
-                if (s_ttf_proportional)
+                /* Per-cell render is needed if the font is proportional or if
+                 * we are in ANSI mode */
+                if (s_ttf_proportional || s_ansi_mode)
                 {
                     int u;
                     for (u = 0; u < run_len; u++)
@@ -410,6 +589,7 @@ static void render_all()
                         uint32_t wc = (uint32_t)(cc->ch & 0xFFFFFFFF);
                         int cx = px(run_start + u);
                         UBYTE saved2;
+                        UBYTE fg_pen;
 
                         if (wc < 0x20)
                             wc = (uint32_t)' ';
@@ -418,9 +598,18 @@ static void render_all()
                          * from a wider neighbor glyph in the previous frame is
                          * erased before we render the current glyph */
                         saved2 = ami_rp->FgPen;
+                        fg_pen = saved2; /* current FgPen is the cell's foreground */
+
                         SetAPen(ami_rp, ami_rp->BgPen);
                         RectFill(ami_rp, cx, y, cx + fw - 1, y + fh - 1);
                         SetAPen(ami_rp, saved2);
+
+                        /* ANSI mode + block glyph: draw directly (no font) */
+                        if (s_ansi_mode && is_block_glyph(wc))
+                        {
+                            draw_block_glyph(wc, cx, y, fw, fh, fg_pen);
+                            continue;
+                        }
 
                         Move(ami_rp, cx, y + fb);
 
@@ -514,6 +703,7 @@ static void render_all()
     if (s_shadow && prev_y >= 0 && prev_x >= 0 && prev_y < LINES && prev_x < COLS && (prev_y != cy_cell || prev_x != cx_cell))
     {
         Cell *cell = CELL(stdscr, prev_y, prev_x);
+
         render_cell(prev_y, prev_x, cell->ch, cell->attrs);
         s_shadow[prev_y * COLS + prev_x] = *cell;
     }
@@ -522,6 +712,7 @@ static void render_all()
     {
         int cx = bx + cx_cell * fw;
         int cy = by + cy_cell * fh;
+
         SetAPen(ami_rp, s_cursor_pen);
         Move(ami_rp, cx, cy);
         Draw(ami_rp, cx + fw - 1, cy);
@@ -632,6 +823,7 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
     {
         char probe_M[2] = "M";
         char probe_i[2] = "i";
+
         mwidth = TT_TextLength(rp, probe_M, 1);
         iwidth = TT_TextLength(rp, probe_i, 1);
     }
@@ -639,6 +831,7 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
     {
         UWORD probe_M[2] = {'M', 0};
         UWORD probe_i[2] = {'i', 0};
+
         mwidth = TT_TextLength(rp, probe_M, 1);
         iwidth = TT_TextLength(rp, probe_i, 1);
     }
@@ -657,10 +850,6 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
         fw = (int)fwidth;
     else if (mwidth >= 4 && mwidth <= 64)
         fw = (int)mwidth;
-
-    /*
-    fprintf(stderr, "TTF: fixed=%lu fw_native=%lu M=%lu i=%lu -> fw=%d proportional=%d\n", (unsigned long)is_fixed, (unsigned long)fwidth, (unsigned long)mwidth, (unsigned long)iwidth, fw, s_ttf_proportional);
-*/
 
     TT_GetAttrs(rp,
                 TT_FontMaxTop, (ULONG)&max_top,
@@ -697,10 +886,6 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
 
     if (fh < 6)
         fh = 6;
-
-    /*
-    fprintf(stderr, "TTF: maxTop=%lu maxBot=%lu accAsc=%lu realDesc=%lu -> fb=%d fh=%d\n", (unsigned long)max_top, (unsigned long)max_bot, (unsigned long)asc_acc, (unsigned long)desc_real, fb, fh);
-    */
 }
 
 static void ami_ttf_close()
@@ -1873,7 +2058,11 @@ int amiga_change_font(int use_ansi)
 {
     struct TextFont *target_font;
 
-    /* In TTF mode the bitmap ANSI font isn't used; ignore the toggle */
+    /* Track ANSI mode regardless of font backend */
+    s_ansi_mode = use_ansi ? 1 : 0;
+    s_shadow_dirty = 1; /* force full redraw */
+
+    /* In TTF mode the bitmap ANSI font isn't used; nothing more to do */
     if (s_use_ttf)
         return 0;
 
@@ -1899,6 +2088,130 @@ int amiga_change_font(int use_ansi)
     s_shadow_dirty = 1;
 
     return 0;
+}
+
+/* Reload TTF with new font path and/or size (called after setup changes)
+ * Closes the current TTengine font, reopens at the new size, reapplies to
+ * the RastPort and resizes stdscr to fit the new cell dimensions.
+ * Returns 1 on success, 0 on failure (old font remains active) */
+int amiga_reload_ttf(const char *font_path, int new_size)
+{
+    APTR new_font;
+    int aa_value;
+    char old_file[512];
+    int old_size;
+
+    if (!font_path || !font_path[0])
+        return 0;
+
+    if (new_size < 6 || new_size > 96)
+        return 0;
+
+    if (!s_use_ttf || !ami_ttf_font || !TTEngineBase)
+    {
+        /* TTF not active: just update stored settings */
+        strncpy(s_ttf_file, font_path, sizeof(s_ttf_file) - 1);
+
+        s_ttf_file[sizeof(s_ttf_file) - 1] = '\0';
+        s_ttf_size = new_size;
+
+        return 1;
+    }
+
+    strncpy(old_file, s_ttf_file, sizeof(old_file) - 1);
+
+    old_file[sizeof(old_file) - 1] = '\0';
+    old_size = s_ttf_size;
+
+    aa_value = (s_ttf_antialias == 2) ? TT_Antialias_On : (s_ttf_antialias == 1) ? TT_Antialias_Off
+                                                                                 : TT_Antialias_Auto;
+
+    new_font = TT_OpenFont(
+        TT_FontFile, (ULONG)font_path,
+        TT_FontSize, (ULONG)new_size,
+        TT_FontWeight, TT_FontWeight_Normal,
+        TT_Antialias, (ULONG)aa_value,
+        TAG_END);
+
+    if (!new_font)
+    {
+        fprintf(stderr, "TTF: TT_OpenFont failed for '%s' at %dpt; keeping old font\n", font_path, new_size);
+        return 0;
+    }
+
+    /* Detach old font from rastport, close it */
+    if (ami_rp)
+        TT_DoneRastPort(ami_rp);
+
+    TT_CloseFont(ami_ttf_font);
+    ami_ttf_font = new_font;
+
+    /* Update stored settings */
+    strncpy(s_ttf_file, font_path, sizeof(s_ttf_file) - 1);
+    s_ttf_file[sizeof(s_ttf_file) - 1] = '\0';
+    s_ttf_size = new_size;
+
+    /* Reapply to rastport — this recalculates fw/fh/fb */
+    if (ami_rp)
+        ami_ttf_apply_to_rastport(ami_rp);
+
+    /* Resize the physical window to keep the same COLS x LINES with new font */
+    if (ami_win)
+    {
+        struct Screen *scr;
+        int bw = ami_win->BorderLeft + ami_win->BorderRight;
+        int bh = ami_win->BorderTop + ami_win->BorderBottom;
+        int want_w = COLS * fw + bw;
+        int want_h = LINES * fh + bh;
+
+        /* BorderTop already includes the title bar pixel height on a
+         * backdrop window, so no extra offset needed here */
+        int win_x = ami_win->LeftEdge;
+        int win_y = ami_win->TopEdge;
+
+        /* Clamp to screen bounds */
+        scr = ami_win->WScreen;
+        if (scr)
+        {
+            if (want_w > scr->Width)
+                want_w = scr->Width;
+
+            if (want_h > scr->Height)
+                want_h = scr->Height;
+
+            if (win_x + want_w > scr->Width)
+                win_x = scr->Width - want_w;
+
+            if (win_y + want_h > scr->Height)
+                win_y = scr->Height - want_h;
+
+            if (win_x < 0)
+                win_x = 0;
+
+            if (win_y < 0)
+                win_y = 0;
+        }
+
+        /* ChangeWindowBox is asynchronous: Intuition will send IDCMP_NEWSIZE
+         * once the resize is done and the window frame is repainted
+         * The IDCMP_NEWSIZE handler in wgetch() recalculates COLS/LINES and
+         * redraws everything. We just mark the shadow dirty so that redraw
+         * is full, then let the event loop do the rest */
+        s_shadow_dirty = 1;
+
+        if (s_shadow)
+        {
+            free(s_shadow);
+
+            s_shadow = NULL;
+            s_shadow_w = 0;
+            s_shadow_h = 0;
+        }
+
+        ChangeWindowBox(ami_win, win_x, win_y, want_w, want_h);
+    }
+
+    return 1;
 }
 
 /* Keyboard input */

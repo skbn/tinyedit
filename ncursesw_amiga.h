@@ -434,6 +434,8 @@ int amiga_set_ansi_font_name(const char *font_name);
  */
 int amiga_set_ttf(const char *ttf_file, int size, int antialias);
 int amiga_set_ttf_encoding(int use_utf8);
+int amiga_reload_ttf_size(int new_size);
+int amiga_reload_ttf(const char *font_path, int new_size);
 int amiga_change_font(int use_ansi);
 void amiga_force_redraw();
 

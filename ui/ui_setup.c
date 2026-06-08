@@ -54,6 +54,7 @@ static const SetupField st_fields[] =
         {0, "Charset", FT_CHARSET, F_OFF(charset), 0},
         {0, "Auto-wrap col", FT_INT, F_OFF(autowrap_col), 0},
         {0, "Hard wrap", FT_BOOL, F_OFF(hard_wrap), 0},
+        {0, "Line numbers", FT_BOOL, F_OFF(show_line_numbers), 0},
         {0, "Undo levels", FT_INT, F_OFF(undo_levels), 0},
 
 /* Colour/Font */
@@ -202,8 +203,18 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (ui_popup_input_wcs(fld->label, "New value (integer):", tmp, sizeof(tmp) / sizeof(wchar_t)) == 0)
         {
-            int parsed = (int)wcstol(tmp, NULL, 10);
+            int parsed;
+#ifdef PLATFORM_AMIGA
+            /* wcstol is broken on AmigaOS: convert to char* first, then use strtol */
+            char char_buf[32];
 
+            wcstombs(char_buf, tmp, sizeof(char_buf));
+            char_buf[31] = '\0';
+
+            parsed = (int)strtol(char_buf, NULL, 10);
+#else
+            parsed = (int)wcstol(tmp, NULL, 10);
+#endif
             /* Special validation for TTF_SIZE (6-96) */
             if (fld->off == F_OFF(ttf_size))
             {
@@ -231,8 +242,18 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (ui_popup_input_wcs(fld->label, "New value (integer):", tmp, sizeof(tmp) / sizeof(wchar_t)) == 0)
         {
-            int parsed = (int)wcstol(tmp, NULL, 10);
+            int parsed;
+#ifdef PLATFORM_AMIGA
+            /* wcstol is broken on AmigaOS: convert to char* first, then use strtol */
+            char char_buf[32];
 
+            wcstombs(char_buf, tmp, sizeof(char_buf));
+            char_buf[31] = '\0';
+
+            parsed = (int)strtol(char_buf, NULL, 10);
+#else
+            parsed = (int)wcstol(tmp, NULL, 10);
+#endif
             if (parsed < 0)
                 parsed = 0;
 
@@ -457,6 +478,15 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
                 ui_popup_confirm("Setup", "Save failed.");
                 continue;
             }
+
+#ifdef PLATFORM_AMIGA
+            /* If TTF_FONT or TTF_SIZE changed, reload font without restarting */
+            if (work.ttf_enabled && (strcmp(cfg->ttf_font, work.ttf_font) != 0 || cfg->ttf_size != work.ttf_size))
+            {
+                extern int amiga_reload_ttf(const char *font_path, int new_size);
+                amiga_reload_ttf(work.ttf_font, work.ttf_size);
+            }
+#endif
 
             *cfg = work;
             return 1;

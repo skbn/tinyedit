@@ -122,12 +122,13 @@ typedef struct
     char charset_out[32]; /* charset used to write the file (save) */
     char *raw_bytes;      /* original file bytes kept for live charset re-decode */
     int raw_len;
-    int hard_wrap;      /* 0=soft-wrap (default), 1=hard-wrap */
-    int wrap_col;       /* hard-wrap column (0=disabled) */
-    TeSearch search;    /* search state */
-    char status[256];   /* status bar message */
-    char cfg_path[512]; /* path to config file */
-    TeConfig cfg;       /* live config (for setup access) */
+    int hard_wrap;         /* 0=soft-wrap (default), 1=hard-wrap */
+    int wrap_col;          /* hard-wrap column (0=disabled) */
+    int show_line_numbers; /* 0=hide line numbers, 1=show line numbers */
+    TeSearch search;       /* search state */
+    char status[256];      /* status bar message */
+    char cfg_path[512];    /* path to config file */
+    TeConfig cfg;          /* live config (for setup access) */
 } TeApp;
 
 /* te_app.c */

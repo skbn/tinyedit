@@ -33,6 +33,9 @@ typedef struct
      * 1 = hard-wrap (CR inserted at autowrap_col) */
     int hard_wrap;
 
+    /* Show line numbers: 0 = disabled, 1 = enabled */
+    int show_line_numbers;
+
     /* UI font name (Amiga: "topaz.font"; unused on Linux) */
     char font[TE_CFG_STR_MAX];
 
