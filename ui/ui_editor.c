@@ -1563,9 +1563,7 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
 
     case KEY_ALT('W'):
     {
-        int new_hard_wrap = !app->hard_wrap;
-
-        if (new_hard_wrap == 1)
+        if (app->hard_wrap == 0)
         {
             /* Changing from soft to hard: ask if user wants to rewrap */
             char msg[128];
@@ -1574,14 +1572,19 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
 
             if (ui_popup_confirm("Hard Wrap", msg) == 1)
             {
+                app->hard_wrap = 1;
+                ed_set_hard_wrap(app->editor, 1);
                 ed_rewrap_document(app->editor, app->wrap_col);
-                te_status(app, "Document rewrapped to hard-wrap");
+                te_status(app, "Hard wrap: ON (rewrapped)");
             }
         }
-
-        app->hard_wrap = new_hard_wrap;
-        ed_set_hard_wrap(app->editor, new_hard_wrap);
-        te_status(app, "Hard wrap: %s", new_hard_wrap ? "ON" : "OFF");
+        else
+        {
+            /* Changing from hard to soft: just toggle without asking */
+            app->hard_wrap = 0;
+            ed_set_hard_wrap(app->editor, 0);
+            te_status(app, "Hard wrap: OFF");
+        }
 
         return 1;
     }
