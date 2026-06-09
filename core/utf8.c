@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 #include <wctype.h>
+#include <stdio.h>
 #include "utf8.h"
 
 static const uint16_t cp437_map[128] =
@@ -679,17 +680,24 @@ wchar_t *utf8_to_wcs(const char *utf8, int *out_len)
 char *wcs_to_utf8(const wchar_t *wcs, int len)
 {
     char *utf8, *p;
-    int cap, i;
+    size_t cap, i;
 
-    cap = len * 4 + 1;
-    utf8 = (char *)malloc((size_t)cap);
+    if (len < 0)
+        return NULL;
+
+    /* Check for overflow: len * 4 must fit in size_t */
+    if (len > 0 && (size_t)len > (SIZE_MAX - 1) / 4)
+        return NULL;
+
+    cap = (size_t)len * 4 + 1;
+    utf8 = (char *)malloc(cap);
 
     if (!utf8)
         return NULL;
 
     p = utf8;
 
-    for (i = 0; i < len; i++)
+    for (i = 0; i < (size_t)len; i++)
         p += utf8_encode((uint32_t)wcs[i], p);
 
     *p = '\0';

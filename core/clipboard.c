@@ -20,6 +20,12 @@
 #include <windows.h>
 #endif
 
+#ifdef PLATFORM_UNIX
+#include <unistd.h>
+#include <sys/wait.h>
+#include <ncurses.h>
+#endif
+
 static char *normalise_newlines(char *s)
 {
     /* Convert CRLF / CR to LF in place, strip trailing NULs */
@@ -222,7 +228,13 @@ static char *read_ftxt_payload(struct IOClipReq *io)
 
         if (type == ID_CHRS && size > 0)
         {
-            char *grown = (char *)realloc(out, out_len + size + 1);
+            size_t new_cap = out_len + size + 1;
+
+            /* Use exponential growth to reduce number of reallocs */
+            if (new_cap < out_len * 2)
+                new_cap = out_len * 2;
+
+            char *grown = (char *)realloc(out, new_cap);
 
             if (!grown)
             {
@@ -456,21 +468,74 @@ char *clipboard_paste()
 
 static int try_copy_cmd(const char *cmd, const char *data)
 {
-    FILE *fp;
-    int result = -1;
+    size_t len;
+    char tmp_file[256];
+    int tmp_fd;
+    FILE *tmp_fp;
+    pid_t pid;
+    int status;
 
-    fp = popen(cmd, "w");
+    /* Create temporary file with mkstemp */
+    snprintf(tmp_file, sizeof(tmp_file), "/tmp/tinyedit_clipboard_XXXXXX");
+    tmp_fd = mkstemp(tmp_file);
 
-    if (!fp)
+    if (tmp_fd == -1)
         return -1;
 
-    if (fputs(data, fp) != EOF)
-        result = 0;
+    tmp_fp = fdopen(tmp_fd, "w");
 
-    if (pclose(fp) != 0)
-        result = -1;
+    if (!tmp_fp)
+    {
+        close(tmp_fd);
+        return -1;
+    }
 
-    return result;
+    len = strlen(data);
+
+    if (fwrite(data, 1, len, tmp_fp) != len)
+    {
+        fclose(tmp_fp);
+        unlink(tmp_file);
+        return -1;
+    }
+
+    fclose(tmp_fp);
+
+    /* Save ncurses state before fork */
+    def_prog_mode();
+    endwin();
+
+    /* Fork and exec */
+    pid = fork();
+
+    if (pid == -1)
+    {
+        reset_prog_mode();
+        refresh();
+        unlink(tmp_file);
+        return -1;
+    }
+
+    if (pid == 0)
+    {
+        /* Child process - redirect file to stdin of clipboard tool */
+        char cmd_with_file[512];
+
+        snprintf(cmd_with_file, sizeof(cmd_with_file), "%s < %s", cmd, tmp_file);
+        execl("/bin/sh", "sh", "-c", cmd_with_file, (char *)NULL);
+        _exit(1);
+    }
+
+    /* Parent process - wait for child */
+    waitpid(pid, &status, 0);
+
+    /* Restore ncurses state */
+    reset_prog_mode();
+    refresh();
+
+    unlink(tmp_file);
+
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
 }
 
 int clipboard_copy(const char *utf8)

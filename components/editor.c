@@ -1207,8 +1207,8 @@ static wchar_t *block_extract_wcs(const Ed *ed, int *out_len)
     int r2;
     int c2;
     int i;
-    int need = 0;
-    int pos = 0;
+    size_t need = 0;
+    size_t pos = 0;
     wchar_t *buf;
 
     block_range(ed, &r1, &c1, &r2, &c2);
@@ -1223,13 +1223,22 @@ static wchar_t *block_extract_wcs(const Ed *ed, int *out_len)
         if (e > ed->lines[i]->len)
             e = ed->lines[i]->len;
 
-        need += (e > s) ? (e - s) : 0;
+        need += (e > s) ? (size_t)(e - s) : 0;
 
         if (i < r2)
             need++;
     }
 
-    buf = (wchar_t *)malloc((size_t)(need + 1) * sizeof(wchar_t));
+    /* Check for overflow before multiplication */
+    if (need > (SIZE_MAX - 1) / sizeof(wchar_t))
+    {
+        if (out_len)
+            *out_len = 0;
+
+        return NULL;
+    }
+
+    buf = (wchar_t *)malloc((need + 1) * sizeof(wchar_t));
 
     if (!buf)
     {
