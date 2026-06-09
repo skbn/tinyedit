@@ -1380,22 +1380,24 @@ int ed_block_delete(Ed *ed)
 
 int ed_block_paste(Ed *ed)
 {
-    wchar_t *kb;
-    int i;
+    char *utf8;
 
     if (!ed || !ed->killbuf || !ed->killlen)
         return -1;
 
-    ed_save_undo(ed);
-    kb = ed->killbuf;
+    utf8 = wcs_to_utf8(ed->killbuf, ed->killlen);
 
-    for (i = 0; i < ed->killlen; i++)
+    if (!utf8)
+        return -1;
+
+    if (ed_paste_text_with_undo(ed, utf8) != 0)
     {
-        if (kb[i] == L'\n')
-            ed_enter(ed);
-        else
-            ed_insert_char(ed, kb[i]);
+        free(utf8);
+
+        return -1;
     }
+
+    free(utf8);
 
     return 0;
 }
