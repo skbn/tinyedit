@@ -77,7 +77,7 @@ static const char *HELP_LINES[] =
         "    Ctrl+N           New file (clears editor)",
         "    F2 / Ctrl+S      Save",
         "    ESC / F10        Quit (confirm if modified)",
-        "    F1 / Ctrl+I      This help",
+        "    F1 / Alt+Y       This help",
         "",
         "  Other:",
         "    F4 / Alt+S       Setup / configuration",
@@ -1089,6 +1089,85 @@ static char *collect_bracketed_paste(void)
     return out;
 }
 
+/* Detect rapid paste (fallback for terminals
+ * without bracketed paste support) */
+static char *collect_rapid_paste(void)
+{
+    wchar_t *wbuf = NULL;
+    int wlen = 0, wcap = 0;
+    char *out;
+    const int MAX_CHARS = 10; /* If 10+ chars arrive instantly, it's a paste not manual typing */
+
+    /* Read first character */
+    wint_t wch;
+    int wrc = wrapper_read_key(&wch);
+
+    if (wrc == ERR || wrc == KEY_CODE_YES)
+        return NULL;
+
+    /* Add first character */
+    wbuf = (wchar_t *)malloc(256 * sizeof(wchar_t));
+
+    if (!wbuf)
+        return NULL;
+
+    wcap = 256;
+    wbuf[wlen++] = (wchar_t)wch;
+
+    /* Check if more characters are available (rapid paste detection) */
+    nodelay(stdscr, TRUE);
+
+    while (wlen < MAX_CHARS)
+    {
+        wint_t next_wch;
+        int next_wrc = get_wch(&next_wch);
+
+        /* No more characters: end of rapid paste */
+        if (next_wrc == ERR)
+            break;
+
+        /* Special key: not a paste */
+        if (next_wrc == KEY_CODE_YES)
+            break;
+
+        /* Add to buffer */
+        if (wlen + 1 >= wcap)
+        {
+            int ncap = wcap * 2;
+            wchar_t *nb = (wchar_t *)realloc(wbuf, (size_t)ncap * sizeof(wchar_t));
+
+            if (!nb)
+            {
+                free(wbuf);
+
+                nodelay(stdscr, FALSE);
+
+                return NULL;
+            }
+
+            wbuf = nb;
+            wcap = ncap;
+        }
+
+        wbuf[wlen++] = (wchar_t)next_wch;
+    }
+
+    nodelay(stdscr, FALSE);
+
+    /* If only 1-2 characters, probably manual typing */
+    if (wlen < 3)
+    {
+        free(wbuf);
+        return NULL;
+    }
+
+    /* Convert to UTF-8 */
+    out = wcs_to_utf8(wbuf, wlen);
+    free(wbuf);
+
+    return out;
+}
+
 /* Save */
 static int do_save(TeApp *app)
 {
@@ -1234,7 +1313,7 @@ static int do_save(TeApp *app)
 static int handle_function_keys(TeApp *app, int ch, int is_key)
 {
     /* F1 / ? : help */
-    if ((is_key && ch == KEY_F(1)) || (!is_key && ch == CTRL('I')))
+    if ((is_key && ch == KEY_F(1)) || (is_key && ch == KEY_ALT('Y')))
     {
         ui_popup_help("tinyedit Help", HELP_LINES, HELP_N);
         return 1;
@@ -1856,7 +1935,8 @@ void ui_editor_run(TeApp *app)
                     }
                 }
 
-                ed_paste_text(app->editor, to_insert);
+                ed_paste_text_with_undo(app->editor, to_insert);
+
                 clear_search_highlights(app);
                 soft_reset_desired();
 
@@ -1968,6 +2048,54 @@ void ui_editor_run(TeApp *app)
         }
         else /* printable / control chars */
         {
+            /* Try rapid paste detection first (fallback for terminals
+             * without bracketed paste) */
+            if (wch >= 0x20 && wch != 127)
+            {
+                char *rapid_buf = collect_rapid_paste();
+
+                if (rapid_buf)
+                {
+                    /* Rapid paste detected - process as block */
+                    char *wrapped = NULL;
+                    const char *to_insert = rapid_buf;
+                    int reported_len;
+
+                    ed_save_undo(app->editor);
+
+                    /* HARD-WRAP only: reflow pasted text; soft-wrap inserts verbatim */
+                    if (app->hard_wrap)
+                    {
+                        int pw = editor_eff_wrap(app);
+
+                        if (pw > 0)
+                        {
+                            wrapped = wrap_paste_text(rapid_buf, pw);
+
+                            if (wrapped)
+                                to_insert = wrapped;
+                        }
+                    }
+
+                    ed_paste_text_with_undo(app->editor, to_insert);
+
+                    clear_search_highlights(app);
+                    soft_reset_desired();
+
+                    s_soft_vtop = 0;
+                    reported_len = (int)strlen(to_insert);
+
+                    te_status(app, "Pasted %d bytes", reported_len);
+
+                    free(rapid_buf);
+
+                    if (wrapped)
+                        free(wrapped);
+
+                    continue;
+                }
+            }
+
             if (handle_editing_keys(app, ch, wch, soft, width, body_rows, &preserve_desired))
             {
                 if (!preserve_desired)

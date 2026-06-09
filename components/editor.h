@@ -65,7 +65,8 @@ int ed_delete_word_left(Ed *ed);
 int ed_delete_word_right(Ed *ed);
 int ed_duplicate_line(Ed *ed);
 int ed_insert_tab(Ed *ed, int tabstop);
-int ed_paste_text(Ed *ed, const char *utf8_text); /* UTF-8 in */
+int ed_paste_text(Ed *ed, const char *utf8_text);           /* UTF-8 in */
+int ed_paste_text_with_undo(Ed *ed, const char *utf8_text); /* UTF-8 in, single undo record */
 
 /* Block operations */
 void ed_block_anchor(Ed *ed);
@@ -83,6 +84,7 @@ void ed_set_undo_levels(Ed *ed, int levels);
 int ed_undo_depth(const Ed *ed);
 int ed_redo(Ed *ed);
 int ed_redo_depth(const Ed *ed);
+void ed_set_undo_snapshot_mode(Ed *ed, int mode);
 
 /* Mode */
 void ed_toggle_insert(Ed *ed);

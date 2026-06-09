@@ -223,6 +223,9 @@ int main(int argc, char **argv)
 
     if (define_key("\033[1;5C", KEY_CRIGHT) != OK)
         fprintf(stderr, "Warning: define_key(Ctrl+Right) failed\n");
+
+    if (define_key("\033y", KEY_ALT('Y')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Y) failed\n");
 #endif
 
     curs_set(1);

@@ -1111,42 +1111,6 @@ int ed_insert_tab(Ed *ed, int ts)
     return 0;
 }
 
-int ed_paste_text(Ed *ed, const char *utf8_text)
-{
-    const char *p;
-    uint32_t cp;
-
-    if (!ed || !utf8_text)
-        return -1;
-
-    p = utf8_text;
-
-    while (*p)
-    {
-        if (*p == '\r')
-        {
-            p++;
-            continue;
-        }
-
-        if (*p == '\n')
-        {
-            ed_enter(ed);
-            p++;
-
-            continue;
-        }
-
-        cp = utf8_next(&p);
-
-        if (cp > 0)
-            ed_insert_char(ed, (wchar_t)cp);
-    }
-
-    ed_ensure_visible(ed);
-    return 0;
-}
-
 /* Block operations */
 void ed_block_anchor(Ed *ed)
 {
@@ -2076,6 +2040,14 @@ void ed_set_undo_levels(Ed *ed, int levels)
         memmove(&ed->redo_stack[0], &ed->redo_stack[1], (size_t)(ed->redo_top - 1) * sizeof(UndoGroup));
         ed->redo_top--;
     }
+}
+
+void ed_set_undo_snapshot_mode(Ed *ed, int mode)
+{
+    if (!ed)
+        return;
+
+    ed->undo_snapshot_mode = mode;
 }
 
 int ed_undo_depth(const Ed *ed)
@@ -3215,4 +3187,182 @@ int search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int who
     }
 
     return count;
+}
+
+int ed_paste_text(Ed *ed, const char *utf8_text)
+{
+    const char *p;
+    uint32_t cp;
+
+    if (!ed || !utf8_text)
+        return -1;
+
+    p = utf8_text;
+
+    while (*p)
+    {
+        if (*p == '\r')
+        {
+            p++;
+            continue;
+        }
+
+        if (*p == '\n')
+        {
+            ed_enter(ed);
+            p++;
+
+            continue;
+        }
+
+        cp = utf8_next(&p);
+
+        if (cp > 0)
+            ed_insert_char(ed, (wchar_t)cp);
+    }
+
+    ed_ensure_visible(ed);
+
+    return 0;
+}
+
+int ed_paste_text_with_undo(Ed *ed, const char *utf8_text)
+{
+    char *snapshot_before = NULL;
+    char *snapshot_after = NULL;
+    int cursor_row_before, cursor_col_before;
+    int cursor_row_after, cursor_col_after;
+    EdInfo info;
+    UndoGroup *g;
+
+    if (!ed || !utf8_text)
+        return -1;
+
+    /* Save state before paste */
+    ed_get_info(ed, &info);
+
+    cursor_row_before = info.row;
+    cursor_col_before = info.col;
+    snapshot_before = ed_to_string(ed);
+
+    if (!snapshot_before)
+        return -1;
+
+    /* Enable snapshot mode to prevent individual undo records */
+    ed->undo_snapshot_mode = 1;
+
+    /* Paste the text */
+    if (ed_paste_text(ed, utf8_text) != 0)
+    {
+        ed->undo_snapshot_mode = 0;
+
+        free(snapshot_before);
+
+        return -1;
+    }
+
+    /* Save state after paste */
+    ed_get_info(ed, &info);
+
+    cursor_row_after = info.row;
+    cursor_col_after = info.col;
+    snapshot_after = ed_to_string(ed);
+
+    /* Disable snapshot mode */
+    ed->undo_snapshot_mode = 0;
+
+    if (!snapshot_after)
+    {
+        free(snapshot_before);
+
+        return -1;
+    }
+
+    /* Push snapshot to undo stack */
+    redo_clear(ed);
+
+    if (undo_open_group(ed) != 0)
+    {
+        free(snapshot_before);
+        free(snapshot_after);
+
+        return -1;
+    }
+
+    if (ed->undo_top <= 0)
+    {
+        free(snapshot_before);
+        free(snapshot_after);
+
+        return -1;
+    }
+
+    g = &ed->undo_stack[ed->undo_top - 1];
+    g->cur_row = cursor_row_before;
+    g->cur_col = cursor_col_before;
+    g->end_row = cursor_row_after;
+    g->end_col = cursor_col_after;
+
+    if (g->count >= g->cap)
+    {
+        int nc = (g->cap > 0) ? (g->cap * 2) : 4;
+        UndoOp *t = (UndoOp *)realloc(g->ops, (size_t)nc * sizeof(UndoOp));
+
+        if (!t)
+        {
+            free(snapshot_before);
+            free(snapshot_after);
+            return -1;
+        }
+
+        g->ops = t;
+        g->cap = nc;
+    }
+
+    g->ops[g->count].type = OP_SNAPSHOT;
+    g->ops[g->count].row = cursor_row_after;
+    g->ops[g->count].col = cursor_col_after;
+    g->ops[g->count].len = 0;
+    g->ops[g->count].join_col = 0;
+    g->ops[g->count].text = NULL;
+    g->ops[g->count].utf8_snapshot = snapshot_before;
+    g->ops[g->count].hard_wrap_mode = ed->hard_wrap;
+    g->count++;
+    ed->undo_open = 0;
+
+    /* Push snapshot to redo stack */
+    if (undo_stack_make_room(&ed->redo_stack, &ed->redo_top, &ed->redo_cap, ed->redo_max) == 0)
+    {
+        g = &ed->redo_stack[ed->redo_top];
+        g->ops = (UndoOp *)malloc(sizeof(UndoOp));
+
+        if (g->ops)
+        {
+            g->count = 1;
+            g->cap = 1;
+            g->cur_row = cursor_row_before;
+            g->cur_col = cursor_col_before;
+            g->end_row = cursor_row_after;
+            g->end_col = cursor_col_after;
+            g->ops[0].type = OP_SNAPSHOT;
+            g->ops[0].row = cursor_row_after;
+            g->ops[0].col = cursor_col_after;
+            g->ops[0].len = 0;
+            g->ops[0].join_col = 0;
+            g->ops[0].text = NULL;
+            g->ops[0].utf8_snapshot = snapshot_after;
+            g->ops[0].hard_wrap_mode = ed->hard_wrap;
+            ed->redo_top++;
+        }
+        else
+        {
+            free(snapshot_after);
+        }
+    }
+    else
+    {
+        free(snapshot_after);
+    }
+
+    return 0;
 }
