@@ -520,7 +520,7 @@ int te_cfg_load(TeConfig *cfg, const char *path)
                 cfg->cursor_color_rgb[sizeof(cfg->cursor_color_rgb) - 1] = '\0';
                 cfg->cursor_color = -1;
             }
-            else if (val[0] >= '0' && val[0] <= '9')
+            else if ((val[0] >= '0' && val[0] <= '9') || val[0] == '-')
             {
                 cfg->cursor_color = atoi(val);
                 cfg->cursor_color_rgb[0] = '\0';
@@ -735,16 +735,27 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
     if (cfg->cursor_color_rgb[0])
         fprintf(f, "CURSORCOLOR %s\n\n", cfg->cursor_color_rgb);
-    else if (cfg->cursor_color >= 0)
-        fprintf(f, "CURSORCOLOR %d\n\n", cfg->cursor_color);
     else
-        fprintf(f, "# CURSORCOLOR -1\n\n");
+        fprintf(f, "CURSORCOLOR %d\n\n", cfg->cursor_color);
 
-    fprintf(f, "# Color pairs: COLOR <name> <fg> <bg>\n");
-    fprintf(f, "# Names: NORMAL STATUS TITLEBAR POPUP POPUPSEL BORDER SEARCHMATCH\n");
-    fprintf(f, "# Colors: black red green yellow blue magenta cyan white\n");
-    fprintf(f, "#         brightblack brightred brightgreen brightyellow brightblue\n");
-    fprintf(f, "#         brightmagenta brightcyan brightwhite\n\n");
+    fprintf(f, "# COLOR -- Customize color pairs. Syntax: COLOR <pair> <fg> <bg>\n");
+    fprintf(f, "#          <pair> is one of: NORMAL, STATUS, TITLEBAR, POPUP, POPUPSEL,\n");
+    fprintf(f, "#          BORDER, SEARCHMATCH\n");
+    fprintf(f, "#          <fg> and <bg> are color names: black, red, green, yellow,\n");
+    fprintf(f, "#          blue, magenta, cyan, white (these will use your COLORMAP if defined)\n");
+    fprintf(f, "# Default: built-in palette (see below for defaults)\n");
+    fprintf(f, "#COLOR TAGLINE cyan black\n");
+    fprintf(f, "#COLOR QUOTE1 green black\n");
+    fprintf(f, "#COLOR STATUS black white\n\n");
+
+    fprintf(f, "# Built-in default color palette (these are used if you do not override):\n");
+    fprintf(f, "#   NORMAL       white on black\n");
+    fprintf(f, "#   STATUS       black on white\n");
+    fprintf(f, "#   TITLEBAR     black on cyan\n");
+    fprintf(f, "#   POPUP        white on blue\n");
+    fprintf(f, "#   POPUPSEL     black on cyan\n");
+    fprintf(f, "#   BORDER       cyan on black\n");
+    fprintf(f, "#   SEARCH_MATCH black on yellow\n\n");
 
     for (i = 1; i < TE_CFG_COLOR_MAX; i++)
     {

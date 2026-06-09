@@ -34,7 +34,8 @@ typedef enum
     FT_BOOL,     /* yes/no toggle */
     FT_COLORMAP, /* integer 0-255, edit also marks color_map_initialized */
     FT_CHARSET,  /* cycle through available charsets */
-    FT_CYCLE     /* cycle through predefined string options */
+    FT_CYCLE,    /* cycle through predefined string options */
+    FT_COLORPAIR /* color pair configuration (fg/bg) */
 } FieldType;
 
 typedef struct
@@ -76,6 +77,13 @@ static const SetupField st_fields[] =
         {1, "Pen 5 (magenta)", FT_COLORMAP, F_OFF(color_map) + 5 * sizeof(int), 0},
         {1, "Pen 6 (cyan)", FT_COLORMAP, F_OFF(color_map) + 6 * sizeof(int), 0},
         {1, "Pen 7 (white)", FT_COLORMAP, F_OFF(color_map) + 7 * sizeof(int), 0},
+        {1, "Normal", FT_COLORPAIR, F_OFF(color_fg) + COL_NORMAL * sizeof(int), 0},
+        {1, "Status", FT_COLORPAIR, F_OFF(color_fg) + COL_STATUS * sizeof(int), 0},
+        {1, "Titlebar", FT_COLORPAIR, F_OFF(color_fg) + COL_TITLEBAR * sizeof(int), 0},
+        {1, "Popup", FT_COLORPAIR, F_OFF(color_fg) + COL_POPUP * sizeof(int), 0},
+        {1, "Popup Sel", FT_COLORPAIR, F_OFF(color_fg) + COL_POPUP_SEL * sizeof(int), 0},
+        {1, "Border", FT_COLORPAIR, F_OFF(color_fg) + COL_BORDER * sizeof(int), 0},
+        {1, "Search", FT_COLORPAIR, F_OFF(color_fg) + COL_SEARCH_MATCH * sizeof(int), 0},
         {1, "Cursor color", FT_INT, F_OFF(cursor_color), 0},
         {1, "Default BG", FT_INT, F_OFF(default_bg_color), 0},
 };
@@ -144,6 +152,123 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
         }
 
         snprintf(buf, bufsz, "%s", label);
+        break;
+    }
+    case FT_COLORPAIR:
+    {
+        int pair_index = (fld->off - F_OFF(color_fg)) / sizeof(int);
+        int fg = *(const int *)(base + fld->off);
+        int bg = *(const int *)(base + F_OFF(color_bg) + pair_index * sizeof(int));
+
+        /* Color names for display */
+        const char *fg_name = "unknown";
+        const char *bg_name = "unknown";
+
+        switch (fg)
+        {
+        case 0:
+            fg_name = "black";
+            break;
+        case 1:
+            fg_name = "red";
+            break;
+        case 2:
+            fg_name = "green";
+            break;
+        case 3:
+            fg_name = "yellow";
+            break;
+        case 4:
+            fg_name = "blue";
+            break;
+        case 5:
+            fg_name = "magenta";
+            break;
+        case 6:
+            fg_name = "cyan";
+            break;
+        case 7:
+            fg_name = "white";
+            break;
+        case 8:
+            fg_name = "br-black";
+            break;
+        case 9:
+            fg_name = "br-red";
+            break;
+        case 10:
+            fg_name = "br-green";
+            break;
+        case 11:
+            fg_name = "br-yellow";
+            break;
+        case 12:
+            fg_name = "br-blue";
+            break;
+        case 13:
+            fg_name = "br-magenta";
+            break;
+        case 14:
+            fg_name = "br-cyan";
+            break;
+        case 15:
+            fg_name = "br-white";
+            break;
+        }
+
+        switch (bg)
+        {
+        case 0:
+            bg_name = "black";
+            break;
+        case 1:
+            bg_name = "red";
+            break;
+        case 2:
+            bg_name = "green";
+            break;
+        case 3:
+            bg_name = "yellow";
+            break;
+        case 4:
+            bg_name = "blue";
+            break;
+        case 5:
+            bg_name = "magenta";
+            break;
+        case 6:
+            bg_name = "cyan";
+            break;
+        case 7:
+            bg_name = "white";
+            break;
+        case 8:
+            bg_name = "br-black";
+            break;
+        case 9:
+            bg_name = "br-red";
+            break;
+        case 10:
+            bg_name = "br-green";
+            break;
+        case 11:
+            bg_name = "br-yellow";
+            break;
+        case 12:
+            bg_name = "br-blue";
+            break;
+        case 13:
+            bg_name = "br-magenta";
+            break;
+        case 14:
+            bg_name = "br-cyan";
+            break;
+        case 15:
+            bg_name = "br-white";
+            break;
+        }
+
+        snprintf(buf, bufsz, "%s on %s", fg_name, bg_name);
         break;
     }
     }
@@ -310,6 +435,37 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         break;
     }
+    case FT_COLORPAIR:
+    {
+        int pair_index = (fld->off - F_OFF(color_fg)) / sizeof(int);
+        int *fg = (int *)(base + fld->off);
+        int *bg = (int *)(base + F_OFF(color_bg) + pair_index * sizeof(int));
+
+        /* Color names and their values */
+        static const char *color_names[] =
+            {
+                "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+                "bright black", "bright red", "bright green", "bright yellow",
+                "bright blue", "bright magenta", "bright cyan", "bright white"};
+
+        /* Select foreground color */
+        int fg_result = ui_popup_list("Select Foreground", color_names, 16, *fg);
+
+        if (fg_result < 0)
+            return; /* User canceled */
+
+        /* Select background color */
+        int bg_result = ui_popup_list("Select Background", color_names, 16, *bg);
+
+        if (bg_result < 0)
+            return; /* User canceled */
+
+        /* Apply colors only if both selections were confirmed */
+        *fg = fg_result;
+        *bg = bg_result;
+
+        break;
+    }
     }
 }
 
@@ -428,7 +584,15 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
             if (valw < 1)
                 valw = 1;
 
+#ifdef PLATFORM_AMIGA
+            /* Workaround for AmigaOS mvprintw bug with "0" value */
+            if (strcmp(val, "0") == 0)
+                mvprintw(row, 2, "%-20s : %s", st_fields[i].label, "0");
+            else
+                mvprintw(row, 2, "%-20s : %-.*s", st_fields[i].label, valw, val);
+#else
             mvprintw(row, 2, "%-20s : %-.*s", st_fields[i].label, valw, val);
+#endif
 
             attroff(COLOR_PAIR(COL_POPUP_SEL));
             attroff(COLOR_PAIR(COL_NORMAL));
@@ -437,9 +601,15 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
             c++;
         }
 
-        if (nfields > visible_fields && scroll_offset + visible_fields < nfields)
+        if (nfields > visible_fields)
         {
-            mvprintw(LINES - 2, COLS - 2, "↓");
+            /* Show up arrow if not at top */
+            if (scroll_offset > 0)
+                mvprintw(LINES - 2, COLS - 3, "↑");
+
+            /* Show down arrow if not at bottom */
+            if (scroll_offset + visible_fields < nfields)
+                mvprintw(LINES - 2, COLS - 2, "↓");
         }
 
         /* Status bar */
@@ -489,6 +659,10 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
 #endif
 
             *cfg = work;
+
+            /* Reinitialize colors with new configuration */
+            te_init_colors(cfg);
+
             return 1;
         }
 
@@ -532,6 +706,49 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
                 if (sel >= scroll_offset + visible_fields)
                     scroll_offset = sel - visible_fields + 1;
             }
+
+            continue;
+        }
+
+        if (key == KEY_HOME || key == CTRL('B'))
+        {
+            sel = 0;
+            scroll_offset = 0;
+            continue;
+        }
+
+        if (key == KEY_END || key == CTRL('E'))
+        {
+            sel = nfields - 1;
+
+            if (sel >= scroll_offset + visible_fields)
+                scroll_offset = sel - visible_fields + 1;
+
+            continue;
+        }
+
+        if (key == KEY_PPAGE || key == CTRL('U'))
+        {
+            sel -= visible_fields;
+
+            if (sel < 0)
+                sel = 0;
+
+            if (sel < scroll_offset)
+                scroll_offset = sel;
+
+            continue;
+        }
+
+        if (key == KEY_NPAGE || key == CTRL('D'))
+        {
+            sel += visible_fields;
+
+            if (sel >= nfields)
+                sel = nfields - 1;
+
+            if (sel >= scroll_offset + visible_fields)
+                scroll_offset = sel - visible_fields + 1;
 
             continue;
         }

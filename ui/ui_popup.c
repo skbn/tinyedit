@@ -170,7 +170,6 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
 
         standend();
         ui_draw_popup_frame(y, x, h, w, title ? title : "Select");
-        attron(COLOR_PAIR(COL_POPUP));
 
         for (row = 0; row < visible && top + row < count; row++)
         {
@@ -180,6 +179,8 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
 
             if (idx == sel)
                 attron(COLOR_PAIR(COL_POPUP_SEL));
+            else
+                attron(COLOR_PAIR(COL_POPUP));
 
             move(y + 2 + row, x + 2);
 
@@ -190,6 +191,8 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
 
             if (idx == sel)
                 attroff(COLOR_PAIR(COL_POPUP_SEL));
+            else
+                attroff(COLOR_PAIR(COL_POPUP));
         }
 
         /* Scroll indicator */
@@ -644,6 +647,28 @@ int ui_popup_charset_pair(const char *view_in, const char *save_in, char *view_o
             sel[row] = (sel[row] - 1 + n_opts) % n_opts;
         else if (ch == KEY_RIGHT || ch == ' ')
             sel[row] = (sel[row] + 1) % n_opts;
+        else if (ch == KEY_HOME || ch == CTRL('B'))
+        {
+            sel[row] = 0;
+        }
+        else if (ch == KEY_END || ch == CTRL('E'))
+        {
+            sel[row] = n_opts - 1;
+        }
+        else if (ch == KEY_PPAGE || ch == CTRL('U'))
+        {
+            sel[row] -= 10;
+
+            if (sel[row] < 0)
+                sel[row] = 0;
+        }
+        else if (ch == KEY_NPAGE || ch == CTRL('D'))
+        {
+            sel[row] += 10;
+
+            if (sel[row] >= n_opts)
+                sel[row] = n_opts - 1;
+        }
     }
 
     if (view_out && view_outsz > 0)
@@ -927,6 +952,17 @@ void ui_popup_help(const char *title, const char *const *lines, int n)
 
             if (top + visible >= n)
                 top = n - visible;
+
+            if (top < 0)
+                top = 0;
+        }
+        else if (rc == KEY_CODE_YES && wch == KEY_HOME || wch == CTRL('B'))
+        {
+            top = 0;
+        }
+        else if (rc == KEY_CODE_YES && wch == KEY_END || wch == CTRL('E'))
+        {
+            top = n - visible;
 
             if (top < 0)
                 top = 0;

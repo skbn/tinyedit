@@ -29,6 +29,49 @@ static int s_soft_desired_vcol = -1;
 /* Forward declarations for static functions */
 static int ui_paste_char_width(wchar_t ch);
 
+#if defined(PLATFORM_AMIGA) && !defined(wcswidth)
+/* wcswidth implementation based on Markus Kuhn's wcwidth.c
+ * https://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c
+ * Returns number of column positions needed for wide-character string
+ * Compatible with POSIX.1-2001 standard for Unicode terminal display
+ */
+int wcswidth(const wchar_t *wcs, size_t n)
+{
+    int width = 0;
+    size_t i;
+
+    for (i = 0; i < n && wcs[i] != L'\0'; i++)
+    {
+        /* Based on East Asian Width properties:
+         * Wide (W) and Full-width (F) characters = 2 columns
+         * Emoji ranges = 2 columns (most modern terminals)
+         * All other printable characters = 1 column
+         * Implementation follows Unicode TR#11 and POSIX standards
+         */
+        if ((wcs[i] >= 0x1100 && wcs[i] <= 0x115F) ||   /* Hangul Jamo */
+            (wcs[i] >= 0x2E80 && wcs[i] <= 0xA4CF) ||   /* CJK...Yi */
+            (wcs[i] >= 0xAC00 && wcs[i] <= 0xD7A3) ||   /* Hangul Syllables */
+            (wcs[i] >= 0xF900 && wcs[i] <= 0xFAFF) ||   /* CJK Compatibility */
+            (wcs[i] >= 0xFE30 && wcs[i] <= 0xFE6F) ||   /* CJK Compatibility Forms */
+            (wcs[i] >= 0xFF00 && wcs[i] <= 0xFF60) ||   /* Fullwidth Forms */
+            (wcs[i] >= 0x1F300 && wcs[i] <= 0x1F5FF) || /* Misc Symbols & Pictographs */
+            (wcs[i] >= 0x1F600 && wcs[i] <= 0x1F64F) || /* Emoticons */
+            (wcs[i] >= 0x1F680 && wcs[i] <= 0x1F6FF) || /* Transport & Map */
+            (wcs[i] >= 0x1F700 && wcs[i] <= 0x1F77F) || /* Alchemical Symbols */
+            (wcs[i] >= 0x1F780 && wcs[i] <= 0x1F7FF) || /* Geometric Shapes Extended */
+            (wcs[i] >= 0x1F800 && wcs[i] <= 0x1F8FF) || /* Supplemental Arrows-C */
+            (wcs[i] >= 0x1F900 && wcs[i] <= 0x1F9FF) || /* Supplemental Symbols */
+            (wcs[i] >= 0x20000 && wcs[i] <= 0x2FFFD) || /* Supplementary Planes */
+            (wcs[i] >= 0x30000 && wcs[i] <= 0x3FFFD))   /* More Supplementary */
+            width += 2;
+        else
+            width += 1;
+    }
+
+    return width;
+}
+#endif
+
 /* Helper functions that were static in ui_editor.c */
 void clear_search_highlights(TeApp *app)
 {
@@ -680,7 +723,18 @@ int ui_editor_goto_line(TeApp *app)
 
     if (ui_popup_input_wcs("Go to line", "Line number:", buf, sizeof(buf) / sizeof(wchar_t)) == 0 && buf[0])
     {
-        int n = (int)wcstol(buf, NULL, 10);
+        int n;
+#ifdef PLATFORM_AMIGA
+        /* wcstol is broken on AmigaOS: convert to char* first, then use strtol */
+        char char_buf[16];
+
+        wcstombs(char_buf, buf, sizeof(char_buf));
+        char_buf[sizeof(char_buf) - 1] = '\0';
+
+        n = (int)strtol(char_buf, NULL, 10);
+#else
+        n = (int)wcstol(buf, NULL, 10);
+#endif
 
         if (n >= 1)
         {

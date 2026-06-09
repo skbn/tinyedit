@@ -46,6 +46,9 @@ typedef struct
     int attrs;
 } Cell;
 
+/* Macro helper para acceder a celdas */
+#define CELL(win, r, c) (&(win)->cells[(r) * (win)->_maxx + (c)])
+
 typedef struct _win_st
 {
     int _cury, _curx; /* Cursor position */

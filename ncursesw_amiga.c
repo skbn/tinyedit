@@ -120,13 +120,88 @@ static Cell *s_shadow = NULL;
 static int s_shadow_w = 0, s_shadow_h = 0;
 static int s_shadow_dirty = 1; /* force full redraw on next render_all */
 
+#define SHADOW_BLEED_CELLS 2
+#define SHADOW_DIRTY_MAX_COLS 1024
+static unsigned char s_dirty_row[SHADOW_DIRTY_MAX_COLS];
+static unsigned char s_dirty_tmp[SHADOW_DIRTY_MAX_COLS];
+
+/* Compute dirty bitmap for row r into s_dirty_row[0..COLS-1]
+ * Returns 1 if any cell in the row is dirty, 0 otherwise */
+static int compute_dirty_row(int r)
+{
+    int c;
+    int any = 0;
+    int cols = COLS;
+    int countdown = 0;
+
+    if (cols > SHADOW_DIRTY_MAX_COLS)
+        cols = SHADOW_DIRTY_MAX_COLS;
+
+    /* Pass 1: raw per-cell diff vs shadow */
+    if (!s_shadow || s_shadow_dirty)
+    {
+        for (c = 0; c < cols; c++)
+            s_dirty_tmp[c] = 1;
+
+        any = (cols > 0);
+    }
+    else
+    {
+        Cell *row_sh = &s_shadow[r * COLS];
+
+        for (c = 0; c < cols; c++)
+        {
+            Cell *cc = CELL(stdscr, r, c);
+            int d = (cc->ch != row_sh[c].ch) || (cc->attrs != row_sh[c].attrs);
+
+            s_dirty_tmp[c] = (unsigned char)d;
+            any |= d;
+        }
+    }
+
+    if (!any)
+    {
+        for (c = 0; c < cols; c++)
+            s_dirty_row[c] = 0;
+
+        return 0;
+    }
+
+    /* Pass 2: propagate dirty by ±SHADOW_BLEED_CELLS using a sweep with a
+     * running countdown — O(cols), no inner loop */
+    for (c = 0; c < cols; c++)
+    {
+        if (s_dirty_tmp[c])
+            countdown = SHADOW_BLEED_CELLS + 1;
+
+        s_dirty_row[c] = (unsigned char)(countdown > 0);
+
+        if (countdown > 0)
+            countdown--;
+    }
+
+    countdown = 0;
+
+    for (c = cols - 1; c >= 0; c--)
+    {
+        if (s_dirty_tmp[c])
+            countdown = SHADOW_BLEED_CELLS + 1;
+
+        if (countdown > 0)
+        {
+            s_dirty_row[c] = 1;
+            countdown--;
+        }
+    }
+
+    return 1;
+}
+
 static UBYTE s_key_queue[16];
 static int s_key_queue_len = 0;
 static int s_key_queue_pos = 0;
 
 /* Cell helpers */
-#define CELL(win, r, c) (&(win)->cells[(r) * (win)->_maxx + (c)])
-
 static int px(int col) { return bx + col * fw; }
 
 static int py(int row) { return by + row * fh; }
@@ -481,6 +556,11 @@ static void render_all()
 
     for (r = 0; r < LINES; r++)
     {
+        /* Compute dirty bitmap with bleed propagation for this row. If nothing
+         * is dirty, skip the row entirely */
+        if (!compute_dirty_row(r))
+            continue;
+
         c = 0;
 
         while (c < COLS)
@@ -492,19 +572,14 @@ static void render_all()
 
             cell = CELL(stdscr, r, c);
 
-            /* Skip unchanged cells (shadow diff) */
-            if (s_shadow && !s_shadow_dirty)
+            /* Skip cells that are clean after bleed propagation */
+            if (!s_dirty_row[c])
             {
-                Cell *sh = &s_shadow[r * COLS + c];
-
-                if (sh->ch == cell->ch && sh->attrs == cell->attrs)
-                {
-                    c++;
-                    continue;
-                }
+                c++;
+                continue;
             }
 
-            /* Start a run of contiguous changed cells with same color/attrs */
+            /* Start a run of contiguous dirty cells with same color/attrs */
             run_start = c;
             run_pair = (cell->attrs & A_COLOR) >> 8;
             run_attrs = cell->attrs;
@@ -513,18 +588,9 @@ static void render_all()
             while (c < COLS && run_len < (int)sizeof(run_buf))
             {
                 Cell *cc = CELL(stdscr, r, c);
-                int changed = 1;
                 int p;
 
-                if (s_shadow && !s_shadow_dirty)
-                {
-                    Cell *sh = &s_shadow[r * COLS + c];
-
-                    if (sh->ch == cc->ch && sh->attrs == cc->attrs)
-                        changed = 0;
-                }
-
-                if (!changed)
+                if (!s_dirty_row[c])
                     break;
 
                 p = (cc->attrs & A_COLOR) >> 8;
@@ -2171,6 +2237,7 @@ int amiga_reload_ttf(const char *font_path, int new_size)
 
         /* Clamp to screen bounds */
         scr = ami_win->WScreen;
+
         if (scr)
         {
             if (want_w > scr->Width)

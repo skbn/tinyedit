@@ -185,7 +185,19 @@ static void soft_cursor_vpos(const TeApp *app, int width, int *out_vrow, int *ou
             {
                 if (out_vcol)
                 {
-                    int vc = col - pos;
+                    int vc = 0;
+                    int i;
+
+                    /* Calculate visual column width using wcswidth for multi-byte UTF-8 */
+                    for (i = pos; i < col && i < len; i++)
+                    {
+                        int w = wcswidth(&l[i], 1);
+
+                        if (w < 0)
+                            w = 1; /* Fallback for unprintable chars */
+
+                        vc += w;
+                    }
 
                     if (vc < 0)
                         vc = 0;
@@ -1859,6 +1871,15 @@ void ui_editor_run(TeApp *app)
                     free(wrapped);
             }
 
+            continue;
+        }
+
+        /* Handle TAB key explicitly before function keys */
+        if (!is_key && ch == '\t')
+        {
+            ed_save_undo(app->editor);
+            ed_insert_tab(app->editor, 4);
+            clear_search_highlights(app);
             continue;
         }
 
