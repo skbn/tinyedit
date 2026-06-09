@@ -1091,43 +1091,71 @@ static char *collect_bracketed_paste(void)
 
 /* Detect rapid paste (fallback for terminals
  * without bracketed paste support) */
-static char *collect_rapid_paste(void)
+static char *collect_rapid_paste(wint_t first_wch)
 {
     wchar_t *wbuf = NULL;
     int wlen = 0, wcap = 0;
     char *out;
     const int MAX_CHARS = 10; /* If 10+ chars arrive instantly, it's a paste not manual typing */
 
-    /* Read first character */
-    wint_t wch;
-    int wrc = wrapper_read_key(&wch);
-
-    if (wrc == ERR || wrc == KEY_CODE_YES)
-        return NULL;
-
-    /* Add first character */
-    wbuf = (wchar_t *)malloc(256 * sizeof(wchar_t));
-
-    if (!wbuf)
-        return NULL;
-
-    wcap = 256;
-    wbuf[wlen++] = (wchar_t)wch;
-
     /* Check if more characters are available (rapid paste detection) */
     nodelay(stdscr, TRUE);
 
+    wint_t next_wch;
+    int next_wrc = get_wch(&next_wch);
+
+    /* No more characters: not a paste, return NULL so caller handles single char */
+    if (next_wrc == ERR)
+    {
+        nodelay(stdscr, FALSE);
+        return NULL;
+    }
+
+    /* Special key: not a paste */
+    if (next_wrc == KEY_CODE_YES)
+    {
+        nodelay(stdscr, FALSE);
+        return NULL;
+    }
+
+    /* At least one more char available - check for 2 more to confirm paste */
+    wint_t third_wch;
+    int third_wrc = get_wch(&third_wch);
+
+    if (third_wrc == ERR || third_wrc == KEY_CODE_YES)
+    {
+        /* Only 2 chars total, probably manual typing - push back the second char */
+        nodelay(stdscr, FALSE);
+        ungetch((int)next_wch);
+        return NULL;
+    }
+
+    /* We have at least 3 chars - this is a paste, collect them all */
+    wbuf = (wchar_t *)malloc(256 * sizeof(wchar_t));
+
+    if (!wbuf)
+    {
+        nodelay(stdscr, FALSE);
+        return NULL;
+    }
+
+    wcap = 256;
+    wbuf[wlen++] = (wchar_t)first_wch;
+    wbuf[wlen++] = (wchar_t)next_wch;
+    wbuf[wlen++] = (wchar_t)third_wch;
+
+    /* Continue collecting remaining characters */
     while (wlen < MAX_CHARS)
     {
-        wint_t next_wch;
-        int next_wrc = get_wch(&next_wch);
+        wint_t more_wch;
+        int more_wrc = get_wch(&more_wch);
 
         /* No more characters: end of rapid paste */
-        if (next_wrc == ERR)
+        if (more_wrc == ERR)
             break;
 
         /* Special key: not a paste */
-        if (next_wrc == KEY_CODE_YES)
+        if (more_wrc == KEY_CODE_YES)
             break;
 
         /* Add to buffer */
@@ -1149,17 +1177,10 @@ static char *collect_rapid_paste(void)
             wcap = ncap;
         }
 
-        wbuf[wlen++] = (wchar_t)next_wch;
+        wbuf[wlen++] = (wchar_t)more_wch;
     }
 
     nodelay(stdscr, FALSE);
-
-    /* If only 1-2 characters, probably manual typing */
-    if (wlen < 3)
-    {
-        free(wbuf);
-        return NULL;
-    }
 
     /* Convert to UTF-8 */
     out = wcs_to_utf8(wbuf, wlen);
@@ -2052,7 +2073,7 @@ void ui_editor_run(TeApp *app)
              * without bracketed paste) */
             if (wch >= 0x20 && wch != 127)
             {
-                char *rapid_buf = collect_rapid_paste();
+                char *rapid_buf = collect_rapid_paste(wch);
 
                 if (rapid_buf)
                 {
