@@ -76,7 +76,7 @@ static const char *HELP_LINES[] =
         "    Ctrl+N           New file (clears editor)",
         "    F2 / Ctrl+S      Save",
         "    ESC / F10        Quit (confirm if modified)",
-        "    F1 / ?           This help",
+        "    F1 / Ctrl+I      This help",
         "",
         "  Other:",
         "    F4 / Alt+S       Setup / configuration",
@@ -1221,7 +1221,7 @@ static int do_save(TeApp *app)
 static int handle_function_keys(TeApp *app, int ch, int is_key)
 {
     /* F1 / ? : help */
-    if ((is_key && ch == KEY_F(1)) || (!is_key && ch == '?'))
+    if ((is_key && ch == KEY_F(1)) || (!is_key && ch == CTRL('I')))
     {
         ui_popup_help("tinyedit Help", HELP_LINES, HELP_N);
         return 1;
