@@ -202,7 +202,7 @@ void te_draw_titlebar(TeApp *app)
     if (app && app->editor)
     {
         ed_get_info(app->editor, &info);
-        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s ", info.row + 1, info.line_count, info.col + 1, info.insert_mode ? "INS" : "OVR");
+        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", info.insert_mode ? "INS" : "OVR");
     }
     else
     {

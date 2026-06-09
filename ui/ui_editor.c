@@ -53,6 +53,7 @@ static const char *HELP_LINES[] =
         "    Ctrl+W           Rewrap paragraph",
         "    Tab              Insert tab (4 spaces)",
         "    Alt+W            Toggle hard-wrap",
+        "    Alt+Q            Toggle wrap mode",
         "    Alt+L            Toggle line numbers",
         "    F3 / Alt+C       Choose output charset",
         "",
@@ -1572,9 +1573,9 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
 
             if (ui_popup_confirm("Hard Wrap", msg) == 1)
             {
+                ed_rewrap_document(app->editor, app->wrap_col);
                 app->hard_wrap = 1;
                 ed_set_hard_wrap(app->editor, 1);
-                ed_rewrap_document(app->editor, app->wrap_col);
                 te_status(app, "Hard wrap: ON (rewrapped)");
             }
         }
@@ -1588,7 +1589,11 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
 
         return 1;
     }
-
+    case KEY_ALT('Q'):
+    {
+        app->hard_wrap = !app->hard_wrap;
+        return 1;
+    }
     default:
         return 0;
     }
