@@ -226,6 +226,73 @@ int main(int argc, char **argv)
 
     if (define_key("\033y", KEY_ALT('Y')) != OK)
         fprintf(stderr, "Warning: define_key(Alt+Y) failed\n");
+
+    /* Register Alt+key sequences for editor functions */
+    if (define_key("\033g", KEY_ALT('G')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+G) failed\n");
+
+    if (define_key("\033G", KEY_ALT('G')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+G) failed\n");
+
+    if (define_key("\033d", KEY_ALT('D')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+D) failed\n");
+
+    if (define_key("\033D", KEY_ALT('D')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+D) failed\n");
+
+    if (define_key("\033s", KEY_ALT('S')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+S) failed\n");
+
+    if (define_key("\033S", KEY_ALT('S')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+S) failed\n");
+
+    if (define_key("\033t", KEY_ALT('T')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+T) failed\n");
+
+    if (define_key("\033T", KEY_ALT('T')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+T) failed\n");
+
+    if (define_key("\033c", KEY_ALT('C')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+C) failed\n");
+
+    if (define_key("\033C", KEY_ALT('C')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+C) failed\n");
+
+    if (define_key("\033f", KEY_ALT('F')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+F) failed\n");
+
+    if (define_key("\033F", KEY_ALT('F')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+F) failed\n");
+
+    if (define_key("\033b", KEY_ALT('B')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+B) failed\n");
+
+    if (define_key("\033B", KEY_ALT('B')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+B) failed\n");
+
+    if (define_key("\033o", KEY_ALT('O')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+O) failed\n");
+
+    if (define_key("\033O", KEY_ALT('O')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+O) failed\n");
+
+    if (define_key("\033w", KEY_ALT('W')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+W) failed\n");
+
+    if (define_key("\033W", KEY_ALT('W')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+W) failed\n");
+
+    if (define_key("\033q", KEY_ALT('Q')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Q) failed\n");
+
+    if (define_key("\033Q", KEY_ALT('Q')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+Q) failed\n");
+
+    if (define_key("\033z", KEY_ALT('Z')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Z) failed\n");
+
+    if (define_key("\033Z", KEY_ALT('Z')) != OK)
+        fprintf(stderr, "Warning: define_key(Alt+Shift+Z) failed\n");
 #endif
 
     curs_set(1);

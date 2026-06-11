@@ -2116,16 +2116,27 @@ int ed_undo_stack_make_room(UndoGroup **stack, int *top, int *cap, int max)
     UndoGroup *t;
     int nc;
 
+    if (!stack || !top || !cap)
+        return -1;
+
     if (*top < *cap)
         return 0;
 
+    if (max <= 0)
+        return -1;
+
     nc = (*cap > 0) ? (*cap * 2) : 8;
+
     if (nc > max)
         nc = max;
 
     if (nc <= *cap)
     {
-        /* At max depth: drop oldest */
+        /* At max depth: drop oldest. Defensive: only valid when at
+         * least one entry exists in the stack */
+        if (*top <= 0)
+            return -1;
+
         undo_group_clear(&(*stack)[0]);
         memmove(&(*stack)[0], &(*stack)[1], (size_t)(*top - 1) * sizeof(UndoGroup));
 

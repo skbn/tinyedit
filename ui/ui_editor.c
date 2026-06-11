@@ -54,7 +54,7 @@ static const char *HELP_LINES[] =
         "    Tab              Insert tab (4 spaces)",
         "    Alt+W            Toggle hard-wrap",
         "    Alt+Q            Toggle wrap mode",
-        "    Alt+L            Toggle line numbers",
+        "    Alt+D            Toggle line numbers",
         "    F3 / Alt+C       Choose output charset",
         "",
         "  Block (selection):",
@@ -68,8 +68,7 @@ static const char *HELP_LINES[] =
         "  Search:",
         "    F5 / Alt+F       Search (show all matches)",
         "    Ctrl+R           Find & replace",
-        "    Ctrl+Q           Go to line",
-        "    Alt+G            Clear search highlights",
+        "    Alt+G            Go to line",
         "",
         "  Files:",
         "    F7 / Alt+O       Insert file at cursor",
@@ -80,7 +79,7 @@ static const char *HELP_LINES[] =
         "    F1 / Alt+Y       This help",
         "",
         "  Other:",
-        "    F4 / Alt+S       Setup / configuration",
+        "    F4 / Alt+T       Setup / configuration",
 };
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
 
@@ -1595,8 +1594,8 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
             return charset_select(app);
     }
 
-    /* F4 / Alt+S : Setup or Next match in search mode */
-    if ((is_key && ch == KEY_F(4)) || (ch == KEY_ALT('S')))
+    /* F4 / Alt+T : Setup or Next match in search mode */
+    if ((is_key && ch == KEY_F(4)) || (ch == KEY_ALT('T')))
     {
         if (app->search.only_mode || (app->search.is_mode && app->search.count > 0))
             return search_next(app);
@@ -1687,8 +1686,8 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     if (!is_key && ch == CTRL('V'))
         return paste(app);
 
-    /* Ctrl+Q : goto line */
-    if (!is_key && ch == CTRL('Q'))
+    /* Alt+G : goto line */
+    if (ch == KEY_ALT('G'))
         return ui_editor_goto_line(app);
 
     /* Ctrl+R : find & replace */
@@ -1909,7 +1908,7 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
 
         return 1;
 
-    case KEY_ALT('L'):
+    case KEY_ALT('D'):
         app->show_line_numbers = !app->show_line_numbers;
         te_status(app, "Line numbers: %s", app->show_line_numbers ? "ON" : "OFF");
         return 1;
@@ -2287,15 +2286,6 @@ void ui_editor_run(TeApp *app)
         /* Handle control keys */
         if (handle_control_keys(app, ch, is_key))
             continue;
-
-        /* Alt+G : clear search highlights */
-        if (ch == KEY_ALT('G'))
-        {
-            clear_search_highlights(app);
-            te_status(app, "Search highlights cleared");
-
-            continue;
-        }
 
         /* Body key handling */
         if (is_key)

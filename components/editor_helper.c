@@ -66,6 +66,7 @@ char *ed_block_to_string(Ed *ed, int r1, int c1, int r2, int c2)
     char *temp = NULL;
     size_t total_len = 0;
     int i;
+    size_t pos;
 
     if (!ed || r1 < 0 || r2 >= ed->count || r1 > r2)
         return NULL;
@@ -108,7 +109,12 @@ char *ed_block_to_string(Ed *ed, int r1, int c1, int r2, int c2)
 
     result[0] = '\0';
 
-    /* Build result string */
+    /* Build result string. Use a write cursor + memcpy instead of
+     * strcat in a loop: strcat scans to the end of result on every
+     * call, turning the build into O(n^2). With the cursor this is
+     * O(n) -- noticeable on large selections */
+    pos = 0;
+
     for (i = r1; i <= r2; i++)
     {
         EdLine *ln = ed->lines[i];
@@ -125,7 +131,20 @@ char *ed_block_to_string(Ed *ed, int r1, int c1, int r2, int c2)
 
                 if (temp)
                 {
-                    strcat(result, temp);
+                    size_t n = strlen(temp);
+
+                    /* Defensive: total_len was an estimate; if any
+                     * quirk produced more bytes than expected, clamp
+                     * rather than overrun */
+                    if (pos + n > total_len)
+                        n = total_len - pos;
+
+                    if (n > 0)
+                    {
+                        memcpy(result + pos, temp, n);
+                        pos += n;
+                    }
+
                     free(temp);
                 }
 
@@ -134,9 +153,11 @@ char *ed_block_to_string(Ed *ed, int r1, int c1, int r2, int c2)
         }
 
         /* Add newline for all but last line */
-        if (i < r2)
-            strcat(result, "\n");
+        if (i < r2 && pos < total_len)
+            result[pos++] = '\n';
     }
+
+    result[pos] = '\0';
 
     return result;
 }
