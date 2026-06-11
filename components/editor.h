@@ -34,6 +34,88 @@ typedef struct
     int modified;
 } EdInfo;
 
+/* Line: dynamic wchar_t array */
+typedef struct
+{
+    wchar_t *wcs; /* malloc'd, always NUL-terminated */
+    int len;      /* character count (not bytes) */
+    int cap;      /* allocated wchar_t slots */
+} EdLine;
+
+/* Operation types for undo/redo log */
+typedef enum
+{
+    OP_INSERT,   /* inserted wchar_t text at (row,col) */
+    OP_DELETE,   /* deleted wchar_t text at (row,col) */
+    OP_SPLIT,    /* Enter: split line at (row,col) */
+    OP_JOIN,     /* Backspace at col 0: join row with row-1, col=join_col */
+    OP_SNAPSHOT, /* Full document snapshot: text = full document UTF-8 */
+    OP_PASTE     /* Paste UTF-8 text at (row,col): text = UTF-8 string */
+} UndoOpType;
+
+/* Single atomic edit operation */
+typedef struct
+{
+    UndoOpType type;
+    int row, col;        /* position where op occurred */
+    wchar_t *text;       /* owned; used by OP_INSERT and OP_DELETE */
+    int len;             /* chars in text */
+    int join_col;        /* for OP_JOIN: length of previous line before join */
+    char *utf8_snapshot; /* owned; used by OP_SNAPSHOT: full document UTF-8 */
+    int hard_wrap_mode;  /* used by OP_SNAPSHOT: 0=soft-wrap, 1=hard-wrap */
+    /* For OP_PASTE: block coordinates */
+    int end_row, end_col; /* end position after paste */
+} UndoOp;
+
+/* Group of ops treated as one undo/redo step */
+typedef struct
+{
+    UndoOp *ops; /* owned array */
+    int count, cap;
+    int cur_row, cur_col; /* cursor before the group */
+    int end_row, end_col; /* cursor after the group */
+} UndoGroup;
+
+struct Ed
+{
+    EdLine **lines;
+    int count, alloc;
+    int row, col; /* col = character index */
+    int top, page;
+    int insert_mode, modified;
+    EdBlock block;
+    wchar_t *killbuf; /* malloc'd wchar_t copy */
+    int killlen;
+
+    /* Undo stack of groups */
+    UndoGroup *undo_stack;
+    int undo_top, undo_cap, undo_max;
+
+    /* Redo stack of groups */
+    UndoGroup *redo_stack;
+    int redo_top, redo_cap, redo_max;
+
+    /* Coalescing state */
+    int undo_open; /* 1 = current group is open for appending */
+    UndoOpType undo_last_op;
+    int undo_last_row;
+    int undo_last_col_end;  /* col after last recorded char */
+    int undo_snapshot_mode; /* 1 = only allow snapshot operations, block individual ops */
+    int hard_wrap;          /* 0=soft-wrap, 1=hard-wrap */
+
+    /* Prefix sum array for soft-wrap: prefix[i] = total visual rows up to line i */
+    int *prefix;           /* prefix sum array */
+    int prefix_alloc;      /* allocated capacity */
+    int prefix_valid;      /* 0 = invalid, 1 = valid */
+    int prefix_width;      /* width for which prefix was calculated */
+    int prefix_dirty_from; /* -1 = clean, >=0 = dirty from this line onwards */
+    int prefix_start;      /* start line of current prefix range (for range rebuild) */
+    int prefix_end;        /* end line of current prefix range (for range rebuild) */
+    int prefix_base;       /* visual rows before prefix_start (for absolute positioning) */
+};
+
+#define INIT_ALLOC 256
+
 Ed *ed_new();
 void ed_free(Ed *ed);
 void ed_load(Ed *ed, const char *utf8_text); /* UTF-8 in */
@@ -110,7 +192,7 @@ int ed_search_forward(Ed *ed, const wchar_t *needle);
 /* Find all matches, returns count and malloc'd arrays (caller must free) */
 int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols);
 /* Custom search with case_sensitive and whole_word support */
-int search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int whole_word, int **out_rows, int **out_cols);
+int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int whole_word, int **out_rows, int **out_cols);
 /* Re-flow with quote preservation */
 int ed_rewrap_paragraph(Ed *ed, int width);
 int ed_rewrap_document(Ed *ed, int width);
@@ -126,5 +208,27 @@ void ed_set_modified(Ed *ed, int modified);
 /* Hard wrap mode */
 int ed_get_hard_wrap(const Ed *ed);
 void ed_set_hard_wrap(Ed *ed, int hard_wrap);
+
+/* Prefix sum for soft-wrap performance */
+void ed_prefix_invalidate(Ed *ed);
+int ed_prefix_rebuild(Ed *ed, int width);
+int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line);
+int ed_prefix_rebuild_to(Ed *ed, int width, int max_line);
+int ed_prefix_rebuild_from_row(Ed *ed, int from_row, int width);
+int ed_prefix_get(const Ed *ed, int line);
+
+/* Soft-wrap helpers */
+int ed_wrap_next(const wchar_t *line, int len, int width, int start);
+int ed_wrap_count(const wchar_t *line, int len, int width);
+
+/* Internal functions made public for editor_helper.c */
+void ed_clamp(Ed *ed);
+void ed_redo_clear(Ed *ed);
+int ed_undo_open_group(Ed *ed);
+void ed_prefix_invalidate(Ed *ed);
+void ed_prefix_invalidate_from(Ed *ed, int from_line);
+int ed_undo_stack_make_room(UndoGroup **stack, int *top, int *cap, int max);
+void ed_set_pos(Ed *ed, int row, int col);
+int ed_detect_quote_prefix(const wchar_t *line);
 
 #endif

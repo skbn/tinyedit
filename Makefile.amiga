@@ -16,7 +16,7 @@
 # Directory of this Makefile (with trailing slash)
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-CC = m68k-amigaos-gcc -noixemul -mcpu=68020 -DPLATFORM_AMIGA
+CC = m68k-amigaos-gcc -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA
 #CFLAGS = -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -std=gnu89 -O2
 CFLAGS = -Wall -std=gnu89 -O2
 AR = m68k-amigaos-ar

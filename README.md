@@ -24,11 +24,34 @@ make -f Makefile.unix
 
 ### AmigaOS
 ```bash
+For AmigaOS the program use ttengine or freetype with libpng and zlib
+
 Using bebbo gcc
 
-Requires ttengine.library from https://aminet.net/package/util/libs/ttengine-68k
+https://aminet.net/package/util/libs/ttengine-68k
 
-make -f Makefile.amiga
+libpng: https://www.libpng.org/
+zlib: https://zlib.net/
+FreeType: https://freetype.org/
+
+To compile:
+
+In tinyedit directory:
+
+To ttengine.library: make -f Makefile.amiga
+
+To static freetype with libpng and zlib:
+Extract the files freetype-2.14.3.tar.xz, libpng-1.6.58.tar.xz and, zlib.tar.gz
+into CrashEdit and rename them to freetype, zlib, and libpng.
+
+To prepair headers:
+make -f Makefile.amiga.te unprep
+make -f Makefile.amiga.te prep
+make -f Makefile.amiga.te clean all
+
+For freetype, the antialiasing is still buggy; I need to fix it.
+
+The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA.
 ```
 
 ### Windows

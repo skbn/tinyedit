@@ -150,12 +150,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 is_control_key = 1;
                 break;
             case VK_LEFT:
-                key = KEY_LEFT;
-                is_control_key = 1;
+                if (GetKeyState(VK_CONTROL) & 0x8000)
+                {
+                    key = KEY_CLEFT;
+                    is_control_key = 1;
+                }
+                else
+                {
+                    key = KEY_LEFT;
+                    is_control_key = 1;
+                }
                 break;
             case VK_RIGHT:
-                key = KEY_RIGHT;
-                is_control_key = 1;
+                if (GetKeyState(VK_CONTROL) & 0x8000)
+                {
+                    key = KEY_CRIGHT;
+                    is_control_key = 1;
+                }
+                else
+                {
+                    key = KEY_RIGHT;
+                    is_control_key = 1;
+                }
                 break;
             case VK_HOME:
                 key = KEY_HOME;

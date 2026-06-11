@@ -29,48 +29,30 @@ static int s_soft_desired_vcol = -1;
 /* Forward declarations for static functions */
 static int ui_paste_char_width(wchar_t ch);
 
-#if defined(PLATFORM_AMIGA) && !defined(wcswidth)
-/* wcswidth implementation based on Markus Kuhn's wcwidth.c
- * https://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c
- * Returns number of column positions needed for wide-character string
- * Compatible with POSIX.1-2001 standard for Unicode terminal display
- */
-int wcswidth(const wchar_t *wcs, size_t n)
+/* Visual width in display columns of n wchars starting at s.  Wide chars
+ * (CJK ideographs, wide emoji) count 2, narrow 1, control/non-printable 1
+ * Used by ui_editor.c to convert wchar offsets into visual column offsets
+ * when positioning mvaddnwstr() within a line that contains wide glyphs */
+int wcs_vwidth(const wchar_t *s, int n)
 {
-    int width = 0;
-    size_t i;
+    int v = 0;
+    int i;
 
-    for (i = 0; i < n && wcs[i] != L'\0'; i++)
+    if (!s || n <= 0)
+        return 0;
+
+    for (i = 0; i < n; i++)
     {
-        /* Based on East Asian Width properties:
-         * Wide (W) and Full-width (F) characters = 2 columns
-         * Emoji ranges = 2 columns (most modern terminals)
-         * All other printable characters = 1 column
-         * Implementation follows Unicode TR#11 and POSIX standards
-         */
-        if ((wcs[i] >= 0x1100 && wcs[i] <= 0x115F) ||   /* Hangul Jamo */
-            (wcs[i] >= 0x2E80 && wcs[i] <= 0xA4CF) ||   /* CJK...Yi */
-            (wcs[i] >= 0xAC00 && wcs[i] <= 0xD7A3) ||   /* Hangul Syllables */
-            (wcs[i] >= 0xF900 && wcs[i] <= 0xFAFF) ||   /* CJK Compatibility */
-            (wcs[i] >= 0xFE30 && wcs[i] <= 0xFE6F) ||   /* CJK Compatibility Forms */
-            (wcs[i] >= 0xFF00 && wcs[i] <= 0xFF60) ||   /* Fullwidth Forms */
-            (wcs[i] >= 0x1F300 && wcs[i] <= 0x1F5FF) || /* Misc Symbols & Pictographs */
-            (wcs[i] >= 0x1F600 && wcs[i] <= 0x1F64F) || /* Emoticons */
-            (wcs[i] >= 0x1F680 && wcs[i] <= 0x1F6FF) || /* Transport & Map */
-            (wcs[i] >= 0x1F700 && wcs[i] <= 0x1F77F) || /* Alchemical Symbols */
-            (wcs[i] >= 0x1F780 && wcs[i] <= 0x1F7FF) || /* Geometric Shapes Extended */
-            (wcs[i] >= 0x1F800 && wcs[i] <= 0x1F8FF) || /* Supplemental Arrows-C */
-            (wcs[i] >= 0x1F900 && wcs[i] <= 0x1F9FF) || /* Supplemental Symbols */
-            (wcs[i] >= 0x20000 && wcs[i] <= 0x2FFFD) || /* Supplementary Planes */
-            (wcs[i] >= 0x30000 && wcs[i] <= 0x3FFFD))   /* More Supplementary */
-            width += 2;
+        int w = wcswidth(&s[i], 1);
+
+        if (w == 2)
+            v += 2;
         else
-            width += 1;
+            v += 1; /* narrow, zero-width, control -> 1 */
     }
 
-    return width;
+    return v;
 }
-#endif
 
 /* Helper functions that were static in ui_editor.c */
 void clear_search_highlights(TeApp *app)
@@ -235,7 +217,7 @@ int replace(TeApp *app)
     app->search.whole_word = whole_word;
 
     /* Perform search and highlight matches */
-    match_count = search_all_custom(app->editor, app->search.query, case_sensitive, whole_word, &rows, &cols);
+    match_count = ed_search_all_custom(app->editor, app->search.query, case_sensitive, whole_word, &rows, &cols);
 
     clear_search_highlights(app);
 
@@ -273,7 +255,7 @@ static int do_replace(TeApp *app, const wchar_t *needle, const wchar_t *repl)
     int match_count, i;
 
     /* Find all matches with current case-sensitive and whole-word options */
-    match_count = search_all_custom(app->editor, needle, app->search.case_sensitive, app->search.whole_word, &rows, &cols);
+    match_count = ed_search_all_custom(app->editor, needle, app->search.case_sensitive, app->search.whole_word, &rows, &cols);
 
     if (match_count == 0)
         return 0;
@@ -311,6 +293,7 @@ int charset_select(TeApp *app)
 
     strncpy(new_view, app->charset_in, sizeof(new_view) - 1);
     new_view[sizeof(new_view) - 1] = '\0';
+
     strncpy(new_save, app->charset_out, sizeof(new_save) - 1);
     new_save[sizeof(new_save) - 1] = '\0';
 
@@ -324,6 +307,7 @@ int charset_select(TeApp *app)
         if (view_changed)
         {
             ed_get_info(app->editor, &info);
+
             if (info.modified && app->filename[0])
             {
                 if (ui_popup_confirm("Charset", "Unsaved changes: changing charset will reload from disk and lose edits. Continue?") != 1)
@@ -356,6 +340,7 @@ int charset_select(TeApp *app)
                 if (size >= 0)
                 {
                     buf = (char *)malloc((size_t)size + 1);
+
                     if (buf)
                     {
                         r = fread(buf, 1, (size_t)size, fp);
@@ -490,6 +475,7 @@ int do_search(TeApp *app)
             ed_set_pos(app->editor, rows[0], cols[0]);
             ed_ensure_visible(app->editor);
             te_status(app, "Found at line %d", rows[0] + 1);
+
             app->search.rows = rows;
             app->search.cols = cols;
             app->search.count = 1;
@@ -505,6 +491,7 @@ int do_search(TeApp *app)
                 ed_set_pos(app->editor, rows[choice], cols[choice]);
                 ed_ensure_visible(app->editor);
                 te_status(app, "Jumped to line %d", rows[choice] + 1);
+
                 app->search.match_current = choice + 1;
                 app->search.current_match = choice;
             }
@@ -544,6 +531,7 @@ int replace_current(TeApp *app)
 
         /* Use the last replacement text - no popup */
         wchar_t repl[64];
+
         wcsncpy(repl, app->search.last_replace, 63);
         repl[63] = L'\0';
 
@@ -553,6 +541,7 @@ int replace_current(TeApp *app)
 
         match_row = app->search.rows[app->search.current_match];
         match_col = app->search.cols[app->search.current_match];
+
         ed_set_pos(app->editor, match_row, match_col);
 
         /* Save undo state */
@@ -579,7 +568,7 @@ int replace_current(TeApp *app)
         app->search.count = 0;
 
         /* Re-run search to find remaining matches */
-        new_match_count = search_all_custom(app->editor, app->search.query, app->search.case_sensitive, app->search.whole_word, &new_rows, &new_cols);
+        new_match_count = ed_search_all_custom(app->editor, app->search.query, app->search.case_sensitive, app->search.whole_word, &new_rows, &new_cols);
 
         if (new_match_count > 0)
         {
@@ -625,6 +614,7 @@ int replace_all(TeApp *app)
             ed_save_undo(app->editor);
             n = do_replace(app, app->search.query, app->search.last_replace);
             clear_search_highlights(app);
+
             app->search.is_mode = 0;
             te_status(app, "Replaced %d occurrence(s)", n);
         }
@@ -681,8 +671,6 @@ int paste(TeApp *app)
             char *wrapped = NULL;
             const char *to_insert = clip;
 
-            ed_save_undo(app->editor);
-
             /* HARD-WRAP only: reflow pasted text; soft-wrap inserts verbatim */
             if (app->hard_wrap)
             {
@@ -697,11 +685,13 @@ int paste(TeApp *app)
                 }
             }
 
-            ed_paste_text(app->editor, to_insert);
+            ed_paste_text_with_undo(app->editor, to_insert);
             clear_search_highlights(app);
             soft_reset_desired();
+
             s_soft_vtop = 0;
             te_status(app, "Pasted from clipboard");
+
             free(clip);
 
             if (wrapped)
@@ -813,6 +803,7 @@ int ui_editor_goto_end(TeApp *app)
     if (info.line_count > 0)
     {
         int ll = info.line_count - 1;
+
         ed_set_pos(app->editor, ll, ed_line_len(app->editor, ll));
         ed_ensure_visible(app->editor);
     }

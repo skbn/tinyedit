@@ -84,8 +84,25 @@ static const char *HELP_LINES[] =
 };
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
 
-/* Soft-wrap viewport state (module-level, reset on editor_run) */
-static int s_soft_vtop = 0;
+/* Soft-wrap viewport state
+ * Forget about absolute visual row counts. We never compute "how many
+ * visual rows are there from line 0 to line N" because that requires
+ * scanning the whole document -- catastrophic in big files
+ *
+ * Instead the viewport is anchored by:
+ *   - s_soft_top_line : the logical line at the top of the screen
+ *   - s_soft_top_sub  : which sub-row of that line is the first one shown
+ *                       (0 = first sub-row, 1 = second, etc)
+ *
+ * Cursor positioning, page up/down, arrow up/down, ensure-visible -- all
+ * computed by walking O(distance) lines from the current cursor or the
+ * viewport top. Distances are bounded by body_rows (or the requested
+ * page size), so movements stay snappy on a 2-million-line file
+ *
+ * No prefix-sum cache.  No scanning from line 0.  Editing is also fast:
+ * a typed character only re-wraps the current line */
+static int s_soft_top_line = 0;
+static int s_soft_top_sub = 0;
 static int s_soft_desired_vcol = -1;
 static int s_soft_last_width = -1;
 
@@ -96,19 +113,35 @@ static void soft_reset_desired(void)
 
 /* Soft-wrap: returns the end of the current visual segment (exclusive)
  * Breaks at the last space boundary that fits within width columns
- * If no space fits (word longer than width), hard-cuts at start+width
+ * If no space fits (word longer than width), hard-cuts at visual boundary
  * The next segment starts exactly at the returned position - no chars skipped */
 static int wrap_next(const wchar_t *line, int len, int width, int start)
 {
+    int vcol = 0;
+    int k = start;
     int hard_end;
-    int k;
 
     if (width < 1)
         width = 1;
 
-    hard_end = start + width;
+    /* Walk forward from start, accumulating visual width with wcswidth */
+    while (k < len)
+    {
+        int w = wcswidth(&line[k], 1);
 
-    if (hard_end >= len)
+        if (w <= 0)
+            w = 1; /* control/zero-width -> 1 */
+
+        if (vcol + w > width)
+            break;
+
+        vcol += w;
+        k++;
+    }
+
+    hard_end = k;
+
+    if (k >= len)
         return len;
 
     /* Search backwards from hard_end for a space to break at */
@@ -118,7 +151,7 @@ static int wrap_next(const wchar_t *line, int len, int width, int start)
             return k;
     }
 
-    /* No space found: hard cut */
+    /* No space found: hard cut at visual boundary */
     return hard_end;
 }
 
@@ -148,374 +181,549 @@ static int wrap_count(const wchar_t *line, int len, int width)
     return rows;
 }
 
-/* Visual row/col of cursor within soft-wrapped text */
-static void soft_cursor_vpos(const TeApp *app, int width, int *out_vrow, int *out_vcol)
-{
-    EdInfo info;
-    int li, vrow = 0;
-    const wchar_t *l;
-    int len;
-    int pos;
-    int col;
-
-    ed_get_info(app->editor, &info);
-
-    for (li = 0; li < info.row && li < info.line_count; li++)
-    {
-        const wchar_t *l = ed_line_wcs(app->editor, li);
-        int len = ed_line_len(app->editor, li);
-
-        vrow += wrap_count(l ? l : L"", l ? len : 0, width);
-    }
-
-    l = ed_line_wcs(app->editor, info.row);
-    len = ed_line_len(app->editor, info.row);
-    pos = 0;
-    col = info.col;
-
-    if (l && len > 0)
-    {
-        for (;;)
-        {
-            int end = wrap_next(l, len, width, pos);
-
-            /* Cursor is on this sub-row if it sits before the next
-             * sub-row's start, or this is the last sub-row */
-            if (end >= len || col < end)
-            {
-                if (out_vcol)
-                {
-                    int vc = 0;
-                    int i;
-
-                    /* Calculate visual column width using wcswidth for multi-byte UTF-8 */
-                    for (i = pos; i < col && i < len; i++)
-                    {
-                        int w = wcswidth(&l[i], 1);
-
-                        if (w < 0)
-                            w = 1; /* Fallback for unprintable chars */
-
-                        vc += w;
-                    }
-
-                    if (vc < 0)
-                        vc = 0;
-
-                    *out_vcol = vc;
-                }
-
-                break;
-            }
-
-            if (end <= pos)
-                end = pos + (width < 1 ? 1 : width);
-
-            pos = end;
-            vrow++;
-        }
-    }
-    else if (out_vcol)
-    {
-        *out_vcol = 0;
-    }
-
-    if (out_vrow)
-        *out_vrow = vrow;
-}
-
-/* Total visual rows occupied by logical lines [0..upto) at the given width */
-static int soft_count_rows_before(Ed *ed, int upto, int width)
-{
-    int total = 0;
-    int li;
-
-    for (li = 0; li < upto; li++)
-    {
-        const wchar_t *l = ed_line_wcs(ed, li);
-        int len = ed_line_len(ed, li);
-
-        total += wrap_count(l ? l : L"", l ? len : 0, width);
-    }
-
-    return total;
-}
-
-/* Within one logical line, find the logical column that corresponds to
- * (vrow_in_line, target_vcol). vrow_in_line is the sub-row offset within
- * this line (0 = first sub-row)
+/* Sub-row geometry within a single logical line
+ * Return the [seg_start, seg_end) wchar range for the target_sub
+ * sub-row of line.  Returns the actual number of sub-rows scanned
+ * (i.e. min(target_sub + 1, total_subrows)). If target_sub is beyond
+ * the line's sub-rows, returns the last sub-row
  *
- * Returns 0 on success, -1 if vrow_in_line is beyond this line's sub-rows
- * If target_vcol overruns the sub-row's content, the result is clamped to
- * the end of that sub-row's segment - matching what the user sees */
-static int soft_seg_at(const wchar_t *l, int len, int width, int vrow_in_line, int target_vcol, int *out_col)
+ * O(target_sub * line_walk_cost) but bounded by the line length */
+static int line_subrow_range(const wchar_t *l, int len, int width, int target_sub, int *seg_start, int *seg_end)
 {
     int pos = 0;
     int sub = 0;
 
     if (!l || len <= 0)
     {
-        if (vrow_in_line == 0)
-        {
-            *out_col = 0;
-            return 0;
-        }
-
-        return -1;
+        *seg_start = 0;
+        *seg_end = 0;
+        return 0;
     }
 
     for (;;)
     {
-        int seg_end = wrap_next(l, len, width, pos);
-        int seg_len = seg_end - pos;
-        int is_last = (seg_end >= len);
-        int v;
+        int end = wrap_next(l, len, width, pos);
 
-        if (sub == vrow_in_line)
+        if (sub == target_sub || end >= len)
         {
-            v = target_vcol;
-            if (v < 0)
-                v = 0;
-
-            /* End on last segment: go to insertion point (seg_len)
-             * End on interior segment: stay on last visible char (seg_len-1)
-             * so cursor doesn't jump to next row */
-            if (v >= seg_len)
-            {
-                if (is_last)
-                    v = seg_len;
-                else
-                    v = (seg_len > 0) ? seg_len - 1 : 0;
-            }
-
-            *out_col = pos + v;
-
-            return 0;
+            *seg_start = pos;
+            *seg_end = end;
+            return sub;
         }
 
+        if (end <= pos)
+            end = pos + (width < 1 ? 1 : width); /* never stall */
+
+        pos = end;
         sub++;
-
-        if (seg_end >= len)
-            return -1; /* requested vrow past last sub-row */
-
-        if (seg_end <= pos)
-            seg_end = pos + (width < 1 ? 1 : width);
-
-        pos = seg_end;
     }
 }
 
-/* Convert an absolute visual position (target_vrow, target_vcol) - across
- * all logical lines - to (row, col) for ed_set_pos
+/* Returns the sub-row index inside `line` where the column `col` lives
+ * Walks segments until `col` falls within one.  O(sub-rows in line) */
+static int line_subrow_of_col(const wchar_t *l, int len, int width, int col)
+{
+    int pos = 0;
+    int sub = 0;
+
+    if (!l || len <= 0)
+        return 0;
+
+    for (;;)
+    {
+        int end = wrap_next(l, len, width, pos);
+
+        if (col < end || end >= len)
+            return sub;
+
+        if (end <= pos)
+            end = pos + (width < 1 ? 1 : width);
+
+        pos = end;
+        sub++;
+    }
+}
+
+/* Walk N visual rows down/up from (from_line, from_sub). Clamps to doc
  *
- * Out-of-range vrow clamps to the last visual row of the document
- * Out-of-range vcol clamps to the end of the destination sub-row */
-static void soft_visual_to_logical(Ed *ed, int width, int target_vrow, int target_vcol, int *out_row, int *out_col)
+ * Cost: O(delta_lines). In practice delta is bounded by body_rows for
+ * arrow keys, or by pg for PgUp/PgDn.  Doesn't scan the document */
+static void walk_vrows_forward(Ed *ed, int width, int from_line, int from_sub, int delta, int *out_line, int *out_sub)
 {
     EdInfo info;
-    int li;
-    int vacc = 0;
+    int line = from_line;
+    int sub = from_sub;
+    int remaining = delta;
 
     ed_get_info(ed, &info);
 
-    if (target_vrow < 0)
-        target_vrow = 0;
-
-    for (li = 0; li < info.line_count; li++)
+    while (remaining > 0 && line < info.line_count)
     {
-        const wchar_t *l = ed_line_wcs(ed, li);
-        int len = ed_line_len(ed, li);
-        int wc = wrap_count(l ? l : L"", l ? len : 0, width);
+        const wchar_t *l = ed_line_wcs(ed, line);
+        int len = ed_line_len(ed, line);
+        int n = wrap_count(l ? l : L"", l ? len : 0, width);
+        int avail = n - sub - 1; /* remaining sub-rows in this line below `sub` */
 
-        if (target_vrow < vacc + wc)
+        if (remaining <= avail)
         {
-            int vrow_in_line = target_vrow - vacc;
-            int col = 0;
-
-            if (soft_seg_at(l, len, width, vrow_in_line, target_vcol, &col) == 0)
-            {
-                *out_row = li;
-                *out_col = col;
-
-                return;
-            }
+            sub += remaining;
+            remaining = 0;
+            break;
         }
 
-        vacc += wc;
+        /* consume the rest of this line and move to the next */
+        remaining -= (avail + 1);
+        line++;
+        sub = 0;
     }
 
-    /* Past the end: clamp to last line's last sub-row */
-    if (info.line_count > 0)
+    if (line >= info.line_count)
     {
-        int last = info.line_count - 1;
-        const wchar_t *l = ed_line_wcs(ed, last);
-        int len = ed_line_len(ed, last);
-        int wc = wrap_count(l ? l : L"", l ? len : 0, width);
-        int col = 0;
-
-        if (wc > 0 && soft_seg_at(l, len, width, wc - 1, target_vcol, &col) == 0)
+        /* clamp to last line's last sub-row */
+        if (info.line_count > 0)
         {
-            *out_row = last;
-            *out_col = col;
+            const wchar_t *l;
+            int len, n;
 
-            return;
+            line = info.line_count - 1;
+            l = ed_line_wcs(ed, line);
+            len = ed_line_len(ed, line);
+            n = wrap_count(l ? l : L"", l ? len : 0, width);
+            sub = n - 1;
+
+            if (sub < 0)
+                sub = 0;
+        }
+        else
+        {
+            line = 0;
+            sub = 0;
+        }
+    }
+
+    *out_line = line;
+    *out_sub = sub;
+}
+
+static void walk_vrows_backward(Ed *ed, int width, int from_line, int from_sub, int delta, int *out_line, int *out_sub)
+{
+    int line = from_line;
+    int sub = from_sub;
+    int remaining = delta;
+
+    while (remaining > 0)
+    {
+        if (sub > 0)
+        {
+            int take = sub;
+
+            if (take > remaining)
+                take = remaining;
+
+            sub -= take;
+            remaining -= take;
+
+            if (remaining == 0)
+                break;
         }
 
-        *out_row = last;
-        *out_col = len;
+        /* sub == 0 now; step to previous line if possible */
+        if (line == 0)
+        {
+            sub = 0;
+            break;
+        }
 
+        line--;
+        {
+            const wchar_t *l = ed_line_wcs(ed, line);
+            int len = ed_line_len(ed, line);
+            int n = wrap_count(l ? l : L"", l ? len : 0, width);
+
+            sub = n - 1;
+        }
+
+        remaining--;
+
+        if (remaining == 0)
+            break;
+    }
+
+    if (line < 0)
+    {
+        line = 0;
+        sub = 0;
+    }
+
+    *out_line = line;
+    *out_sub = sub;
+}
+
+/* Cursor position vs. viewport
+ * Returns the visual column (in display cells) of the cursor within
+ * its own sub-row. O(width of sub-row) */
+static int soft_cursor_vcol(Ed *ed, int width)
+{
+    EdInfo info;
+    const wchar_t *l;
+    int len;
+    int sub;
+    int seg_start = 0, seg_end = 0;
+    int n;
+
+    ed_get_info(ed, &info);
+
+    l = ed_line_wcs(ed, info.row);
+    len = ed_line_len(ed, info.row);
+
+    if (!l || len <= 0)
+        return 0;
+
+    sub = line_subrow_of_col(l, len, width, info.col);
+    line_subrow_range(l, len, width, sub, &seg_start, &seg_end);
+
+    n = info.col - seg_start;
+
+    if (n < 0)
+        n = 0;
+
+    if (n > len - seg_start)
+        n = len - seg_start;
+
+    return wcs_vwidth(&l[seg_start], n);
+}
+
+/* Number of visual rows between (a_line, a_sub) and (b_line, b_sub)
+ * Returns positive if b is after a, negative if before
+ * Cost: O(|b_line - a_line|) */
+static int soft_vrows_between(Ed *ed, int width, int a_line, int a_sub, int b_line, int b_sub)
+{
+    int i;
+    int delta = 0;
+    const wchar_t *l;
+    int len;
+    int n;
+
+    if (a_line == b_line)
+        return b_sub - a_sub;
+
+    if (a_line < b_line)
+    {
+        /* Walk forward from a */
+        const wchar_t *l = ed_line_wcs(ed, a_line);
+        int len = ed_line_len(ed, a_line);
+        int n = wrap_count(l ? l : L"", l ? len : 0, width);
+
+        delta = (n - a_sub); /* rows to end of a_line + 1 step */
+
+        for (i = a_line + 1; i < b_line; i++)
+        {
+            l = ed_line_wcs(ed, i);
+            len = ed_line_len(ed, i);
+            delta += wrap_count(l ? l : L"", l ? len : 0, width);
+        }
+
+        delta += b_sub;
+
+        return delta;
+    }
+
+    /* a_line > b_line: walk backward */
+    l = ed_line_wcs(ed, b_line);
+    len = ed_line_len(ed, b_line);
+    n = wrap_count(l ? l : L"", l ? len : 0, width);
+
+    delta = (n - b_sub); /* rows to end of b_line + 1 step */
+
+    for (i = b_line + 1; i < a_line; i++)
+    {
+        l = ed_line_wcs(ed, i);
+        len = ed_line_len(ed, i);
+        delta += wrap_count(l ? l : L"", l ? len : 0, width);
+    }
+
+    delta += a_sub;
+
+    return -delta;
+}
+
+/* Compute the cursor's screen row given current viewport
+ * Returns negative if cursor is above viewport, >= body_rows if below
+ * O(|info.row - s_soft_top_line|) */
+static int soft_cursor_screen_row(TeApp *app, int width)
+{
+    EdInfo info;
+    Ed *ed = app->editor;
+    int sub_cursor;
+    const wchar_t *l;
+    int len;
+
+    ed_get_info(ed, &info);
+
+    l = ed_line_wcs(ed, info.row);
+    len = ed_line_len(ed, info.row);
+    sub_cursor = line_subrow_of_col(l ? l : L"", l ? len : 0, width, info.col);
+
+    return soft_vrows_between(ed, width, s_soft_top_line, s_soft_top_sub, info.row, sub_cursor);
+}
+
+/* Adjust viewport (s_soft_top_line, s_soft_top_sub) so the cursor is
+ * inside [0, body_rows). Cost bounded by body_rows + body_rows-ish
+ * for typical movement; clamps to document boundaries */
+static void soft_ensure_visible(TeApp *app, int width, int body_rows)
+{
+    EdInfo info;
+    Ed *ed = app->editor;
+    int sub_cursor;
+    int screen_row;
+    const wchar_t *l;
+    int len;
+    const wchar_t *tl;
+    int tlen;
+    int tn;
+
+    ed_get_info(ed, &info);
+
+    if (info.line_count <= 0)
+    {
+        s_soft_top_line = 0;
+        s_soft_top_sub = 0;
         return;
     }
 
-    *out_row = 0;
-    *out_col = 0;
+    /* Clamp top to valid range */
+    if (s_soft_top_line < 0)
+        s_soft_top_line = 0;
+
+    if (s_soft_top_line >= info.line_count)
+        s_soft_top_line = info.line_count - 1;
+
+    tl = ed_line_wcs(ed, s_soft_top_line);
+    tlen = ed_line_len(ed, s_soft_top_line);
+    tn = wrap_count(tl ? tl : L"", tl ? tlen : 0, width);
+
+    if (s_soft_top_sub < 0)
+        s_soft_top_sub = 0;
+
+    if (s_soft_top_sub >= tn)
+        s_soft_top_sub = tn - 1;
+
+    /* Where is the cursor relative to the viewport? */
+    l = ed_line_wcs(ed, info.row);
+    len = ed_line_len(ed, info.row);
+    sub_cursor = line_subrow_of_col(l ? l : L"", l ? len : 0, width, info.col);
+
+    screen_row = soft_vrows_between(ed, width, s_soft_top_line, s_soft_top_sub, info.row, sub_cursor);
+
+    if (screen_row < 0)
+    {
+        /* Cursor is above viewport: pull top up to cursor */
+        s_soft_top_line = info.row;
+        s_soft_top_sub = sub_cursor;
+    }
+    else if (screen_row >= body_rows)
+    {
+        /* Cursor is below viewport: push top down so cursor lands at last row */
+        int over = screen_row - (body_rows - 1);
+        int new_line, new_sub;
+
+        walk_vrows_forward(ed, width, s_soft_top_line, s_soft_top_sub, over, &new_line, &new_sub);
+
+        s_soft_top_line = new_line;
+        s_soft_top_sub = new_sub;
+    }
 }
 
-/* Move cursor one visual row up. Preserves desired_vcol so consecutive
- * UPs over shorter rows still land back on the same column on long rows */
+/* Position the cursor on (line, sub) with desired visual column */
+static void soft_set_cursor_at(Ed *ed, int width, int line, int sub, int desired_vcol)
+{
+    const wchar_t *l;
+    int len;
+    int seg_start = 0, seg_end = 0;
+    int v, i, col;
+
+    l = ed_line_wcs(ed, line);
+    len = ed_line_len(ed, line);
+
+    line_subrow_range(l ? l : L"", l ? len : 0, width, sub, &seg_start, &seg_end);
+
+    if (desired_vcol < 0)
+        desired_vcol = 0;
+
+    /* Walk through chars of the sub-row, accumulating visual width until
+     * we reach desired_vcol. Land just before exceeding */
+    v = 0;
+    col = seg_start;
+
+    if (l && len > 0)
+    {
+        for (i = seg_start; i < seg_end; i++)
+        {
+            int w = wcswidth(&l[i], 1);
+
+            if (w != 2)
+                w = 1;
+
+            if (v + w > desired_vcol)
+                break;
+
+            v += w;
+            col = i + 1;
+        }
+    }
+
+    /* If on the last sub-row, allow placing cursor at the literal end of
+     * line (one past last char). Otherwise stop at seg_end-1 so we don't
+     * jump to the next sub-row's first column */
+    if (seg_end < len && col >= seg_end)
+        col = seg_end > seg_start ? seg_end - 1 : seg_start;
+
+    if (col < 0)
+        col = 0;
+
+    if (col > len)
+        col = len;
+
+    ed_set_pos(ed, line, col);
+}
+
+/* Move cursor delta visual rows (positive = down, negative = up)
+ * Preserves s_soft_desired_vcol so a sequence of UP/DOWN keys returns
+ * to the original column on long lines. O(|delta|) */
+static void soft_move_vrows(TeApp *app, int width, int delta)
+{
+    EdInfo info;
+    Ed *ed = app->editor;
+    const wchar_t *l;
+    int len;
+    int sub_cursor;
+    int new_line, new_sub;
+    int vcol;
+
+    if (delta == 0)
+        return;
+
+    ed_get_info(ed, &info);
+
+    if (info.line_count <= 0)
+        return;
+
+    l = ed_line_wcs(ed, info.row);
+    len = ed_line_len(ed, info.row);
+    sub_cursor = line_subrow_of_col(l ? l : L"", l ? len : 0, width, info.col);
+
+    /* Record desired visual column on first vertical move */
+    if (s_soft_desired_vcol < 0)
+        s_soft_desired_vcol = soft_cursor_vcol(ed, width);
+
+    if (delta > 0)
+        walk_vrows_forward(ed, width, info.row, sub_cursor, delta, &new_line, &new_sub);
+    else
+        walk_vrows_backward(ed, width, info.row, sub_cursor, -delta, &new_line, &new_sub);
+
+    vcol = s_soft_desired_vcol;
+    soft_set_cursor_at(ed, width, new_line, new_sub, vcol);
+}
+
+/* Handlers used by ui_editor key dispatch */
 static void soft_move_up_visual(TeApp *app, int width)
 {
-    int vr, vc, nr, nc;
-
-    soft_cursor_vpos(app, width, &vr, &vc);
-
-    /* Already on the first visual row: nothing to do (matches ed_move_up) */
-    if (vr <= 0)
-        return;
-
-    if (s_soft_desired_vcol < 0)
-        s_soft_desired_vcol = vc;
-
-    soft_visual_to_logical(app->editor, width, vr - 1, s_soft_desired_vcol, &nr, &nc);
-    ed_set_pos(app->editor, nr, nc);
-    ed_ensure_visible(app->editor);
+    soft_move_vrows(app, width, -1);
 }
 
-/* Move cursor one visual row down. Mirror of soft_move_up_visual */
 static void soft_move_down_visual(TeApp *app, int width)
 {
-    EdInfo info;
-    int total_vrows;
-    int vr, vc, nr, nc;
-
-    ed_get_info(app->editor, &info);
-
-    if (info.line_count <= 0)
-        return;
-
-    total_vrows = soft_count_rows_before(app->editor, info.line_count, width);
-    soft_cursor_vpos(app, width, &vr, &vc);
-
-    /* Already on the last visual row: nothing to do (matches ed_move_down) */
-    if (vr >= total_vrows - 1)
-        return;
-
-    if (s_soft_desired_vcol < 0)
-        s_soft_desired_vcol = vc;
-
-    soft_visual_to_logical(app->editor, width, vr + 1, s_soft_desired_vcol, &nr, &nc);
-    ed_set_pos(app->editor, nr, nc);
-    ed_ensure_visible(app->editor);
+    soft_move_vrows(app, width, +1);
 }
 
-/* HOME in soft-wrap: go to column 0 of current visual row */
 static void soft_move_home_visual(TeApp *app, int width)
 {
-    int vr, vc, nr, nc;
+    EdInfo info;
+    Ed *ed = app->editor;
+    const wchar_t *l;
+    int len;
+    int sub_cursor;
+    int seg_start = 0, seg_end = 0;
 
-    soft_cursor_vpos(app, width, &vr, &vc);
-    soft_visual_to_logical(app->editor, width, vr, 0, &nr, &nc);
-    ed_set_pos(app->editor, nr, nc);
-    ed_ensure_visible(app->editor);
+    ed_get_info(ed, &info);
+
+    l = ed_line_wcs(ed, info.row);
+    len = ed_line_len(ed, info.row);
+    sub_cursor = line_subrow_of_col(l ? l : L"", l ? len : 0, width, info.col);
+
+    line_subrow_range(l ? l : L"", l ? len : 0, width, sub_cursor, &seg_start, &seg_end);
+
+    ed_set_pos(ed, info.row, seg_start);
+    soft_reset_desired();
 }
 
-/* END in soft-wrap: go to last column of current visual row */
 static void soft_move_end_visual(TeApp *app, int width)
 {
-    int vr, vc, nr, nc;
+    EdInfo info;
+    Ed *ed = app->editor;
+    const wchar_t *l;
+    int len;
+    int sub_cursor;
+    int seg_start = 0, seg_end = 0;
+    int target_col;
 
-    soft_cursor_vpos(app, width, &vr, &vc);
+    ed_get_info(ed, &info);
 
-    /* Use large value (not INT_MAX) to clamp to segment end */
-    soft_visual_to_logical(app->editor, width, vr, width + 1000000, &nr, &nc);
+    l = ed_line_wcs(ed, info.row);
+    len = ed_line_len(ed, info.row);
+    sub_cursor = line_subrow_of_col(l ? l : L"", l ? len : 0, width, info.col);
 
-    ed_set_pos(app->editor, nr, nc);
-    ed_ensure_visible(app->editor);
+    line_subrow_range(l ? l : L"", l ? len : 0, width, sub_cursor, &seg_start, &seg_end);
+
+    /* End-of-sub-row: if this is the last sub-row, put cursor at line end
+     * (one past last char). Otherwise put at the last visible char of the
+     * sub-row (so cursor doesn't jump to the next sub-row's first col) */
+    if (seg_end >= len)
+        target_col = len;
+    else
+        target_col = seg_end > seg_start ? seg_end - 1 : seg_start;
+
+    ed_set_pos(ed, info.row, target_col);
+    soft_reset_desired();
 }
 
-/* Move pg visual rows up. Preserves desired_vcol */
 static void soft_move_pgup_visual(TeApp *app, int width, int pg)
 {
-    int vr, vc, nr, nc;
-    int target;
+    int new_line, new_sub;
+    Ed *ed = app->editor;
 
     if (pg <= 0)
         pg = 1;
 
-    soft_cursor_vpos(app, width, &vr, &vc);
+    /* Move the cursor up pg visual rows */
+    soft_move_vrows(app, width, -pg);
 
-    if (s_soft_desired_vcol < 0)
-        s_soft_desired_vcol = vc;
+    /* Slide the viewport up by pg visual rows so the cursor stays at
+     * roughly the same screen row */
+    walk_vrows_backward(ed, width, s_soft_top_line, s_soft_top_sub, pg, &new_line, &new_sub);
 
-    target = vr - pg;
-
-    if (target < 0)
-        target = 0;
-
-    soft_visual_to_logical(app->editor, width, target, s_soft_desired_vcol, &nr, &nc);
-    ed_set_pos(app->editor, nr, nc);
-
-    /* Scroll viewport so the cursor stays at roughly the same screen row */
-    s_soft_vtop -= pg;
-
-    if (s_soft_vtop < 0)
-        s_soft_vtop = 0;
-
-    ed_ensure_visible(app->editor);
+    s_soft_top_line = new_line;
+    s_soft_top_sub = new_sub;
 }
 
-/* Move pg visual rows down. Mirror of soft_move_pgup_visual */
 static void soft_move_pgdn_visual(TeApp *app, int width, int pg)
 {
-    EdInfo info;
-    int total_vrows;
-    int vr, vc, nr, nc;
-    int target;
+    int new_line, new_sub;
+    Ed *ed = app->editor;
 
     if (pg <= 0)
         pg = 1;
 
-    ed_get_info(app->editor, &info);
+    soft_move_vrows(app, width, +pg);
 
-    if (info.line_count <= 0)
-        return;
+    walk_vrows_forward(ed, width, s_soft_top_line, s_soft_top_sub, pg, &new_line, &new_sub);
 
-    total_vrows = soft_count_rows_before(app->editor, info.line_count, width);
-    soft_cursor_vpos(app, width, &vr, &vc);
-
-    if (s_soft_desired_vcol < 0)
-        s_soft_desired_vcol = vc;
-
-    target = vr + pg;
-
-    if (target > total_vrows - 1)
-        target = total_vrows - 1;
-
-    if (target < 0)
-        target = 0;
-
-    soft_visual_to_logical(app->editor, width, target, s_soft_desired_vcol, &nr, &nc);
-    ed_set_pos(app->editor, nr, nc);
-
-    s_soft_vtop += pg;
-
-    if (s_soft_vtop < 0)
-        s_soft_vtop = 0;
-
-    ed_ensure_visible(app->editor);
+    s_soft_top_line = new_line;
+    s_soft_top_sub = new_sub;
 }
 
-/* Word-wrap UTF-8 paste to col columns, preserving newlines. No hard-breaks for URLs/code */
+/* Word-wrap UTF-8 paste to col columns, preserving
+ * newlines. No hard-breaks for URLs/code */
 static int paste_char_width(wchar_t c)
 {
     /* For FTN editing: does this char take 1 column or 0? Zero-width cases: combining marks, BOM. CJK treated as 1 */
@@ -624,6 +832,7 @@ static char *wrap_paste_text(const char *utf8, int col)
         out[out_cap - 1] = L'\0';
 
     result = wcs_to_utf8(out, out_len);
+
     free(out);
 
     return result;
@@ -724,76 +933,90 @@ static void draw_body(TeApp *app)
     /* SOFT-WRAP: one logical line spans several screen rows */
     if (soft)
     {
-        int cur_vrow, cur_vcol;
-        int li, sr, vrow;
+        int li, sr;
+        int sub_skip;
 
-        soft_cursor_vpos(app, width, &cur_vrow, &cur_vcol);
+        /* Make sure the cursor is inside the viewport. This adjusts
+         * s_soft_top_line / s_soft_top_sub as needed -- O(distance to
+         * cursor), which is bounded by body_rows */
+        soft_ensure_visible(app, width, body_rows);
 
-        /* Keep the cursor's visual row inside [s_soft_vtop, +body_rows) */
-        if (cur_vrow < s_soft_vtop)
-            s_soft_vtop = cur_vrow;
-        else if (cur_vrow >= s_soft_vtop + body_rows)
-            s_soft_vtop = cur_vrow - body_rows + 1;
-
-        if (s_soft_vtop < 0)
-            s_soft_vtop = 0;
-
-        /* Walk logical lines, emitting visual sub-rows, skipping the
-         * first s_soft_vtop of them, filling `body_rows` screen rows */
+        /* Clear the body region */
         for (sr = 0; sr < body_rows; sr++)
         {
             move(body_top + sr, 0);
             clrtoeol();
         }
 
-        vrow = 0; /* absolute visual row being produced */
-        sr = 0;   /* screen row index 0..body_rows-1 */
+        /* Start drawing from s_soft_top_line, skipping the first
+         * s_soft_top_sub sub-rows of that line */
+        li = s_soft_top_line;
+        sub_skip = s_soft_top_sub;
+        sr = 0;
 
-        for (li = 0; li < info.line_count && sr < body_rows; li++)
+        while (li < info.line_count && sr < body_rows)
         {
             const wchar_t *l = ed_line_wcs(app->editor, li);
             int len = ed_line_len(app->editor, li);
             int pos = 0;
-            int done = 0;
-            int first_seg = 1; /* Track first segment of each line for line number */
+            int s = 0;         /* sub-row index within this line */
+            int first_seg = 1; /* tracks first painted sub-row for line number */
 
-            while (!done && sr < body_rows)
+            if (!l || len <= 0)
+            {
+                /* Empty line: it occupies exactly one (blank) sub-row
+                 * Only paint it if not skipped */
+                if (sub_skip == 0)
+                {
+                    if (show_lnum)
+                    {
+                        attron(COLOR_PAIR(COL_BORDER));
+                        mvprintw(body_top + sr, 0, "%*d", ln_width - 1, li + 1);
+                        attroff(COLOR_PAIR(COL_BORDER));
+                    }
+
+                    /* Block-selection overlay for empty line */
+                    if (b_r1 >= 0 && li >= b_r1 && li <= b_r2)
+                    {
+                        attron(A_REVERSE);
+                        mvaddch(body_top + sr, ln_offset, ' ');
+                        attroff(A_REVERSE);
+                    }
+
+                    sr++;
+                }
+
+                li++;
+                sub_skip = 0;
+                continue;
+            }
+
+            while (sr < body_rows)
             {
                 int seg_start = pos;
-                int seg_end, seg_len, np;
+                int seg_end = wrap_next(l, len, width, pos);
+                int np = seg_end;
 
-                if (l && len > 0)
+                if (s >= sub_skip)
                 {
-                    seg_end = wrap_next(l, len, width, pos);
-                    np = seg_end;
-                }
-                else
-                {
-                    seg_end = 0;
-                    np = len; /* empty line: one (blank) sub-row */
-                }
-
-                if (vrow >= s_soft_vtop)
-                {
-                    seg_len = seg_end - seg_start;
+                    int seg_len = seg_end - seg_start;
 
                     if (seg_len < 0)
                         seg_len = 0;
 
-                    /* Draw line number on first segment of each line */
+                    /* Line number on the first painted sub-row of this line */
                     if (show_lnum && first_seg)
                     {
                         attron(COLOR_PAIR(COL_BORDER));
                         mvprintw(body_top + sr, 0, "%*d", ln_width - 1, li + 1);
                         attroff(COLOR_PAIR(COL_BORDER));
-
                         first_seg = 0;
                     }
 
-                    if (l && seg_len > 0)
+                    if (seg_len > 0)
                         mvaddnwstr(body_top + sr, ln_offset, &l[seg_start], seg_len);
 
-                    /* Highlight search matches in softwrap */
+                    /* Highlight search matches */
                     if (app->search.rows && app->search.cols && app->search.count > 0)
                     {
                         int j;
@@ -806,25 +1029,21 @@ static void draw_body(TeApp *app)
                                 int match_col = app->search.cols[j];
                                 int match_end = match_col + match_len;
 
-                                /* Check if match is within this segment */
                                 if (match_col >= seg_start && match_end <= seg_end)
                                 {
-                                    /* Match entirely within this segment */
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                                    mvaddnwstr(body_top + sr, ln_offset + match_col - seg_start, &l[match_col], match_len);
+                                    mvaddnwstr(body_top + sr, ln_offset + wcs_vwidth(&l[seg_start], match_col - seg_start), &l[match_col], match_len);
                                     attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                                 }
                                 else if (match_col >= seg_start && match_col < seg_end)
                                 {
-                                    /* Match starts in this segment, continues to next */
                                     int partial_len = seg_end - match_col;
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                                    mvaddnwstr(body_top + sr, ln_offset + match_col - seg_start, &l[match_col], partial_len);
+                                    mvaddnwstr(body_top + sr, ln_offset + wcs_vwidth(&l[seg_start], match_col - seg_start), &l[match_col], partial_len);
                                     attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                                 }
                                 else if (match_end > seg_start && match_end <= seg_end)
                                 {
-                                    /* Match ends in this segment, started in previous */
                                     int partial_len = match_end - seg_start;
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
                                     mvaddnwstr(body_top + sr, ln_offset, &l[seg_start], partial_len);
@@ -834,7 +1053,7 @@ static void draw_body(TeApp *app)
                         }
                     }
 
-                    /* Block-selection overlay (logical-span) */
+                    /* Block-selection overlay */
                     if (b_r1 >= 0 && li >= b_r1 && li <= b_r2 && l)
                     {
                         int hs = (li == b_r1) ? b_c1 : 0;
@@ -849,12 +1068,11 @@ static void draw_body(TeApp *app)
                         if (hs < he)
                         {
                             attron(A_REVERSE);
-                            mvaddnwstr(body_top + sr, ln_offset + hs - seg_start, &l[hs], he - hs);
+                            mvaddnwstr(body_top + sr, ln_offset + wcs_vwidth(&l[seg_start], hs - seg_start), &l[hs], he - hs);
                             attroff(A_REVERSE);
                         }
                         else if (hs == seg_start && he == seg_start)
                         {
-                            /* Cursor at col 0 or empty line: show one reversed space */
                             attron(A_REVERSE);
                             mvaddch(body_top + sr, ln_offset, ' ');
                             attroff(A_REVERSE);
@@ -864,15 +1082,19 @@ static void draw_body(TeApp *app)
                     sr++;
                 }
 
+                s++;
+
                 if (np >= len)
-                    done = 1;
+                    break;
 
                 if (np <= pos)
                     np = pos + (width < 1 ? 1 : width);
 
                 pos = np;
-                vrow++;
             }
+
+            li++;
+            sub_skip = 0; /* subsequent lines start at sub-row 0 */
         }
     }
     else /* HARD-WRAP: classic 1 logical line == 1 screen row */
@@ -921,7 +1143,7 @@ static void draw_body(TeApp *app)
                         if (match_col >= 0 && match_col + match_len <= line_len)
                         {
                             attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                            mvaddnwstr(body_top + i, ln_offset + match_col, &wl[match_col], match_len);
+                            mvaddnwstr(body_top + i, ln_offset + wcs_vwidth(wl, match_col), &wl[match_col], match_len);
                             attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                         }
                     }
@@ -948,7 +1170,7 @@ static void draw_body(TeApp *app)
                 if (hs < he)
                 {
                     attron(A_REVERSE);
-                    mvaddnwstr(body_top + i, ln_offset + hs, &wcs[hs], he - hs);
+                    mvaddnwstr(body_top + i, ln_offset + wcs_vwidth(wl, hs), &wcs[hs], he - hs);
                     attroff(A_REVERSE);
                 }
                 else if (hs == 0 && he == 0)
@@ -990,12 +1212,15 @@ static void position_cursor(TeApp *app)
 
     if (soft)
     {
-        int vrow = 0, vcol = 0;
         int cy, cx;
         int max_y;
+        int screen_row;
+        int vcol;
 
-        soft_cursor_vpos(app, width, &vrow, &vcol);
-        cy = body_top + (vrow - s_soft_vtop);
+        screen_row = soft_cursor_screen_row(app, width);
+        vcol = soft_cursor_vcol(app->editor, width);
+
+        cy = body_top + screen_row;
         cx = ln_offset + vcol;
 
         /* Clamp to body region */
@@ -1021,7 +1246,21 @@ static void position_cursor(TeApp *app)
     else
     {
         int cy = body_top + (info.row - info.top);
-        int cx = ln_offset + info.col;
+        int cx;
+        const wchar_t *wl = ed_line_wcs(app->editor, info.row);
+        int line_len = ed_line_len(app->editor, info.row);
+        int wchar_col = info.col;
+
+        /* info.col is a wchar index; convert to visual column using the
+         * current line so wide glyphs (CJK / wide emoji) place the cursor
+         * at the correct pixel column */
+        if (wchar_col > line_len)
+            wchar_col = line_len;
+
+        if (wchar_col < 0)
+            wchar_col = 0;
+
+        cx = ln_offset + (wl ? wcs_vwidth(wl, wchar_col) : wchar_col);
 
         if (cy >= LINES - 1)
             cy = LINES - 2;
@@ -1512,6 +1751,7 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
 
         app->raw_bytes = NULL;
         app->raw_len = 0;
+
         te_status(app, "[No Name]");
 
         return 1;
@@ -1686,7 +1926,9 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
             if (ui_popup_confirm("Hard Wrap", msg) == 1)
             {
                 ed_rewrap_document(app->editor, app->wrap_col);
+
                 app->hard_wrap = 1;
+
                 ed_set_hard_wrap(app->editor, 1);
                 te_status(app, "Hard wrap: ON (rewrapped)");
             }
@@ -1852,6 +2094,7 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
                             ed_set_pos(app->editor, wi.row, brk);
                             ed_delete(app->editor);
                             ed_enter(app->editor);
+
                             clear_search_highlights(app);
                             ed_set_pos(app->editor, wi.row + 1, tail);
                         }
@@ -1875,7 +2118,8 @@ void ui_editor_run(TeApp *app)
         return;
 
     /* Reset soft-wrap state */
-    s_soft_vtop = 0;
+    s_soft_top_line = 0;
+    s_soft_top_sub = 0;
     s_soft_desired_vcol = -1;
     s_soft_last_width = COLS;
 
@@ -1961,7 +2205,6 @@ void ui_editor_run(TeApp *app)
                 clear_search_highlights(app);
                 soft_reset_desired();
 
-                s_soft_vtop = 0;
                 reported_len = (int)strlen(to_insert);
 
                 te_status(app, "Pasted %d bytes", reported_len);
@@ -2103,7 +2346,6 @@ void ui_editor_run(TeApp *app)
                     clear_search_highlights(app);
                     soft_reset_desired();
 
-                    s_soft_vtop = 0;
                     reported_len = (int)strlen(to_insert);
 
                     te_status(app, "Pasted %d bytes", reported_len);
