@@ -161,6 +161,13 @@ struct TERenderContext
     int scratch_h;
     UBYTE scratch_depth;
     UBYTE scratch_tried; /* 0 not tried, 1 in progress, 2 unsupported */
+
+    /* Reusable ARGB32 buffer for the read-modify-write AA blend path on
+     * RTG screens. Grown lazily to the largest glyph we encounter, kept
+     * alive across calls so the per-string cost is one realloc at most */
+    ULONG *aa_buf;
+    ULONG aa_buf_size; /* in pixels (w*h), not bytes */
+    UBYTE aa_disabled; /* 1 = ReadPixelArray failed once, stay on fallback */
 };
 
 static struct TEGlyph *te_glyph_get(struct TERenderContext *dc, struct TEFont *fnt, ULONG cp);
@@ -388,6 +395,15 @@ void TE_ContextRelease(struct TERenderContext *dc)
     {
         FreeBitMap(dc->scratch_bm);
         dc->scratch_bm = NULL;
+    }
+
+    /* Free the AA blend staging buffer if we ever grew one */
+    if (dc->aa_buf)
+    {
+        FreeVec(dc->aa_buf);
+
+        dc->aa_buf = NULL;
+        dc->aa_buf_size = 0;
     }
 
     if (dc->ft)
@@ -1738,7 +1754,7 @@ static void te_draw_rgba_rtg(struct TERenderContext *dc, struct TEGlyph *g, stru
             UBYTE R = s[x * 4 + 0], G = s[x * 4 + 1], B = s[x * 4 + 2], A = s[x * 4 + 3];
 
             /* If the pixel is fully transparent, write the current BG
-             * color so the glyph rectangle is solid.  This matches
+             * color so the glyph rectangle is solid. This matches
              * Move()+Text() semantics where the cell is filled */
             if (A == 0)
             {
@@ -1768,6 +1784,149 @@ static void te_draw_rgba_rtg(struct TERenderContext *dc, struct TEGlyph *g, stru
     FreeVec(line);
 }
 
+static int te_aa_ensure_buf(struct TERenderContext *dc, int w, int h)
+{
+    ULONG need = (ULONG)w * (ULONG)h;
+    ULONG *t;
+
+    if (need <= dc->aa_buf_size && dc->aa_buf)
+        return 1;
+
+    /* Grow (never shrink) so subsequent glyphs reuse the allocation. */
+    if (dc->aa_buf)
+    {
+        FreeVec(dc->aa_buf);
+
+        dc->aa_buf = NULL;
+        dc->aa_buf_size = 0;
+    }
+
+    t = (ULONG *)AllocVec(need * 4UL, MEMF_PUBLIC);
+
+    if (!t)
+        return 0;
+
+    dc->aa_buf = t;
+    dc->aa_buf_size = need;
+    return 1;
+}
+
+/* TODO */
+static int te_aa_lock_begin(struct TERenderContext *dc, struct RastPort *rp)
+{
+    if (!dc)
+        return 0;
+
+    return 0;
+}
+
+static void te_aa_lock_end(struct TERenderContext *dc)
+{
+}
+
+/* Alpha-blend a GRAY glyph into the RastPort using Read+Blend+Write
+ * dx/dy are RastPort-local coordinates as the caller already computes
+ * them (penX + bearingX, baseY - bearingY). Layer translation and
+ * clipping are handled by the CGX driver */
+static int te_aa_blend_gray(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int dx, int dy)
+{
+    int x, y;
+    int w, h;
+    LONG read_ok;
+    UBYTE fR, fG, fB;
+    ULONG *buf;
+
+    if (!dc || !rp || !g || !g->data)
+        return 0;
+
+    if (dc->aa_disabled)
+        return 0;
+
+    if (!CyberGfxBase)
+    {
+        cgx_probe();
+        if (!CyberGfxBase)
+            return 0;
+    }
+
+    w = g->width;
+    h = g->height;
+
+    if (w <= 0 || h <= 0)
+        return 1; /* SPACE etc., nothing to draw but not a failure */
+
+    if (!te_aa_ensure_buf(dc, w, h))
+        return 0;
+
+    buf = dc->aa_buf;
+
+    /* Read current screen pixels under the glyph rectangle into
+     * the ARGB32 buffer.  The driver clips automatically to the Layer's
+     * visible region, so pixels outside the window are left untouched
+     * (the read may return them zeroed -- that's fine since we'll only
+     * write pixels we actually modify) */
+    read_ok = ReadPixelArray((APTR)buf, 0, 0, (UWORD)(w * 4), rp, (UWORD)dx, (UWORD)dy, (UWORD)w, (UWORD)h, PIXFMT_ARGB32);
+
+    if (!read_ok)
+    {
+        /* Driver doesn't support ReadPixelArray with ARGB32 on this
+         * screen. Disable AA so we don't try again */
+        dc->aa_disabled = 1;
+        return 0;
+    }
+
+    fR = (UBYTE)((dc->fgRGB >> 16) & 0xFF);
+    fG = (UBYTE)((dc->fgRGB >> 8) & 0xFF);
+    fB = (UBYTE)(dc->fgRGB & 0xFF);
+
+    /* Blend foreground colour into buffer using the glyph alpha
+     * Pixels with alpha==0 are skipped entirely (preserves whatever was
+     * read for the background). Pixels with alpha==255 take fg
+     * directly. Everything else is interpolated */
+    for (y = 0; y < h; y++)
+    {
+        const UBYTE *srow = g->data + (ULONG)y * (ULONG)g->pitch;
+        ULONG *drow = buf + (ULONG)y * (ULONG)w;
+
+        for (x = 0; x < w; x++)
+        {
+            UBYTE a = srow[x];
+            ULONG pix;
+
+            if (a == 0)
+                continue;
+
+            if (a == 255)
+            {
+                drow[x] = 0xFF000000UL | ((ULONG)fR << 16) | ((ULONG)fG << 8) | (ULONG)fB;
+                continue;
+            }
+
+            /* Existing pixel: ARGB32 -> extract bytes */
+            pix = drow[x];
+            {
+                UBYTE dr = (UBYTE)((pix >> 16) & 0xFF);
+                UBYTE dg = (UBYTE)((pix >> 8) & 0xFF);
+                UBYTE db = (UBYTE)(pix & 0xFF);
+                ULONG ap1 = (ULONG)a + 1UL;
+                ULONG inv = (ULONG)(255 - a);
+
+                dr = (UBYTE)(((ULONG)fR * ap1 + (ULONG)dr * inv) >> 8);
+                dg = (UBYTE)(((ULONG)fG * ap1 + (ULONG)dg * inv) >> 8);
+                db = (UBYTE)(((ULONG)fB * ap1 + (ULONG)db * inv) >> 8);
+
+                drow[x] = 0xFF000000UL | ((ULONG)dr << 16) | ((ULONG)dg << 8) | (ULONG)db;
+            }
+        }
+    }
+
+    /* Write the modified rectangle back.  CGX handles
+     * format conversion and Layer clipping. */
+    WritePixelArray((APTR)buf, 0, 0, (UWORD)(w * 4), rp, (UWORD)dx, (UWORD)dy, (UWORD)w, (UWORD)h, PIXFMT_ARGB32);
+
+    return 1;
+}
+
 static void te_draw_glyph(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int penX, int baseY)
 {
     if (!g)
@@ -1790,24 +1949,32 @@ static void te_draw_glyph(struct TERenderContext *dc, struct RastPort *rp, struc
         return;
     }
 
-    /* TODO FIX AA */
-
-    /* GRAY (anti-aliased) format -- DIAGNOSTIC FALLBACK PATH
-     *
-     * The "pretty" AA paths (RTG WritePixelArray ARGB32, CLUT grayPens via
-     * te_draw_clut) have been observed to silently fail on the target
-     * hardware: with AA on, the glyphs are not visible even though the
-     * call paths execute normally.  Until the root cause is identified,
-     * we route every GRAY glyph through a bullet-proof MONO threshold
-     * blitter that uses the exact same BltTemplate machinery as the
-     * working MONO path.  This loses the smooth anti-aliased edges but
-     * guarantees the glyph is drawn with the RastPort's FgPen.
-     *
-     * If text is now visible with AA on, the AA paths are the problem
-     * If text is STILL invisible, the bug is upstream (rasterisation,
-     * cache, or coordinate maths) */
+    /* GRAY (anti-aliased) format. Three-tier fallback:
+     *   1. Read-Modify-Write blend (RTG, ARGB32) -- real AA over the
+     *      current screen contents. Driver-agnostic, uses public CGX
+     *      APIs only.
+     *   2. CLUT path with grayPens for indexed (AGA) screens
+     *   3. MONO-threshold via BltTemplate as last-resort so something
+     *      always shows even if both fast paths refuse */
     if (g->format == FMT_GRAY)
     {
+        if (dc->screenIsRTG && !dc->aa_disabled)
+        {
+            int dx = penX + g->bearingX;
+            int dy = baseY - g->bearingY;
+
+            if (te_aa_blend_gray(dc, rp, g, dx, dy))
+                return;
+        }
+
+        if (dc->colorMapValid && !dc->screenIsRTG)
+        {
+            te_build_clut_mirror(dc, g);
+            te_draw_clut(dc, g, rp, penX, baseY);
+            return;
+        }
+
+        /* Safety net */
         te_draw_gray_as_mono(g, rp, penX, baseY);
         return;
     }
@@ -2073,6 +2240,13 @@ void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDra
             TE_SetScreen(dc, sc);
     }
 
+    /* AA path: try to lock the destination bitmap once for the whole
+     * string. If it works, te_draw_glyph() will blend each GRAY glyph
+     * directly into bitmap memory in the screen's native pixel format
+     * If the lock fails (unsupported format, planar bitmap, etc.) the
+     * per-glyph fallback chain (CLUT or MONO threshold) is used */
+    te_aa_lock_begin(dc, rp);
+
     penX = pos->x;
     baseY = pos->y;
 
@@ -2159,6 +2333,9 @@ void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDra
             penX += dc->fonts->monospace_advance;
         }
     }
+
+    /* Release the bitmap lock taken at the start of the function */
+    te_aa_lock_end(dc);
 
     pos->x = (WORD)penX;
 }

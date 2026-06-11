@@ -122,7 +122,7 @@ static Cell *s_shadow = NULL;
 static int s_shadow_w = 0, s_shadow_h = 0;
 static int s_shadow_dirty = 1; /* force full redraw on next render_all */
 
-#define SHADOW_BLEED_CELLS 2
+#define SHADOW_BLEED_CELLS 4
 #define SHADOW_DIRTY_MAX_COLS 1024
 static unsigned char s_dirty_row[SHADOW_DIRTY_MAX_COLS];
 static unsigned char s_dirty_tmp[SHADOW_DIRTY_MAX_COLS];
@@ -138,7 +138,7 @@ static int s_key_queue_pos = 0;
  * two cells in the buffer: a LEAD cell with the actual codepoint, followed
  * by a TRAILING cell with this sentinel. The TRAILING cell is skipped by
  * the renderer (its pixels are painted by the lead glyph's wide bitmap) but
- * counted for RectFill area and shadow tracking.
+ * counted for RectFill area and shadow tracking
  *
  * The sentinel value 0xFFFE is U+FFFE, a Unicode non-character that cannot
  * appear in valid text
@@ -199,6 +199,7 @@ static int compute_dirty_row(int r)
     int any = 0;
     int cols = COLS;
     int countdown = 0;
+    int has_wide;
 
     if (cols > SHADOW_DIRTY_MAX_COLS)
         cols = SHADOW_DIRTY_MAX_COLS;
@@ -231,6 +232,59 @@ static int compute_dirty_row(int r)
             s_dirty_row[c] = 0;
 
         return 0;
+    }
+
+    /* If the row contains wide-glyph cells (CJK lead+trailing, or any
+     * codepoint in a Unicode range we render as 2-cells wide), force
+     * the entire row dirty. Wide glyphs and visually-wide symbols
+     * (arrows, dingbats, geometric shapes...) often render pixels that
+     * extend outside their reported cell width. Repainting only a
+     * limited bleed range crops those extensions on adjacent cells that
+     * happened to not be in the dirty zone
+     *
+     * The cost is one extra row repaint per frame in rows containing
+     * wide content, which is negligible compared to a corrupted visual */
+    has_wide = 0;
+
+    for (c = 0; c < cols; c++)
+    {
+        Cell *cc = CELL(stdscr, r, c);
+        ULONG ch = (ULONG)cc->ch;
+        wchar_t wc;
+
+        if (ch == TE_CELL_WIDE_TRAILING)
+        {
+            has_wide = 1;
+            break;
+        }
+
+        /* Codepoints that visually render wider than one cell even
+         * though wcwidth() says 1. Detected here so the dirty
+         * propagation covers them too. Keep this list short -- it
+         * is a heuristic for "this row may have glyph overflow" */
+        /* TODO */
+        /*wc = (wchar_t)ch;
+        has_wide = (wcswidth(&wc, 1) == 2);
+        break;*/
+
+        if ((ch >= 0x2190 && ch <= 0x21FF) || /* Arrows         */
+            (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block    */
+            (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric      */
+            (ch >= 0x2600 && ch <= 0x26FF) || /* Misc symbols   */
+            (ch >= 0x2700 && ch <= 0x27BF) || /* Dingbats       */
+            (ch >= 0x2B00 && ch <= 0x2BFF))   /* Misc symbols 2 */
+        {
+            has_wide = 1;
+            break;
+        }
+    }
+
+    if (has_wide)
+    {
+        for (c = 0; c < cols; c++)
+            s_dirty_row[c] = 1;
+
+        return 1;
     }
 
     /* Propagate dirty by ±SHADOW_BLEED_CELLS using a sweep with a
@@ -1005,6 +1059,7 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
     struct TEGlyphMetrics metric;
     WORD mw, iw;
     struct TEGlyphMetrics ms, is_;
+    ULONG prefs;
 
     if (!s_use_ttf || !ami_te_dc || !rp)
         return;
@@ -1047,34 +1102,32 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
     /* AUTO antialias: decide based on screen depth now that we know it
      * On AGA (depth <= 8) the AA path is slow and on a 4-bit screen looks
      * worse than MONO, so default to OFF. RTG (>=15 bit) gets AA */
+    prefs = TE_GetFlags(ami_te_dc);
+
+    if (s_ttf_aa_auto && ami_te_screen)
     {
-        ULONG prefs = TE_GetFlags(ami_te_dc);
+        ULONG depth = (ULONG)GetBitMapAttr(ami_te_screen->RastPort.BitMap, BMA_DEPTH);
+        int want = (depth >= 15) ? 1 : 0; /* RTG depths only */
 
-        if (s_ttf_aa_auto && ami_te_screen)
-        {
-            ULONG depth = (ULONG)GetBitMapAttr(ami_te_screen->RastPort.BitMap, BMA_DEPTH);
-            int want = (depth >= 15) ? 1 : 0; /* RTG depths only */
+        s_ttf_antialias = want;
 
-            s_ttf_antialias = want;
-
-            if (want)
-                prefs |= TE_FLAG_ANTIALIAS;
-            else
-                prefs &= ~TE_FLAG_ANTIALIAS;
-        }
-
-        /* If the detected font is monospace, tell TE to advance every
-         * glyph by monospace_advance instead of the glyph's own advance.
-         * This is essential for fixed-cell terminal layouts -- without it,
-         * glyphs with quirky per-glyph advances (notably GNU Unifont in
-         * GRAY mode) bunch together and become illegible or invisible. */
-        if (!s_ttf_proportional)
-            prefs |= TE_FLAG_FIXEDWIDTH;
+        if (want)
+            prefs |= TE_FLAG_ANTIALIAS;
         else
-            prefs &= ~TE_FLAG_FIXEDWIDTH;
-
-        TE_SetFlags(ami_te_dc, prefs);
+            prefs &= ~TE_FLAG_ANTIALIAS;
     }
+
+    /* If the detected font is monospace, tell TE to advance every
+     * glyph by monospace_advance instead of the glyph's own advance.
+     * This is essential for fixed-cell terminal layouts -- without it,
+     * glyphs with quirky per-glyph advances (notably GNU Unifont in
+     * GRAY mode) bunch together and become illegible or invisible. */
+    if (!s_ttf_proportional)
+        prefs |= TE_FLAG_FIXEDWIDTH;
+    else
+        prefs &= ~TE_FLAG_FIXEDWIDTH;
+
+    TE_SetFlags(ami_te_dc, prefs);
 }
 
 static void ami_ttf_close()

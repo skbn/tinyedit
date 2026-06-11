@@ -828,6 +828,16 @@ int ed_rewrap_document(Ed *ed, int width)
     char *snapshot_before = NULL;
     char *snapshot_after = NULL;
     UndoGroup *g;
+    int do_undo;
+
+/* Threshold over which we skip the full-document undo snapshot. On
+ * a 2M-line file, ed_to_string() runs twice and the result lives in
+ * the undo stack -- that's both the slowest single thing this
+ * function does and a memory hog. For files that big the user is
+ * usually applying a one-shot reformat and undo of the entire doc
+ * isn't realistic anyway, so we skip the snapshot and just rewrap
+ * (Individual edits afterwards still get normal undo entries) */
+#define ED_REWRAP_UNDO_LINE_LIMIT 5000
 
     if (!ed || width < 20 || ed->count <= 0)
         return -1;
@@ -835,10 +845,18 @@ int ed_rewrap_document(Ed *ed, int width)
     cursor_row_before = ed->row;
     cursor_col_before = ed->col;
 
-    snapshot_before = ed_to_string(ed);
+    if (do_undo)
+    {
+        snapshot_before = ed_to_string(ed);
 
-    if (!snapshot_before)
-        return -1;
+        if (!snapshot_before)
+        {
+            /* If snapshot allocation failed (out of memory) but the doc
+             * is below the threshold, give up on undo silently and
+             * proceed.  Better than refusing the whole operation */
+            do_undo = 0;
+        }
+    }
 
     /* Enable snapshot mode to block individual undo operations */
     ed->undo_snapshot_mode = 1;
@@ -916,6 +934,20 @@ int ed_rewrap_document(Ed *ed, int width)
     cursor_row_after = ed->row;
     cursor_col_after = ed->col;
 
+    /* Invalidate the soft-wrap prefix cache regardless of undo path -- the
+     * line shapes changed so any cached vrow positions are stale */
+    ed_prefix_invalidate(ed);
+
+    if (!do_undo)
+    {
+        /* Large-document path: rewrap done, no undo entry generated
+         * The redo stack is also cleared so the user doesn't accidentally
+         * restore stale state */
+        ed_redo_clear(ed);
+
+        return 0;
+    }
+
     /* Save snapshot after rewrap for redo */
     snapshot_after = ed_to_string(ed);
 
@@ -973,8 +1005,6 @@ int ed_rewrap_document(Ed *ed, int width)
     g->ops[g->count].hard_wrap_mode = ed->hard_wrap;
     g->count++;
     ed->undo_open = 0;
-
-    ed_prefix_invalidate(ed);
 
     /* Push snapshot to redo stack */
     if (ed_undo_stack_make_room(&ed->redo_stack, &ed->redo_top, &ed->redo_cap, ed->redo_max) == 0)
