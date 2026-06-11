@@ -15,6 +15,10 @@
 #include <stdint.h>
 #include <wchar.h>
 
+#ifdef PLATFORM_WIN32
+#include <windows.h>
+#endif
+
 int utf8_strlen(const char *s);
 int utf8_offset(const char *s, int charpos);
 uint32_t utf8_next(const char **p);

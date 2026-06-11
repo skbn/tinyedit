@@ -23,6 +23,10 @@
 
 #include "wrapper.h"
 #include "ncursesw_win32.h"
+#include "core/utf8.h"
+
+/* Sentinel value for trailing cells of wide glyphs (same as amiga_te) */
+#define WIN32_CELL_WIDE_TRAILING 0x0000FFFEUL
 
 /* Screen dimensions */
 int LINES = 25;
@@ -75,6 +79,11 @@ static Cell *s_shadow = NULL;
 static int s_shadow_w = 0, s_shadow_h = 0;
 static int s_shadow_dirty = 1;
 
+#define SHADOW_BLEED_CELLS 4
+#define SHADOW_DIRTY_MAX_COLS 1024
+static unsigned char s_dirty_row[SHADOW_DIRTY_MAX_COLS];
+static unsigned char s_dirty_tmp[SHADOW_DIRTY_MAX_COLS];
+
 /* Previous cursor position for clean redraw */
 static int s_last_cur_y = -1, s_last_cur_x = -1;
 
@@ -110,6 +119,7 @@ static COLORREF s_rgb_map[16] =
 
 /* Forward declarations */
 static void render_all(void);
+static int compute_dirty_row(int r);
 
 /* Window procedure */
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -138,137 +148,150 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             int key = (int)wParam;
             int is_control_key = 0;
 
-            /* Map arrow and special keys only */
-            switch (key)
+            /* Handle Alt+letter combinations */
+            if ((GetKeyState(VK_MENU) & 0x8000) && ((key >= 'A' && key <= 'Z') || (key >= 'a' && key <= 'z')))
             {
-            case VK_UP:
-                key = KEY_UP;
-                is_control_key = 1;
-                break;
-            case VK_DOWN:
-                key = KEY_DOWN;
-                is_control_key = 1;
-                break;
-            case VK_LEFT:
-                if (GetKeyState(VK_CONTROL) & 0x8000)
-                {
-                    key = KEY_CLEFT;
-                    is_control_key = 1;
-                }
-                else
-                {
-                    key = KEY_LEFT;
-                    is_control_key = 1;
-                }
-                break;
-            case VK_RIGHT:
-                if (GetKeyState(VK_CONTROL) & 0x8000)
-                {
-                    key = KEY_CRIGHT;
-                    is_control_key = 1;
-                }
-                else
-                {
-                    key = KEY_RIGHT;
-                    is_control_key = 1;
-                }
-                break;
-            case VK_HOME:
-                key = KEY_HOME;
-                is_control_key = 1;
-                break;
-            case VK_END:
-                key = KEY_END;
-                is_control_key = 1;
-                break;
-            case VK_PRIOR:
-                key = KEY_PPAGE;
-                is_control_key = 1;
-                break;
-            case VK_NEXT:
-                key = KEY_NPAGE;
-                is_control_key = 1;
-                break;
-            case VK_INSERT:
-                key = KEY_IC;
-                is_control_key = 1;
+                /* Convert to uppercase for KEY_ALT */
+                if (key >= 'a' && key <= 'z')
+                    key = key - 'a' + 'A';
 
-                /* Check for Shift+Insert for paste */
-                if (GetKeyState(VK_SHIFT) & 0x8000)
+                key = KEY_ALT(key);
+                is_control_key = 1;
+            }
+            else
+            {
+                /* Map arrow and special keys only */
+                switch (key)
                 {
-                    key = KEY_SIC; /* Shift+Insert */
+                case VK_UP:
+                    key = KEY_UP;
+                    is_control_key = 1;
+                    break;
+                case VK_DOWN:
+                    key = KEY_DOWN;
+                    is_control_key = 1;
+                    break;
+                case VK_LEFT:
+                    if (GetKeyState(VK_CONTROL) & 0x8000)
+                    {
+                        key = KEY_CLEFT;
+                        is_control_key = 1;
+                    }
+                    else
+                    {
+                        key = KEY_LEFT;
+                        is_control_key = 1;
+                    }
+                    break;
+                case VK_RIGHT:
+                    if (GetKeyState(VK_CONTROL) & 0x8000)
+                    {
+                        key = KEY_CRIGHT;
+                        is_control_key = 1;
+                    }
+                    else
+                    {
+                        key = KEY_RIGHT;
+                        is_control_key = 1;
+                    }
+                    break;
+                case VK_HOME:
+                    key = KEY_HOME;
+                    is_control_key = 1;
+                    break;
+                case VK_END:
+                    key = KEY_END;
+                    is_control_key = 1;
+                    break;
+                case VK_PRIOR:
+                    key = KEY_PPAGE;
+                    is_control_key = 1;
+                    break;
+                case VK_NEXT:
+                    key = KEY_NPAGE;
+                    is_control_key = 1;
+                    break;
+                case VK_INSERT:
+                    key = KEY_IC;
+                    is_control_key = 1;
+
+                    /* Check for Shift+Insert for paste */
+                    if (GetKeyState(VK_SHIFT) & 0x8000)
+                        key = KEY_SIC; /* Shift+Insert */
+
+                    break;
+                case VK_DELETE:
+                    key = KEY_DC;
+                    is_control_key = 1;
+                    break;
+                case VK_F1:
+                    key = KEY_F(1);
+                    is_control_key = 1;
+                    break;
+                case VK_F2:
+                    key = KEY_F(2);
+                    is_control_key = 1;
+                    break;
+                case VK_F3:
+                    key = KEY_F(3);
+                    is_control_key = 1;
+                    break;
+                case VK_F4:
+                    key = KEY_F(4);
+                    is_control_key = 1;
+                    break;
+                case VK_F5:
+                    key = KEY_F(5);
+                    is_control_key = 1;
+                    break;
+                case VK_F6:
+                    key = KEY_F(6);
+                    is_control_key = 1;
+                    break;
+                case VK_F7:
+                    key = KEY_F(7);
+                    is_control_key = 1;
+                    break;
+                case VK_F8:
+                    key = KEY_F(8);
+                    is_control_key = 1;
+                    break;
+                case VK_F9:
+                    key = KEY_F(9);
+                    is_control_key = 1;
+                    break;
+                case VK_F10:
+                    key = KEY_F(10);
+                    is_control_key = 1;
+                    break;
+                case VK_F11:
+                    key = KEY_F(11);
+                    is_control_key = 1;
+                    break;
+                case VK_F12:
+                    key = KEY_F(12);
+                    is_control_key = 1;
+                    break;
+                case VK_ESCAPE:
+                    is_control_key = 1;
+                    break;
+                case VK_RETURN:
+                    is_control_key = 1;
+                    break;
+                case VK_TAB:
+                    is_control_key = 1;
+                    break;
+                case VK_BACK:
+                    key = KEY_BACKSPACE;
+                    is_control_key = 1;
+                    break;
                 }
-                break;
-            case VK_DELETE:
-                key = KEY_DC;
-                is_control_key = 1;
-                break;
-            case VK_F1:
-                key = KEY_F(1);
-                is_control_key = 1;
-                break;
-            case VK_F2:
-                key = KEY_F(2);
-                is_control_key = 1;
-                break;
-            case VK_F3:
-                key = KEY_F(3);
-                is_control_key = 1;
-                break;
-            case VK_F4:
-                key = KEY_F(4);
-                is_control_key = 1;
-                break;
-            case VK_F5:
-                key = KEY_F(5);
-                is_control_key = 1;
-                break;
-            case VK_F6:
-                key = KEY_F(6);
-                is_control_key = 1;
-                break;
-            case VK_F7:
-                key = KEY_F(7);
-                is_control_key = 1;
-                break;
-            case VK_F8:
-                key = KEY_F(8);
-                is_control_key = 1;
-                break;
-            case VK_F9:
-                key = KEY_F(9);
-                is_control_key = 1;
-                break;
-            case VK_F10:
-                key = KEY_F(10);
-                is_control_key = 1;
-                break;
-            case VK_F11:
-                key = KEY_F(11);
-                is_control_key = 1;
-                break;
-            case VK_F12:
-                key = KEY_F(12);
-                is_control_key = 1;
-                break;
-            case VK_ESCAPE:
-                is_control_key = 1;
-                break;
-            case VK_RETURN:
-                is_control_key = 1;
-                break;
-            case VK_TAB:
-                is_control_key = 1;
-                break;
-            case VK_BACK:
-                key = KEY_BACKSPACE;
-                is_control_key = 1;
-                break;
             }
 
             if (is_control_key)
                 s_key_buf[s_key_count++] = key;
         }
+
         return 0;
 
     case WM_CHAR:
@@ -478,17 +501,34 @@ static void render_cell(int row, int col, chtype ch, attr_t attrs)
     HBRUSH hBrush;
     wchar_t buf[2];
     int pair;
+    int cell_w = fw; /* width of the area to repaint -- fw or 2*fw */
+    chtype draw_ch = ch;
 
     if (!hMemDC || row < 0 || row >= LINES || col < 0 || col >= COLS)
         return;
 
+    /* Don't render TRAILING cells - they're part of the lead glyph */
+    if (ch == WIN32_CELL_WIDE_TRAILING)
+        return;
+
+    /* WIDE-CELL HANDLING -- use wcswidth for consistency */
+    if (stdscr && stdscr->cells)
+    {
+        wchar_t wc = (wchar_t)ch;
+        int w = wcswidth(&wc, 1);
+
+        if (w == 2)
+            cell_w = 2 * fw;
+    }
+
     pair = (int)((attrs & A_COLOR) >> 8);
     apply_colors(pair, attrs);
 
-    /* Background - use current background color like Amiga BgPen */
+    /* Background - use current background color like Amiga BgPen
+     * Clear over the actual visual extent (1 or 2 cells) */
     rect.left = col * fw;
     rect.top = row * fh;
-    rect.right = rect.left + fw;
+    rect.right = rect.left + cell_w;
     rect.bottom = rect.top + fh;
 
     hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
@@ -496,7 +536,7 @@ static void render_cell(int row, int col, chtype ch, attr_t attrs)
     DeleteObject(hBrush);
 
     /* Character - already Unicode from reader, just render */
-    buf[0] = (wchar_t)ch;
+    buf[0] = (wchar_t)draw_ch;
     buf[1] = L'\0';
 
     if (buf[0] >= 0x20)
@@ -508,6 +548,122 @@ void win32_force_redraw(void)
 {
     s_shadow_dirty = 1;
     render_all();
+}
+
+/* Compute dirty bitmap for row r into s_dirty_row[0..COLS-1]
+ * Returns 1 if any cell in the row is dirty, 0 otherwise */
+static int compute_dirty_row(int r)
+{
+    int c;
+    int any = 0;
+    int cols = COLS;
+    int countdown = 0;
+    int has_wide;
+
+    if (cols > SHADOW_DIRTY_MAX_COLS)
+        cols = SHADOW_DIRTY_MAX_COLS;
+
+    /* Raw per-cell diff vs shadow */
+    if (!s_shadow || s_shadow_dirty)
+    {
+        for (c = 0; c < cols; c++)
+            s_dirty_tmp[c] = 1;
+
+        any = (cols > 0);
+    }
+    else
+    {
+        Cell *row_sh = &s_shadow[r * COLS];
+
+        for (c = 0; c < cols; c++)
+        {
+            Cell *cc = CELL(stdscr, r, c);
+            int d = (cc->ch != row_sh[c].ch) || (cc->attrs != row_sh[c].attrs);
+
+            s_dirty_tmp[c] = (unsigned char)d;
+            any |= d;
+        }
+    }
+
+    if (!any)
+    {
+        for (c = 0; c < cols; c++)
+            s_dirty_row[c] = 0;
+
+        return 0;
+    }
+
+    /* If the row contains wide-glyph cells (CJK lead+trailing, or any
+     * codepoint in a Unicode range we render as 2-cells wide), force
+     * the entire row dirty. Wide glyphs and visually-wide symbols
+     * (arrows, dingbats, geometric shapes...) often render pixels that
+     * extend outside their reported cell width. Repainting only a
+     * limited bleed range crops those extensions on adjacent cells that
+     * happened to not be in the dirty zone
+     *
+     * The cost is one extra row repaint per frame in rows containing
+     * wide content, which is negligible compared to a corrupted visual */
+    has_wide = 0;
+
+    for (c = 0; c < cols; c++)
+    {
+        Cell *cc = CELL(stdscr, r, c);
+        ULONG ch = (ULONG)cc->ch;
+
+        /* Codepoints that visually render wider than one cell even
+         * though they report as 1 cell. Detected here so the dirty
+         * propagation covers them too. Keep this list short -- it
+         * is a heuristic for "this row may have glyph overflow" */
+        if ((ch >= 0x2190 && ch <= 0x21FF) || /* Arrows         */
+            (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block    */
+            (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric      */
+            (ch >= 0x2600 && ch <= 0x26FF) || /* Misc symbols   */
+            (ch >= 0x2700 && ch <= 0x27BF) || /* Dingbats       */
+            (ch >= 0x2B00 && ch <= 0x2BFF))   /* Misc symbols 2 */
+        {
+            has_wide = 1;
+            break;
+        }
+    }
+
+    if (has_wide)
+    {
+        for (c = 0; c < cols; c++)
+            s_dirty_row[c] = 1;
+
+        return 1;
+    }
+
+    /* Propagate dirty by ±SHADOW_BLEED_CELLS using a sweep with a
+     * running countdown - O(cols), no inner loop. After the forward sweep,
+     * s_dirty_row[c] is set if any cell in [c-K..c] was base-dirty (handles
+     * left→right bleed). The backward sweep adds right→left bleed */
+    for (c = 0; c < cols; c++)
+    {
+        if (s_dirty_tmp[c])
+            countdown = SHADOW_BLEED_CELLS + 1;
+
+        s_dirty_row[c] = (unsigned char)(countdown > 0);
+
+        if (countdown > 0)
+            countdown--;
+    }
+
+    countdown = 0;
+
+    for (c = cols - 1; c >= 0; c--)
+    {
+        if (s_dirty_tmp[c])
+            countdown = SHADOW_BLEED_CELLS + 1;
+
+        if (countdown > 0)
+        {
+            s_dirty_row[c] = 1;
+            countdown--;
+        }
+    }
+
+    return 1;
 }
 
 /* Render entire screen with shadow buffer like Amiga */
@@ -554,6 +710,11 @@ static void render_all(void)
 
     for (r = 0; r < LINES; r++)
     {
+        /* Compute dirty bitmap with bleed propagation for this row. If nothing
+         * is dirty, skip the row entirely — saves the inner while() walk */
+        if (!compute_dirty_row(r))
+            continue;
+
         c = 0;
 
         while (c < COLS)
@@ -565,19 +726,14 @@ static void render_all(void)
 
             cell = CELL(stdscr, r, c);
 
-            /* Skip unchanged cells (shadow diff) */
-            if (s_shadow && !s_shadow_dirty)
+            /* Skip cells that are clean after bleed propagation */
+            if (!s_dirty_row[c])
             {
-                Cell *sh = &s_shadow[r * COLS + c];
-
-                if (sh->ch == cell->ch && sh->attrs == cell->attrs)
-                {
-                    c++;
-                    continue;
-                }
+                c++;
+                continue;
             }
 
-            /* Start a run of contiguous changed cells with same color/attrs */
+            /* Start a run of contiguous dirty cells with same color/attrs */
             run_start = c;
             run_pair = (cell->attrs & A_COLOR) >> 8;
             run_attrs = cell->attrs;
@@ -585,19 +741,14 @@ static void render_all(void)
 
             while (c < COLS && run_len < COLS)
             {
-                Cell *cc = CELL(stdscr, r, c);
-                int changed = 1;
+                Cell *cc;
                 int p;
+                wchar_t wc;
+                int is_wide;
 
-                if (s_shadow && !s_shadow_dirty)
-                {
-                    Cell *sh = &s_shadow[r * COLS + c];
+                cc = CELL(stdscr, r, c);
 
-                    if (sh->ch == cc->ch && sh->attrs == cc->attrs)
-                        changed = 0;
-                }
-
-                if (!changed)
+                if (!s_dirty_row[c])
                     break;
 
                 p = (cc->attrs & A_COLOR) >> 8;
@@ -606,8 +757,24 @@ static void render_all(void)
                 if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
                     break;
 
-                /* Character is already UTF-8/Unicode, use directly */
-                ((wchar_t *)text_buf)[run_len++] = (wchar_t)cc->ch;
+                /* TRAILING cell of a wide glyph: don't add to run_buf (no
+                 * glyph to draw -- the lead already covered this pixel area)
+                 * but DO advance c and update shadow so the row count and
+                 * FillRect area match the visual extent */
+                if (cc->ch == WIN32_CELL_WIDE_TRAILING)
+                {
+                    if (s_shadow)
+                        s_shadow[r * COLS + c] = *cc;
+
+                    run_len++; /* counts for area, not for text_buf */
+                    c++;
+
+                    continue;
+                }
+
+                /* Normal character */
+                wc = (wchar_t)cc->ch;
+                ((wchar_t *)text_buf)[run_len++] = wc;
 
                 if (s_shadow)
                     s_shadow[r * COLS + c] = *cc;
@@ -621,6 +788,25 @@ static void render_all(void)
                 continue;
             }
 
+            /* Pre-scan: does this run contain any wide-glyph cells?
+             * If yes, force per-cell rendering. Check for TRAILING cells */
+            int run_has_wide = 0;
+            {
+                int u2;
+                Cell *cc2;
+
+                for (u2 = 0; u2 < run_len; u2++)
+                {
+                    cc2 = CELL(stdscr, r, run_start + u2);
+
+                    if (cc2->ch == WIN32_CELL_WIDE_TRAILING)
+                    {
+                        run_has_wide = 1;
+                        break;
+                    }
+                }
+            }
+
             if (run_pair != last_pair || run_attrs != last_attrs)
             {
                 apply_colors(run_pair, run_attrs);
@@ -628,18 +814,74 @@ static void render_all(void)
                 last_attrs = run_attrs;
             }
 
-            /* Draw background for entire run */
-            rect.left = run_start * fw;
-            rect.top = r * fh;
-            rect.right = rect.left + run_len * fw;
-            rect.bottom = rect.top + fh;
+            if (run_has_wide)
+            {
+                /* Per-cell rendering for wide glyphs.
+                 * Similar to amiga_te.c: pin each glyph at cell-aligned position */
+                int u;
+                int actual_pos = run_start;
+                Cell *cc;
+                wchar_t wc;
+                int cx;
+                int cy;
+                int is_wide;
 
-            hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
-            FillRect(hMemDC, &rect, hBrush);
-            DeleteObject(hBrush);
+                for (u = 0; u < run_len; u++)
+                {
+                    cc = CELL(stdscr, r, actual_pos);
+                    wc = (wchar_t)cc->ch;
+                    cx = actual_pos * fw;
+                    cy = r * fh;
 
-            /* Draw text for the run using Unicode */
-            TextOutW(hMemDC, rect.left, rect.top, (LPCWSTR)text_buf, run_len);
+                    /* TRAILING cell: skip drawing but advance position */
+                    if (wc == WIN32_CELL_WIDE_TRAILING)
+                    {
+                        actual_pos++;
+                        continue;
+                    }
+
+                    /* Check if this is a wide glyph using wcswidth */
+                    is_wide = (wcswidth(&wc, 1) == 2);
+
+                    /* Clear this cell's exact rectangle (or 2 cells if wide) */
+                    rect.left = cx;
+                    rect.top = cy;
+                    rect.right = cx + (is_wide ? 2 * fw : fw);
+                    rect.bottom = cy + fh;
+
+                    hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
+                    FillRect(hMemDC, &rect, hBrush);
+                    DeleteObject(hBrush);
+
+                    /* Draw character */
+                    if (wc >= 0x20)
+                    {
+                        wchar_t buf[2] = {wc, L'\0'};
+                        TextOutW(hMemDC, cx, cy, buf, 1);
+                    }
+
+                    /* If wide, skip the trailing cell in the next iteration */
+                    if (is_wide)
+                        actual_pos += 2;
+                    else
+                        actual_pos++;
+                }
+            }
+            else
+            {
+                /* Batched rendering for normal runs */
+                rect.left = run_start * fw;
+                rect.top = r * fh;
+                rect.right = rect.left + run_len * fw;
+                rect.bottom = rect.top + fh;
+
+                hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
+                FillRect(hMemDC, &rect, hBrush);
+                DeleteObject(hBrush);
+
+                /* Draw text for the run using Unicode */
+                TextOutW(hMemDC, rect.left, rect.top, (LPCWSTR)text_buf, run_len);
+            }
         }
 
         /* Reset color tracking between lines */
@@ -660,36 +902,91 @@ static void render_all(void)
     if (s_shadow && prev_y >= 0 && prev_x >= 0 && prev_y < LINES && prev_x < COLS && (prev_y != cy_cell || prev_x != cx_cell))
     {
         Cell *cell = CELL(stdscr, prev_y, prev_x);
+        int sync_lead = prev_x;
+
         render_cell(prev_y, prev_x, cell->ch, cell->attrs);
-        s_shadow[prev_y * COLS + prev_x] = *cell;
+
+        /* If prev was a TRAILING, the lead lives one to the left -- shadow
+         * sync target is the lead */
+        if (cell->ch == WIN32_CELL_WIDE_TRAILING && prev_x > 0)
+            sync_lead = prev_x - 1;
+
+        s_shadow[prev_y * COLS + sync_lead] = *CELL(stdscr, prev_y, sync_lead);
+
+        /* If lead has a trailing companion, also resync that */
+        if (sync_lead + 1 < COLS)
+        {
+            Cell *trail = CELL(stdscr, prev_y, sync_lead + 1);
+
+            if (trail->ch == WIN32_CELL_WIDE_TRAILING)
+                s_shadow[prev_y * COLS + sync_lead + 1] = *trail;
+        }
     }
 
     /* Draw cursor border like Amiga */
     if (s_cursor_vis && cy_cell >= 0 && cy_cell < LINES && cx_cell >= 0 && cx_cell < COLS)
     {
         HPEN hPen, oldPen;
-        int cx = cx_cell * fw;
-        int cy = cy_cell * fh;
+        int cx, cy;
+        int cursor_w = fw;
+        int draw_x_cell = cx_cell;
+        int trailing_x_cell = -1; /* -1 = none */
+
+        /* Determine cursor visual width based on what's under it
+         * Two wide-glyph cases for the cursor:
+         *  - on LEAD (cell[c+1] == TRAILING)  ->  2*fw outline at cell c
+         *  - on TRAILING (cell[c] is sentinel) -> 2*fw outline snapped to c-1
+         */
+        if (stdscr && stdscr->cells)
+        {
+            Cell *cur = CELL(stdscr, cy_cell, cx_cell);
+
+            if (cur->ch == WIN32_CELL_WIDE_TRAILING && cx_cell > 0)
+            {
+                draw_x_cell = cx_cell - 1;
+                trailing_x_cell = cx_cell;
+                cursor_w = 2 * fw;
+            }
+            else if (cx_cell + 1 < COLS)
+            {
+                Cell *nxt = CELL(stdscr, cy_cell, cx_cell + 1);
+
+                if (nxt->ch == WIN32_CELL_WIDE_TRAILING)
+                {
+                    trailing_x_cell = cx_cell + 1;
+                    cursor_w = 2 * fw;
+                }
+            }
+        }
+
+        cx = draw_x_cell * fw;
+        cy = cy_cell * fh;
 
         hPen = CreatePen(PS_SOLID, 1, s_rgb_map[s_cursor_color]);
         oldPen = SelectObject(hMemDC, hPen);
 
         /* Draw rectangle border like Amiga Draw() calls */
         MoveToEx(hMemDC, cx, cy, NULL);
-        LineTo(hMemDC, cx + fw - 1, cy);
+        LineTo(hMemDC, cx + cursor_w - 1, cy);
         MoveToEx(hMemDC, cx, cy + fh - 1, NULL);
-        LineTo(hMemDC, cx + fw - 1, cy + fh - 1);
+        LineTo(hMemDC, cx + cursor_w - 1, cy + fh - 1);
         MoveToEx(hMemDC, cx, cy, NULL);
         LineTo(hMemDC, cx, cy + fh - 1);
-        MoveToEx(hMemDC, cx + fw - 1, cy, NULL);
-        LineTo(hMemDC, cx + fw - 1, cy + fh - 1);
+        MoveToEx(hMemDC, cx + cursor_w - 1, cy, NULL);
+        LineTo(hMemDC, cx + cursor_w - 1, cy + fh - 1);
 
         SelectObject(hMemDC, oldPen);
         DeleteObject(hPen);
 
-        /* Force next render to redraw under cursor */
+        /* Force next render to redraw under cursor
+         * Mark both cells if cursor is wide */
         if (s_shadow)
-            s_shadow[cy_cell * COLS + cx_cell].ch ^= 0x10000;
+        {
+            s_shadow[cy_cell * COLS + draw_x_cell].ch ^= 0x10000;
+
+            if (cursor_w > fw && draw_x_cell + 1 < COLS)
+                s_shadow[cy_cell * COLS + draw_x_cell + 1].ch ^= 0x10000;
+        }
 
         s_last_cur_y = cy_cell;
         s_last_cur_x = cx_cell;
@@ -1207,6 +1504,8 @@ int waddch(WINDOW *win, const chtype ch)
     int r, c;
     chtype ch_out;
     attr_t attrs;
+    wchar_t wc;
+    int cw;
 
     if (!win)
         return ERR;
@@ -1222,10 +1521,69 @@ int waddch(WINDOW *win, const chtype ch)
     attrs &= ~A_COLOR;
     attrs |= COLOR_PAIR(win->color_pair);
 
+    /* Cleanup edge cases when overwriting existing wide glyphs */
+    /* Case A: writing on top of a TRAILING cell -> the lead to our
+     * left is now orphaned. Replace the lead with a space */
+    if (c > 0)
+    {
+        Cell *cur = CELL(win, r, c);
+
+        if (cur->ch == WIN32_CELL_WIDE_TRAILING)
+        {
+            Cell *prev = CELL(win, r, c - 1);
+            prev->ch = ' ';
+        }
+    }
+
+    /* Get character width using wcswidth */
+    wc = (wchar_t)ch_out;
+    cw = wcswidth(&wc, 1);
+
+    if (cw < 1)
+        cw = 1;
+
+    /* Case B: writing a NARROW char into what was a LEAD of a wide
+     * (the cell to our right is TRAILING). The trailing is now
+     * orphaned -> replace with a space */
+    if (cw == 1 && c + 1 < win->_maxx)
+    {
+        Cell *nxt = CELL(win, r, c + 1);
+
+        if (nxt->ch == WIN32_CELL_WIDE_TRAILING)
+        {
+            nxt->ch = ' ';
+            nxt->attrs = attrs;
+        }
+    }
+
+    /* Case C: writing a WIDE char whose trailing slot was the LEAD of
+     * a previous wide. The cell at curx+2 was its trailing -> orphan,
+     * replace with space */
+    if (cw == 2 && c + 2 < win->_maxx)
+    {
+        Cell *thd = CELL(win, r, c + 2);
+
+        if (thd->ch == WIN32_CELL_WIDE_TRAILING)
+        {
+            thd->ch = ' ';
+            thd->attrs = attrs;
+        }
+    }
+
+    /* Write the LEAD */
     CELL(win, r, c)->ch = ch_out;
     CELL(win, r, c)->attrs = attrs;
-
     win->_curx++;
+
+    /* Write the TRAILING for wide chars */
+    if (cw == 2)
+    {
+        Cell *trail = CELL(win, r, win->_curx);
+
+        trail->ch = WIN32_CELL_WIDE_TRAILING;
+        trail->attrs = attrs;
+        win->_curx++;
+    }
 
     if (win->_curx >= win->_maxx)
     {

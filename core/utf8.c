@@ -736,11 +736,13 @@ const wchar_t *wcs_casestr(const wchar_t *hay, const wchar_t *needle)
     return NULL;
 }
 
-#if defined(PLATFORM_AMIGA) && !defined(wcswidth)
+#if (defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)) && !defined(wcswidth)
+
 /* wcswidth implementation based on Markus Kuhn's wcwidth.c
  * https://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c
  * Returns number of column positions needed for wide-character string
  * Compatible with POSIX.1-2001 standard for Unicode terminal display
+ * Uses Unicode ranges for consistency across platforms (more reliable than font measurement)
  */
 int wcswidth(const wchar_t *wcs, size_t n)
 {
