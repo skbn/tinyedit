@@ -104,6 +104,8 @@ Screenshots
 
 ![Linux](img/linux.png)
 
+![Glyph picker](img/emojis.png)
+
 ## License
 
 GPL-2.0 - see LICENSE file for details
