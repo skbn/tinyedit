@@ -47,6 +47,10 @@ typedef struct
     int ttf_antialias;             /* 0=auto, 1=off, 2=on */
     int ttf_use_utf8;              /* 0=UTF-16 BE (BMP only), 1=UTF-8 (full Unicode/emojis) */
 
+#define TE_CFG_TTF_FALLBACKS 8
+    char ttf_fallback[TE_CFG_TTF_FALLBACKS][TE_CFG_STR_MAX];
+    int ttf_fallback_size[TE_CFG_TTF_FALLBACKS]; /* 0 = inherit ttf_size */
+
     /* Default background color for COLOR_PAIR(0) on Amiga */
     int default_bg_color;
 

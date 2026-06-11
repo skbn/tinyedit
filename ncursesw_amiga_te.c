@@ -84,6 +84,16 @@ static int s_ansi_mode = 0;        /* 1 = app is in ANSI-art viewing mode; draw 
                                     * for pixel-perfect tiling */
 static int s_ttf_use_utf8 = 1;     /* Uses UTF-8 natively */
 
+/* Fallback TTF fonts. Slots are populated by main BEFORE initscr() via
+ * amiga_add_ttf_fallback(); during initscr() each non-empty slot is
+ * passed to TE_FontAdd() after the primary font, in array order. The
+ * te_rastport engine looks them up when a codepoint isn't found in the
+ * primary face -- typical use is CJK / colour emoji coverage */
+#define AMI_TTF_FALLBACKS 8
+static char s_ttf_fallback_file[AMI_TTF_FALLBACKS][512];
+static int s_ttf_fallback_size[AMI_TTF_FALLBACKS];
+static int s_ttf_fallback_count = 0;
+
 static int s_cursor_vis = 1;
 static int s_colors_on = 0;
 static int s_raw_mode = 0;
@@ -1008,6 +1018,7 @@ static void render_all()
 static int ami_ttf_try_open()
 {
     ULONG prefs;
+    int fi;
 
     if (!s_ttf_file[0])
         return 0; /* TTF disabled in config */
@@ -1038,6 +1049,25 @@ static int ami_ttf_try_open()
         TE_ContextRelease(ami_te_dc);
         ami_te_dc = NULL;
         return 0;
+    }
+
+    /* Load fallback fonts. These cover codepoints missing from the
+     * primary face -- typical setup is a Latin/monospace primary plus
+     * CJK and/or colour emoji fallbacks. A fallback that fails to load
+     * is reported but doesn't abort initialisation */
+    for (fi = 0; fi < s_ttf_fallback_count; fi++)
+    {
+        const char *fp = s_ttf_fallback_file[fi];
+        int fs = s_ttf_fallback_size[fi];
+
+        if (!fp[0])
+            continue;
+
+        if (fs < 6 || fs > 96)
+            fs = s_ttf_size;
+
+        if (!TE_FontAdd(ami_te_dc, fp, fs, 0))
+            fprintf(stderr, "TTF: fallback %d TE_FontAdd('%s', %d) failed; skipping\n", fi + 1, fp, fs);
     }
 
     /* Provisional cell metrics — refined in ami_ttf_apply_to_rastport */
@@ -1102,6 +1132,8 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
     /* AUTO antialias: decide based on screen depth now that we know it
      * On AGA (depth <= 8) the AA path is slow and on a 4-bit screen looks
      * worse than MONO, so default to OFF. RTG (>=15 bit) gets AA */
+    /*if (s_ttf_aa_auto && ami_te_screen)*/
+
     prefs = TE_GetFlags(ami_te_dc);
 
     if (s_ttf_aa_auto && ami_te_screen)
@@ -1118,10 +1150,10 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
     }
 
     /* If the detected font is monospace, tell TE to advance every
-     * glyph by monospace_advance instead of the glyph's own advance.
+     * glyph by monospace_advance instead of the glyph's own advance
      * This is essential for fixed-cell terminal layouts -- without it,
      * glyphs with quirky per-glyph advances (notably GNU Unifont in
-     * GRAY mode) bunch together and become illegible or invisible. */
+     * GRAY mode) bunch together and become illegible or invisible */
     if (!s_ttf_proportional)
         prefs |= TE_FLAG_FIXEDWIDTH;
     else
@@ -1864,6 +1896,14 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
     if (!w || !ws)
         return ERR;
 
+    if (n < 0)
+    {
+        n = 0;
+
+        while (ws[n])
+            n++;
+    }
+
     for (i = 0; i < n && ws[i]; i++)
     {
         chtype ch;
@@ -2386,6 +2426,47 @@ int amiga_set_ttf_encoding(int use_utf8)
     return 0;
 }
 
+/* Add one fallback TTF font.  Must be called BEFORE initscr() -- the
+ * fonts are loaded as a chain at TE_ContextCreate() time, alongside the
+ * primary TTF font.  Returns 0 on success, -1 if no slot available or
+ * path invalid.  A NULL/empty path silently succeeds (no-op). */
+int amiga_add_ttf_fallback(const char *path, int size)
+{
+    int idx;
+
+    if (!path || !path[0])
+        return 0;
+
+    if (s_ttf_fallback_count >= AMI_TTF_FALLBACKS)
+        return -1;
+
+    idx = s_ttf_fallback_count;
+
+    strncpy(s_ttf_fallback_file[idx], path, sizeof(s_ttf_fallback_file[idx]) - 1);
+
+    s_ttf_fallback_file[idx][sizeof(s_ttf_fallback_file[idx]) - 1] = '\0';
+
+    s_ttf_fallback_size[idx] = (size >= 6 && size <= 96) ? size : s_ttf_size;
+
+    s_ttf_fallback_count++;
+    return 0;
+}
+
+/* Clear all configured fallback fonts. Idempotent. Call before
+ * re-applying fallbacks (e.g., after reloading the config file) */
+void amiga_clear_ttf_fallbacks(void)
+{
+    int i;
+
+    for (i = 0; i < AMI_TTF_FALLBACKS; i++)
+    {
+        s_ttf_fallback_file[i][0] = '\0';
+        s_ttf_fallback_size[i] = 0;
+    }
+
+    s_ttf_fallback_count = 0;
+}
+
 /* Switch font (call after toggling ANSI mode)
  * use_ansi: 1 = use ANSI font, 0 = use regular font */
 int amiga_change_font(int use_ansi)
@@ -2433,6 +2514,9 @@ int amiga_reload_ttf(const char *font_path, int new_size)
     char old_file[512];
     int old_size;
     ULONG prefs;
+    int fi;
+    const char *fp;
+    int fs;
 
     if (!font_path || !font_path[0])
         return 0;
@@ -2466,6 +2550,22 @@ int amiga_reload_ttf(const char *font_path, int new_size)
         /* Try to restore old font */
         TE_FontAdd(ami_te_dc, old_file, old_size, 0);
         return 0;
+    }
+
+    /* Reload fallback fonts after primary font */
+    for (fi = 0; fi < s_ttf_fallback_count; fi++)
+    {
+        fp = s_ttf_fallback_file[fi];
+        fs = s_ttf_fallback_size[fi];
+
+        if (!fp[0])
+            continue;
+
+        if (fs < 6 || fs > 96)
+            fs = new_size;
+
+        if (!TE_FontAdd(ami_te_dc, fp, fs, 0))
+            fprintf(stderr, "TTF: fallback %d TE_FontAdd('%s', %d) failed; skipping\n", fi + 1, fp, fs);
     }
 
     /* Update stored settings */

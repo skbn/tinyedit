@@ -19,6 +19,11 @@ int charset_select(TeApp *app);
 
 void clear_search_highlights(TeApp *app);
 
+/* Functions from ui_editor.c needed by ui_editor_helper.c */
+void soft_reset_desired(void);
+int editor_eff_wrap(const TeApp *app);
+char *wrap_paste_text(const char *utf8, int col);
+
 /* Function key implementations */
 int search_prev(TeApp *app);
 int search_next(TeApp *app);
@@ -38,9 +43,9 @@ int ui_editor_goto_end(TeApp *app);
 int ui_editor_export(TeApp *app);
 int rewrap(TeApp *app);
 
-/* On Amiga we ship our own wcswidth (Markus Kuhn's tables).  Declare it
+/* On Amiga we ship our own wcswidth (Markus Kuhn's tables). Declare it
  * here so any TU can use it without pulling in the full implementation
- * file.  On Unix/Windows the system one is used. */
+ * file. On Unix/Windows the system one is used */
 #if defined(PLATFORM_AMIGA) && !defined(wcswidth)
 int wcswidth(const wchar_t *wcs, size_t n);
 #endif

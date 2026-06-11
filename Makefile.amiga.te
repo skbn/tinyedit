@@ -57,7 +57,7 @@ CORE_OBJS  = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
              
 COMP_OBJS  = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS    = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o \
-             $(OBJDIR)/ui_popup.o $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o
+             $(OBJDIR)/ui_popup.o $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o
 ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS)
 
 # FreeType objects (with gzip + lzw modules) - all in OBJDIR
@@ -391,6 +391,9 @@ $(OBJDIR)/ui_files.o: $(UIDIR)/ui_files.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 $(OBJDIR)/ui_setup.o: $(UIDIR)/ui_setup.c | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/ui_glyph_picker.o: $(UIDIR)/ui_glyph_picker.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 

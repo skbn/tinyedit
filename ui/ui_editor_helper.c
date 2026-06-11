@@ -29,7 +29,7 @@ static int s_soft_desired_vcol = -1;
 /* Forward declarations for static functions */
 static int ui_paste_char_width(wchar_t ch);
 
-/* Visual width in display columns of n wchars starting at s.  Wide chars
+/* Visual width in display columns of n wchars starting at s. Wide chars
  * (CJK ideographs, wide emoji) count 2, narrow 1, control/non-printable 1
  * Used by ui_editor.c to convert wchar offsets into visual column offsets
  * when positioning mvaddnwstr() within a line that contains wide glyphs */
@@ -54,7 +54,6 @@ int wcs_vwidth(const wchar_t *s, int n)
     return v;
 }
 
-/* Helper functions that were static in ui_editor.c */
 void clear_search_highlights(TeApp *app)
 {
     if (app->search.rows)
@@ -69,179 +68,52 @@ void clear_search_highlights(TeApp *app)
         app->search.cols = NULL;
     }
 
+    app->search.count = 0;
     app->search.is_mode = 0;
     app->search.only_mode = 0;
-    app->search.count = 0;
+    app->search.current_match = 0;
     app->search.match_current = 0;
     app->search.match_total = 0;
 }
 
-static void soft_reset_desired(void)
+/* Navigate to previous match in editor.  Wraps at the start. */
+int search_prev(TeApp *app)
 {
-    s_soft_desired_vcol = -1;
-}
+    int match_row;
+    int match_col;
 
-static int editor_eff_wrap(const TeApp *app)
-{
-    int cfgw = app->wrap_col;
-    int limit = COLS - 1; /* leave one column of margin */
-
-    if (cfgw <= 0)
+    if (!app->search.rows || app->search.count == 0)
         return 0;
 
-    return (cfgw < limit) ? cfgw : limit;
+    app->search.current_match = (app->search.current_match - 1 + app->search.count) % app->search.count;
+    app->search.match_current = app->search.current_match + 1;
+
+    match_row = app->search.rows[app->search.current_match];
+    match_col = app->search.cols[app->search.current_match];
+
+    ed_set_pos(app->editor, match_row, match_col);
+    ed_ensure_visible(app->editor);
+
+    return 1;
 }
 
-static char *wrap_paste_text(const char *text, int wrap_col)
+/* Navigate to next match in editor.  Wraps at the end. */
+int search_next(TeApp *app)
 {
-    wchar_t *w;
-    wchar_t *out;
-    int out_cap;
-    int out_len = 0;
-    char *result;
-    int col_pos = 0;
-    int line_start = 0;
-    int last_space = -1;
-    int i;
+    int match_row;
+    int match_col;
 
-    if (!text || wrap_col <= 0)
-        return NULL;
+    if (!app->search.rows || app->search.count == 0)
+        return 0;
 
-    int wlen;
-    w = utf8_to_wcs(text, &wlen);
-    if (!w)
-        return NULL;
+    app->search.current_match = (app->search.current_match + 1) % app->search.count;
+    app->search.match_current = app->search.current_match + 1;
 
-    out_cap = (int)wcslen(w) + 100; /* extra room for newlines */
-    out = malloc(out_cap * sizeof(wchar_t));
+    match_row = app->search.rows[app->search.current_match];
+    match_col = app->search.cols[app->search.current_match];
 
-    if (!out)
-    {
-        free(w);
-        return NULL;
-    }
-
-    for (i = 0; w[i] != L'\0'; i++)
-    {
-        wchar_t ch = w[i];
-        int cw = (ch == L'\t') ? 1 : ui_paste_char_width(ch);
-
-        if (out_len + 1 >= out_cap)
-        {
-            wchar_t *old_out = out;
-            out_cap *= 2;
-            out = realloc(out, out_cap * sizeof(wchar_t));
-
-            if (!out)
-            {
-                free(old_out);
-                free(w);
-                return NULL;
-            }
-        }
-
-        if (out_len < out_cap)
-            out[out_len++] = ch;
-
-        if (ch == L' ' || ch == L'\t')
-            last_space = out_len - 1;
-
-        col_pos += cw;
-
-        if (col_pos > wrap_col && last_space > line_start)
-        {
-            int new_start;
-            int j;
-            int width_after = 0;
-
-            out[last_space] = L'\n';
-            new_start = last_space + 1;
-
-            for (j = new_start; j < out_len; j++)
-            {
-                int w2 = (out[j] == L'\t') ? 1 : ui_paste_char_width(out[j]);
-                width_after += w2;
-            }
-
-            line_start = new_start;
-            last_space = -1;
-            col_pos = width_after;
-        }
-    }
-
-    free(w);
-
-    if (out_len < out_cap)
-        out[out_len] = L'\0';
-    else
-        out[out_cap - 1] = L'\0';
-
-    result = wcs_to_utf8(out, out_len);
-
-    free(out);
-
-    return result;
-}
-
-static int ui_paste_char_width(wchar_t ch)
-{
-    if (ch == L'\t')
-        return 1; /* simplified tab width */
-
-    return 1; /* simplified width calculation */
-}
-
-int replace(TeApp *app)
-{
-    wchar_t needle[64], repl[64];
-    int case_sensitive = app->search.case_sensitive;
-    int whole_word = app->search.whole_word;
-    int *rows = NULL, *cols = NULL;
-    int match_count;
-
-    wcsncpy(needle, app->search.query, 63);
-    needle[63] = L'\0';
-    wcsncpy(repl, app->search.last_replace, 63);
-    repl[63] = L'\0';
-
-    if (ui_popup_replace(needle, repl, needle, 64, repl, 64, &case_sensitive, &whole_word) != 0 || !needle[0])
-        return 1;
-
-    wcsncpy(app->search.query, needle, 63);
-    app->search.query[63] = L'\0';
-
-    wcsncpy(app->search.last_replace, repl, 63);
-
-    app->search.last_replace[63] = L'\0';
-    app->search.case_sensitive = case_sensitive;
-    app->search.whole_word = whole_word;
-
-    /* Perform search and highlight matches */
-    match_count = ed_search_all_custom(app->editor, app->search.query, case_sensitive, whole_word, &rows, &cols);
-
-    clear_search_highlights(app);
-
-    if (match_count > 0)
-    {
-        app->search.rows = rows;
-        app->search.cols = cols;
-        app->search.count = match_count;
-        app->search.is_mode = 1;
-        app->search.current_match = 0;
-        app->search.match_current = 1;
-        app->search.match_total = match_count;
-
-        /* Move cursor to first match and ensure it's visible */
-        ed_set_pos(app->editor, rows[0], cols[0]);
-        ed_ensure_visible(app->editor);
-    }
-    else
-    {
-        free(rows);
-        free(cols);
-        app->search.is_mode = 0;
-        te_status(app, "No matches found");
-    }
+    ed_set_pos(app->editor, match_row, match_col);
+    ed_ensure_visible(app->editor);
 
     return 1;
 }
@@ -284,233 +156,57 @@ static int do_replace(TeApp *app, const wchar_t *needle, const wchar_t *repl)
     return count;
 }
 
-/* Additional helper functions */
-int charset_select(TeApp *app)
+int replace(TeApp *app)
 {
-    char new_view[32], new_save[32];
-    EdInfo info;
-    int view_changed = 0;
-
-    strncpy(new_view, app->charset_in, sizeof(new_view) - 1);
-    new_view[sizeof(new_view) - 1] = '\0';
-
-    strncpy(new_save, app->charset_out, sizeof(new_save) - 1);
-    new_save[sizeof(new_save) - 1] = '\0';
-
-    if (ui_popup_charset_pair(new_view, new_save, new_view, sizeof(new_view), new_save, sizeof(new_save)) == 0)
-    {
-        /* Check if view charset changed */
-        if (strcasecmp(new_view, app->charset_in) != 0)
-            view_changed = 1;
-
-        /* If view charset changed and editor has unsaved changes, warn user */
-        if (view_changed)
-        {
-            ed_get_info(app->editor, &info);
-
-            if (info.modified && app->filename[0])
-            {
-                if (ui_popup_confirm("Charset", "Unsaved changes: changing charset will reload from disk and lose edits. Continue?") != 1)
-                    return 1; /* User cancelled */
-            }
-        }
-
-        /* Apply charset changes */
-        strncpy(app->charset_in, new_view, sizeof(app->charset_in) - 1);
-        app->charset_in[sizeof(app->charset_in) - 1] = '\0';
-
-        strncpy(app->charset_out, new_save, sizeof(app->charset_out) - 1);
-        app->charset_out[sizeof(app->charset_out) - 1] = '\0';
-
-        /* If view charset changed and we have a file, reload from disk */
-        if (view_changed && app->filename[0])
-        {
-            FILE *fp;
-            long size;
-            char *buf;
-            size_t r;
-
-            fp = fopen(app->filename, "rb");
-            if (fp)
-            {
-                fseek(fp, 0, SEEK_END);
-                size = ftell(fp);
-                fseek(fp, 0, SEEK_SET);
-
-                if (size >= 0)
-                {
-                    buf = (char *)malloc((size_t)size + 1);
-
-                    if (buf)
-                    {
-                        r = fread(buf, 1, (size_t)size, fp);
-                        buf[r] = '\0';
-
-                        /* Update raw_bytes */
-                        free(app->raw_bytes);
-
-                        app->raw_bytes = (char *)malloc(r + 1);
-
-                        if (app->raw_bytes)
-                        {
-                            memcpy(app->raw_bytes, buf, r + 1);
-                            app->raw_len = (int)r;
-                        }
-                        else
-                        {
-                            app->raw_len = 0;
-                        }
-
-                        /* Convert to UTF-8 using new charset_in */
-                        if (new_view[0] && strcasecmp(new_view, "UTF-8") != 0 && strcasecmp(new_view, "UTF8") != 0)
-                        {
-                            size_t outsz = r * 4 + 16;
-                            char *utf8 = (char *)malloc(outsz);
-
-                            if (utf8)
-                            {
-                                int wrote = charset_body_to_utf8(new_view, buf, (int)r, utf8, (int)outsz);
-
-                                if (wrote >= 0)
-                                {
-                                    utf8[wrote] = '\0';
-                                    ed_load(app->editor, utf8);
-                                }
-
-                                free(utf8);
-                            }
-                        }
-                        else
-                        {
-                            ed_load(app->editor, buf);
-                        }
-
-                        free(buf);
-                    }
-                }
-
-                fclose(fp);
-            }
-        }
-        else if (!view_changed && app->raw_bytes && app->raw_len > 0)
-        {
-            /* Only save charset changed, no reload needed for now...*/
-        }
-
-        te_status(app, "View: %s  Save: %s", new_view[0] ? new_view : "UTF-8", new_save[0] ? new_save : "UTF-8");
-    }
-
-    return 1;
-}
-
-/* Function key implementations */
-int search_prev(TeApp *app)
-{
-    int match_row;
-    int match_col;
-
-    /* Navigate to previous match */
-    if (!app->search.rows || app->search.count == 0)
-        return 0;
-
-    app->search.current_match = (app->search.current_match - 1 + app->search.count) % app->search.count;
-    app->search.match_current = app->search.current_match + 1;
-
-    match_row = app->search.rows[app->search.current_match];
-    match_col = app->search.cols[app->search.current_match];
-
-    /* Move cursor to match position (line and column) */
-    ed_set_pos(app->editor, match_row, match_col);
-    ed_ensure_visible(app->editor);
-
-    return 1;
-}
-
-int search_next(TeApp *app)
-{
-    int match_row;
-    int match_col;
-
-    /* Navigate to next match */
-    if (!app->search.rows || app->search.count == 0)
-        return 0;
-
-    app->search.current_match = (app->search.current_match + 1) % app->search.count;
-    app->search.match_current = app->search.current_match + 1;
-
-    match_row = app->search.rows[app->search.current_match];
-    match_col = app->search.cols[app->search.current_match];
-
-    /* Move cursor to match position (line and column) */
-    ed_set_pos(app->editor, match_row, match_col);
-    ed_ensure_visible(app->editor);
-
-    return 1;
-}
-
-int do_search(TeApp *app)
-{
-    /* Normal search functionality */
-    wchar_t tmp[64];
+    wchar_t needle[64], repl[64];
+    int case_sensitive = app->search.case_sensitive;
+    int whole_word = app->search.whole_word;
     int *rows = NULL, *cols = NULL;
     int match_count;
 
-    wcsncpy(tmp, app->search.query, 63);
-    tmp[63] = L'\0';
+    wcsncpy(needle, app->search.query, 63);
+    needle[63] = L'\0';
 
-    if (ui_popup_input_wcs("Search", "Text:", tmp, 64) == 0 && tmp[0])
+    wcsncpy(repl, app->search.last_replace, 63);
+    repl[63] = L'\0';
+
+    if (ui_popup_replace(needle, repl, needle, 64, repl, 64, &case_sensitive, &whole_word) != 0 || !needle[0])
+        return 1;
+
+    wcsncpy(app->search.query, needle, 63);
+    app->search.query[63] = L'\0';
+
+    wcsncpy(app->search.last_replace, repl, 63);
+    app->search.last_replace[63] = L'\0';
+
+    app->search.case_sensitive = case_sensitive;
+    app->search.whole_word = whole_word;
+
+    /* Perform search and highlight matches */
+    match_count = ed_search_all_custom(app->editor, app->search.query, case_sensitive, whole_word, &rows, &cols);
+
+    clear_search_highlights(app);
+
+    if (match_count > 0)
     {
-        wcsncpy(app->search.query, tmp, 63);
-        app->search.query[63] = L'\0';
-        match_count = ed_search_all(app->editor, app->search.query, &rows, &cols);
+        app->search.rows = rows;
+        app->search.cols = cols;
+        app->search.count = match_count;
+        app->search.is_mode = 1;
+        app->search.current_match = 0;
+        app->search.match_current = 1;
+        app->search.match_total = match_count;
 
-        clear_search_highlights(app);
-
-        if (match_count == 0)
-        {
-            te_status(app, "Not found");
-        }
-        else if (match_count == 1)
-        {
-            ed_set_pos(app->editor, rows[0], cols[0]);
-            ed_ensure_visible(app->editor);
-            te_status(app, "Found at line %d", rows[0] + 1);
-
-            app->search.rows = rows;
-            app->search.cols = cols;
-            app->search.count = 1;
-            app->search.match_current = 1;
-            app->search.match_total = 1;
-        }
-        else
-        {
-            int choice = ui_popup_search_results_popup(app, app->search.query, rows, cols, match_count);
-
-            if (choice >= 0)
-            {
-                ed_set_pos(app->editor, rows[choice], cols[choice]);
-                ed_ensure_visible(app->editor);
-                te_status(app, "Jumped to line %d", rows[choice] + 1);
-
-                app->search.match_current = choice + 1;
-                app->search.current_match = choice;
-            }
-            else
-            {
-                te_status(app, "Search cancelled");
-                app->search.match_current = 1;
-                app->search.current_match = 0;
-            }
-
-            app->search.rows = rows;
-            app->search.cols = cols;
-            app->search.count = match_count;
-            app->search.match_total = match_count;
-
-            /* Activate only_search mode when matches are found */
-            if (match_count > 0)
-                app->search.only_mode = 1;
-        }
+        /* Move cursor to first match and ensure it's visible */
+        ed_set_pos(app->editor, rows[0], cols[0]);
+        ed_ensure_visible(app->editor);
+    }
+    else
+    {
+        free(rows);
+        free(cols);
+        app->search.is_mode = 0;
+        te_status(app, "No matches found");
     }
 
     return 1;
@@ -518,20 +214,19 @@ int do_search(TeApp *app)
 
 int replace_current(TeApp *app)
 {
+    int match_row;
+    int match_col;
+    int nlen;
+    int rlen;
+    int i;
+    int *new_rows;
+    int *new_cols;
+    int new_match_count;
+
     if (app->search.last_replace[0] != L'\0')
     {
-        int match_row;
-        int match_col;
-        int nlen;
-        int rlen;
-        int i;
-        int *new_rows = NULL;
-        int *new_cols = NULL;
-        int new_match_count;
-
         /* Use the last replacement text - no popup */
         wchar_t repl[64];
-
         wcsncpy(repl, app->search.last_replace, 63);
         repl[63] = L'\0';
 
@@ -568,6 +263,8 @@ int replace_current(TeApp *app)
         app->search.count = 0;
 
         /* Re-run search to find remaining matches */
+        new_rows = NULL;
+        new_cols = NULL;
         new_match_count = ed_search_all_custom(app->editor, app->search.query, app->search.case_sensitive, app->search.whole_word, &new_rows, &new_cols);
 
         if (new_match_count > 0)
@@ -582,6 +279,7 @@ int replace_current(TeApp *app)
             /* Move cursor to first remaining match */
             ed_set_pos(app->editor, new_rows[0], new_cols[0]);
             ed_ensure_visible(app->editor);
+
             te_status(app, "Replaced. %d match(es) remaining", new_match_count);
         }
         else
@@ -589,6 +287,8 @@ int replace_current(TeApp *app)
             free(new_rows);
             free(new_cols);
             app->search.is_mode = 0;
+            app->search.match_total = 0;
+
             te_status(app, "Replaced 1 occurrence (no more matches)");
         }
         return 1;
@@ -613,19 +313,104 @@ int replace_all(TeApp *app)
         {
             ed_save_undo(app->editor);
             n = do_replace(app, app->search.query, app->search.last_replace);
+
             clear_search_highlights(app);
 
-            app->search.is_mode = 0;
             te_status(app, "Replaced %d occurrence(s)", n);
         }
         else
         {
-            te_status(app, "Replace All cancelled");
+            te_status(app, "Replace all cancelled");
         }
+    }
+    else
+    {
+        te_status(app, "No search active (use F5/Alt+S first)");
+    }
+
+    return 1;
+}
+
+int do_search(TeApp *app)
+{
+    wchar_t tmp[64];
+    int *rows = NULL, *cols = NULL;
+    int match_count;
+    int choice;
+
+    wcsncpy(tmp, app->search.query, 63);
+    tmp[63] = L'\0';
+
+    if (ui_popup_input_wcs("Search", "Text:", tmp, 64) != 0 || !tmp[0])
+        return 1;
+
+    wcsncpy(app->search.query, tmp, 63);
+    app->search.query[63] = L'\0';
+
+    /* Find all matches (no limit) */
+    match_count = ed_search_all(app->editor, app->search.query, &rows, &cols);
+
+    /* Free previous search matches */
+    clear_search_highlights(app);
+
+    if (match_count == 0)
+    {
+        free(rows);
+        free(cols);
+        te_status(app, "Not found");
         return 1;
     }
 
-    return 0;
+    if (match_count == 1)
+    {
+        /* Single match: jump directly */
+        ed_set_pos(app->editor, rows[0], cols[0]);
+        ed_ensure_visible(app->editor);
+        te_status(app, "Found at line %d", rows[0] + 1);
+
+        /* Save matches for highlighting and activate search mode */
+        app->search.rows = rows;
+        app->search.cols = cols;
+        app->search.count = match_count;
+        app->search.only_mode = 1;
+        app->search.current_match = 0;
+        app->search.match_current = 1;
+        app->search.match_total = match_count;
+
+        return 1;
+    }
+
+    /* Multiple matches: show the picker popup; user chooses one. */
+
+    choice = ui_popup_search_results_popup(app, app->search.query, rows, cols, match_count);
+
+    if (choice >= 0)
+    {
+        ed_set_pos(app->editor, rows[choice], cols[choice]);
+        ed_ensure_visible(app->editor);
+        te_status(app, "Jumped to line %d", rows[choice] + 1);
+
+        app->search.current_match = choice;
+        app->search.match_current = choice + 1;
+    }
+    else
+    {
+        /* User cancelled the picker -- keep the matches armed so
+         * F3/F4 still work, just leave the cursor in place */
+        te_status(app, "Search cancelled");
+        app->search.current_match = 0;
+        app->search.match_current = 1;
+    }
+
+    /* Save matches for highlighting and activate search mode
+     * (don't free rows/cols -- ownership transfers to the struct) */
+    app->search.rows = rows;
+    app->search.cols = cols;
+    app->search.count = match_count;
+    app->search.only_mode = 1;
+    app->search.match_total = match_count;
+
+    return 1;
 }
 
 int insert_file(TeApp *app)
@@ -849,6 +634,125 @@ int rewrap(TeApp *app)
     {
         clear_search_highlights(app);
         te_status(app, "Paragraph rewrapped");
+    }
+
+    return 1;
+}
+
+/* Additional helper functions */
+int charset_select(TeApp *app)
+{
+    char new_view[32], new_save[32];
+    EdInfo info;
+    int view_changed = 0;
+
+    strncpy(new_view, app->charset_in, sizeof(new_view) - 1);
+    new_view[sizeof(new_view) - 1] = '\0';
+
+    strncpy(new_save, app->charset_out, sizeof(new_save) - 1);
+    new_save[sizeof(new_save) - 1] = '\0';
+
+    if (ui_popup_charset_pair(new_view, new_save, new_view, sizeof(new_view), new_save, sizeof(new_save)) == 0)
+    {
+        /* Check if view charset changed */
+        if (strcasecmp(new_view, app->charset_in) != 0)
+            view_changed = 1;
+
+        /* If view charset changed and editor has unsaved changes, warn user */
+        if (view_changed)
+        {
+            ed_get_info(app->editor, &info);
+
+            if (info.modified && app->filename[0])
+            {
+                if (ui_popup_confirm("Charset", "Unsaved changes: changing charset will reload from disk and lose edits. Continue?") != 1)
+                    return 1; /* User cancelled */
+            }
+        }
+
+        /* Apply charset changes */
+        strncpy(app->charset_in, new_view, sizeof(app->charset_in) - 1);
+        app->charset_in[sizeof(app->charset_in) - 1] = '\0';
+
+        strncpy(app->charset_out, new_save, sizeof(app->charset_out) - 1);
+        app->charset_out[sizeof(app->charset_out) - 1] = '\0';
+
+        /* If view charset changed and we have a file, reload from disk */
+        if (view_changed && app->filename[0])
+        {
+            FILE *fp;
+            long size;
+            char *buf;
+            size_t r;
+
+            fp = fopen(app->filename, "rb");
+            if (fp)
+            {
+                fseek(fp, 0, SEEK_END);
+                size = ftell(fp);
+                fseek(fp, 0, SEEK_SET);
+
+                if (size >= 0)
+                {
+                    buf = (char *)malloc((size_t)size + 1);
+
+                    if (buf)
+                    {
+                        r = fread(buf, 1, (size_t)size, fp);
+                        buf[r] = '\0';
+
+                        /* Update raw_bytes */
+                        free(app->raw_bytes);
+
+                        app->raw_bytes = (char *)malloc(r + 1);
+
+                        if (app->raw_bytes)
+                        {
+                            memcpy(app->raw_bytes, buf, r + 1);
+                            app->raw_len = (int)r;
+                        }
+                        else
+                        {
+                            app->raw_len = 0;
+                        }
+
+                        /* Convert to UTF-8 using new charset_in */
+                        if (new_view[0] && strcasecmp(new_view, "UTF-8") != 0 && strcasecmp(new_view, "UTF8") != 0)
+                        {
+                            size_t outsz = r * 4 + 16;
+                            char *utf8 = (char *)malloc(outsz);
+
+                            if (utf8)
+                            {
+                                int wrote = charset_body_to_utf8(new_view, buf, (int)r, utf8, (int)outsz);
+
+                                if (wrote >= 0)
+                                {
+                                    utf8[wrote] = '\0';
+                                    ed_load(app->editor, utf8);
+                                }
+
+                                free(utf8);
+                            }
+                        }
+                        else
+                        {
+                            ed_load(app->editor, buf);
+                        }
+
+                        free(buf);
+                    }
+                }
+
+                fclose(fp);
+            }
+        }
+        else if (!view_changed && app->raw_bytes && app->raw_len > 0)
+        {
+            /* TODO */
+        }
+
+        te_status(app, "View: %s  Save: %s", new_view[0] ? new_view : "UTF-8", new_save[0] ? new_save : "UTF-8");
     }
 
     return 1;

@@ -433,6 +433,13 @@ int amiga_set_ansi_font_name(const char *font_name);
  *   antialias  : 0=auto, 1=off, 2=on
  */
 int amiga_set_ttf(const char *ttf_file, int size, int antialias);
+
+/* Optional: register up to AMI_TTF_FALLBACKS extra TTF fonts to cover
+ * codepoints missing from the primary one (CJK, emoji, etc). Both
+ * functions must be called BEFORE initscr(); the fonts are loaded as a
+ * chain at startup */
+int amiga_add_ttf_fallback(const char *path, int size);
+void amiga_clear_ttf_fallbacks(void);
 int amiga_set_ttf_encoding(int use_utf8);
 int amiga_reload_ttf_size(int new_size);
 int amiga_reload_ttf(const char *font_path, int new_size);

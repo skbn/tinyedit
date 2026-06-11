@@ -23,8 +23,8 @@
 #include "../core/keys.h"
 
 /* Tabs */
-#define ST_TAB_COUNT 2
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
+#define ST_TAB_COUNT 3
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF Fallbacks"};
 
 /* Field types */
 typedef enum
@@ -86,6 +86,26 @@ static const SetupField st_fields[] =
         {1, "Search", FT_COLORPAIR, F_OFF(color_fg) + COL_SEARCH_MATCH * sizeof(int), 0},
         {1, "Cursor color", FT_INT, F_OFF(cursor_color), 0},
         {1, "Default BG", FT_INT, F_OFF(default_bg_color), 0},
+
+/* TTF Fallbacks */
+#ifdef PLATFORM_AMIGA
+        {2, "Fallback 1", FT_STR, F_OFF(ttf_fallback[0]), TE_CFG_STR_MAX},
+        {2, "Fallback 1 Size", FT_INT, F_OFF(ttf_fallback_size[0]), 0},
+        {2, "Fallback 2", FT_STR, F_OFF(ttf_fallback[1]), TE_CFG_STR_MAX},
+        {2, "Fallback 2 Size", FT_INT, F_OFF(ttf_fallback_size[1]), 0},
+        {2, "Fallback 3", FT_STR, F_OFF(ttf_fallback[2]), TE_CFG_STR_MAX},
+        {2, "Fallback 3 Size", FT_INT, F_OFF(ttf_fallback_size[2]), 0},
+        {2, "Fallback 4", FT_STR, F_OFF(ttf_fallback[3]), TE_CFG_STR_MAX},
+        {2, "Fallback 4 Size", FT_INT, F_OFF(ttf_fallback_size[3]), 0},
+        {2, "Fallback 5", FT_STR, F_OFF(ttf_fallback[4]), TE_CFG_STR_MAX},
+        {2, "Fallback 5 Size", FT_INT, F_OFF(ttf_fallback_size[4]), 0},
+        {2, "Fallback 6", FT_STR, F_OFF(ttf_fallback[5]), TE_CFG_STR_MAX},
+        {2, "Fallback 6 Size", FT_INT, F_OFF(ttf_fallback_size[5]), 0},
+        {2, "Fallback 7", FT_STR, F_OFF(ttf_fallback[6]), TE_CFG_STR_MAX},
+        {2, "Fallback 7 Size", FT_INT, F_OFF(ttf_fallback_size[6]), 0},
+        {2, "Fallback 8", FT_STR, F_OFF(ttf_fallback[7]), TE_CFG_STR_MAX},
+        {2, "Fallback 8 Size", FT_INT, F_OFF(ttf_fallback_size[7]), 0},
+#endif
 };
 
 #define ST_FIELD_COUNT ((int)(sizeof(st_fields) / sizeof(st_fields[0])))
@@ -285,8 +305,8 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
     {
         char *s = (char *)(base + fld->off);
 
-        /* Special case: TTF Font uses file picker */
-        if ((strcmp(fld->label, "TTF Font") == 0) || (strcmp(fld->label, "Font") == 0))
+        /* Special case: TTF Font and Fallbacks use file picker */
+        if ((strcmp(fld->label, "TTF Font") == 0) || (strcmp(fld->label, "Font") == 0) || strncmp(fld->label, "Fallback", 8) == 0)
         {
             char tmp[TE_CFG_STR_MAX];
 
@@ -650,11 +670,44 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
             }
 
 #ifdef PLATFORM_AMIGA
-            /* If TTF_FONT or TTF_SIZE changed, reload font without restarting */
-            if (work.ttf_enabled && (strcmp(cfg->ttf_font, work.ttf_font) != 0 || cfg->ttf_size != work.ttf_size))
+            /* If TTF_FONT, TTF_SIZE, or any fallback changed, reload fonts without restarting */
+            if (work.ttf_enabled)
             {
-                extern int amiga_reload_ttf(const char *font_path, int new_size);
-                amiga_reload_ttf(work.ttf_font, work.ttf_size);
+                int fi;
+                int fallbacks_changed = 0;
+
+                for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
+                {
+                    if (strcmp(cfg->ttf_fallback[fi], work.ttf_fallback[fi]) != 0 || cfg->ttf_fallback_size[fi] != work.ttf_fallback_size[fi])
+                    {
+                        fallbacks_changed = 1;
+                        break;
+                    }
+                }
+
+                if (strcmp(cfg->ttf_font, work.ttf_font) != 0 || cfg->ttf_size != work.ttf_size || fallbacks_changed)
+                {
+                    extern int amiga_reload_ttf(const char *font_path, int new_size);
+                    extern int amiga_add_ttf_fallback(const char *path, int size);
+                    extern void amiga_clear_ttf_fallbacks(void);
+
+                    /* Push the new fallback set into the backend's internal
+                     * table BEFORE amiga_reload_ttf() iterates it. Without
+                     * this the reload would re-add the previous (stale)
+                     * fallback list, leaving the new entries in the config
+                     * file but not in the running engine */
+                    amiga_clear_ttf_fallbacks();
+                    for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
+                    {
+                        if (work.ttf_fallback[fi][0])
+                        {
+                            int sz = work.ttf_fallback_size[fi] > 0 ? work.ttf_fallback_size[fi] : work.ttf_size;
+                            amiga_add_ttf_fallback(work.ttf_fallback[fi], sz);
+                        }
+                    }
+
+                    amiga_reload_ttf(work.ttf_font, work.ttf_size);
+                }
             }
 #endif
 

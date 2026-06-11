@@ -2037,8 +2037,7 @@ static struct TEGlyph *te_glyph_from_chain(struct TERenderContext *dc, ULONG cp,
 /* Measurement */
 void TE_GetMetrics(struct TERenderContext *dc, struct TEGlyphMetrics *out)
 {
-    struct TEFont *f;
-    WORD maxA = 0, maxD = 0;
+    struct TEFont *primary;
 
     if (!out)
         return;
@@ -2051,17 +2050,13 @@ void TE_GetMetrics(struct TERenderContext *dc, struct TEGlyphMetrics *out)
     if (!dc)
         return;
 
-    for (f = dc->fonts; f; f = f->next)
+    primary = dc->fonts;
+
+    if (primary)
     {
-        if (f->ascender > maxA)
-            maxA = f->ascender;
-
-        if (f->descender > maxD)
-            maxD = f->descender;
+        out->height = (WORD)(primary->ascender + primary->descender);
+        out->baseY = primary->ascender;
     }
-
-    out->height = (WORD)(maxA + maxD);
-    out->baseY = maxA;
 }
 
 void TE_MeasureText(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars, struct TEGlyphMetrics *out)
@@ -2315,23 +2310,18 @@ void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDra
 
         te_draw_glyph(dc, rp, g, penX, baseY);
 
-        /* Advance.  FIXEDWIDTH preferred; defensively fall back to
+        /* Advance. FIXEDWIDTH preferred; defensively fall back to
          * monospace_advance if g->advance is zero or absurdly small
          * (some fonts -- notably GNU Unifont in GRAY mode -- have been
          * observed to return 0 for valid glyphs, which would stack every
-         * letter on the same X and produce an invisible run). */
+         * letter on the same X and produce an invisible run) */
         if (dc->prefs & TE_FLAG_FIXEDWIDTH)
-        {
             penX += dc->fonts->monospace_advance;
-        }
+
         else if (g->advance > 0)
-        {
             penX += g->advance;
-        }
         else
-        {
             penX += dc->fonts->monospace_advance;
-        }
     }
 
     /* Release the bitmap lock taken at the start of the function */

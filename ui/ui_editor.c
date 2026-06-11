@@ -80,6 +80,7 @@ static const char *HELP_LINES[] =
         "",
         "  Other:",
         "    F4 / Alt+T       Setup / configuration",
+        "    Alt+U            ",
 };
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
 
@@ -98,14 +99,14 @@ static const char *HELP_LINES[] =
  * viewport top. Distances are bounded by body_rows (or the requested
  * page size), so movements stay snappy on a 2-million-line file
  *
- * No prefix-sum cache.  No scanning from line 0.  Editing is also fast:
+ * No prefix-sum cache. No scanning from line 0. Editing is also fast:
  * a typed character only re-wraps the current line */
 static int s_soft_top_line = 0;
 static int s_soft_top_sub = 0;
 static int s_soft_desired_vcol = -1;
 static int s_soft_last_width = -1;
 
-static void soft_reset_desired(void)
+void soft_reset_desired(void)
 {
     s_soft_desired_vcol = -1;
 }
@@ -182,7 +183,7 @@ static int wrap_count(const wchar_t *line, int len, int width)
 
 /* Sub-row geometry within a single logical line
  * Return the [seg_start, seg_end) wchar range for the target_sub
- * sub-row of line.  Returns the actual number of sub-rows scanned
+ * sub-row of line. Returns the actual number of sub-rows scanned
  * (i.e. min(target_sub + 1, total_subrows)). If target_sub is beyond
  * the line's sub-rows, returns the last sub-row
  *
@@ -218,8 +219,8 @@ static int line_subrow_range(const wchar_t *l, int len, int width, int target_su
     }
 }
 
-/* Returns the sub-row index inside `line` where the column `col` lives
- * Walks segments until `col` falls within one.  O(sub-rows in line) */
+/* Returns the sub-row index inside line where the column col lives
+ * Walks segments until col falls within one.  O(sub-rows in line) */
 static int line_subrow_of_col(const wchar_t *l, int len, int width, int col)
 {
     int pos = 0;
@@ -244,9 +245,8 @@ static int line_subrow_of_col(const wchar_t *l, int len, int width, int col)
 }
 
 /* Walk N visual rows down/up from (from_line, from_sub). Clamps to doc
- *
  * Cost: O(delta_lines). In practice delta is bounded by body_rows for
- * arrow keys, or by pg for PgUp/PgDn.  Doesn't scan the document */
+ * arrow keys, or by pg for PgUp/PgDn. Doesn't scan the document */
 static void walk_vrows_forward(Ed *ed, int width, int from_line, int from_sub, int delta, int *out_line, int *out_sub)
 {
     EdInfo info;
@@ -261,7 +261,7 @@ static void walk_vrows_forward(Ed *ed, int width, int from_line, int from_sub, i
         const wchar_t *l = ed_line_wcs(ed, line);
         int len = ed_line_len(ed, line);
         int n = wrap_count(l ? l : L"", l ? len : 0, width);
-        int avail = n - sub - 1; /* remaining sub-rows in this line below `sub` */
+        int avail = n - sub - 1; /* remaining sub-rows in this line below sub */
 
         if (remaining <= avail)
         {
@@ -358,7 +358,7 @@ static void walk_vrows_backward(Ed *ed, int width, int from_line, int from_sub, 
     *out_sub = sub;
 }
 
-/* Cursor position vs. viewport
+/* Cursor position vs viewport
  * Returns the visual column (in display cells) of the cursor within
  * its own sub-row. O(width of sub-row) */
 static int soft_cursor_vcol(Ed *ed, int width)
@@ -725,7 +725,8 @@ static void soft_move_pgdn_visual(TeApp *app, int width, int pg)
  * newlines. No hard-breaks for URLs/code */
 static int paste_char_width(wchar_t c)
 {
-    /* For FTN editing: does this char take 1 column or 0? Zero-width cases: combining marks, BOM. CJK treated as 1 */
+    /* For FTN editing: does this char take 1 column
+     * or 0? Zero-width cases: combining marks, BOM. CJK treated as 1 */
     if (c == 0)
         return 0;
 
@@ -741,7 +742,7 @@ static int paste_char_width(wchar_t c)
     return 1;
 }
 
-static char *wrap_paste_text(const char *utf8, int col)
+char *wrap_paste_text(const char *utf8, int col)
 {
     wchar_t *w;
     int wlen = 0;
@@ -838,7 +839,7 @@ static char *wrap_paste_text(const char *utf8, int col)
 }
 
 /* Effective wrap column. Clamp AUTOWRAP to COLS-1; 0=disabled */
-static int editor_eff_wrap(const TeApp *app)
+int editor_eff_wrap(const TeApp *app)
 {
     int cfgw = app->wrap_col;
     int limit = COLS - 1; /* leave one column of margin */
@@ -1598,7 +1599,9 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
     if ((is_key && ch == KEY_F(4)) || (ch == KEY_ALT('T')))
     {
         if (app->search.only_mode || (app->search.is_mode && app->search.count > 0))
+        {
             return search_next(app);
+        }
         else
         {
             /* Normal setup functionality */
@@ -1664,7 +1667,7 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
     {
         if (app->search.is_mode && app->search.count > 0)
             return replace_all(app);
-        else if (!app->search.only_mode)
+        else if (!app->search.only_mode && !app->search.is_mode)
         {
             /* Normal block anchor functionality */
             ed_block_anchor(app->editor);
@@ -1676,7 +1679,21 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
     if ((is_key && ch == KEY_F(7)) || (ch == KEY_ALT('O')))
         return insert_file(app);
 
-    return 0; /* not handled */
+    /* F8 / Alt+U : Unicode glyph picker */
+    if ((is_key && ch == KEY_F(8)) || (ch == KEY_ALT('U')))
+    {
+        long cp = ui_glyph_pick();
+
+        if (cp >= 0)
+        {
+            ed_insert_char(app->editor, (wchar_t)cp);
+            clear_search_highlights(app);
+        }
+
+        return 1;
+    }
+
+    return 0;
 }
 
 /* Handle control key combinations (Ctrl+...) */

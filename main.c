@@ -125,6 +125,7 @@ int main(int argc, char **argv)
     const char *home;
     char dir_path[512];
     const char *last_sep;
+    int fi;
 
     setlocale(LC_ALL, "");
 
@@ -183,11 +184,26 @@ int main(int argc, char **argv)
     {
         amiga_set_ttf(cfg.ttf_font, cfg.ttf_size, cfg.ttf_antialias);
         amiga_set_ttf_encoding(cfg.ttf_use_utf8);
+
+        /* Pass any TTF_FALLBACK<N> entries to the engine. Empty slots
+         * are skipped by amiga_add_ttf_fallback() */
+        amiga_clear_ttf_fallbacks();
+
+        for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
+        {
+            if (cfg.ttf_fallback[fi][0])
+            {
+                int sz = cfg.ttf_fallback_size[fi] > 0 ? cfg.ttf_fallback_size[fi] : cfg.ttf_size;
+
+                amiga_add_ttf_fallback(cfg.ttf_fallback[fi], sz);
+            }
+        }
     }
     else
     {
         /* Explicitly disable TTF when ttf_enabled=0 */
         amiga_set_ttf(NULL, 0, 0);
+        amiga_clear_ttf_fallbacks();
     }
 #endif
 

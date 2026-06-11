@@ -289,6 +289,14 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->ttf_antialias = 0; /* auto */
     cfg->ttf_use_utf8 = 1;  /* UTF-8 for full Unicode/emoji support */
 
+    /* Fallback slots empty by default -- user opts in by setting any of
+     * TTF_FALLBACK1..TTF_FALLBACK8 in the config file */
+    for (i = 0; i < TE_CFG_TTF_FALLBACKS; i++)
+    {
+        cfg->ttf_fallback[i][0] = '\0';
+        cfg->ttf_fallback_size[i] = 0;
+    }
+
     /* White-on-black fallback */
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
     {
@@ -491,6 +499,50 @@ int te_cfg_load(TeConfig *cfg, const char *path)
             else
                 cfg->ttf_use_utf8 = 1; /* default to UTF-8 */
         }
+        else if (strncasecmp(word, "TTF_FALLBACK", 12) == 0)
+        {
+            /* TODO */
+            /*const char *suffix = word + 12;
+            int is_size = 0;
+            int slot;
+
+            if (strncasecmp(suffix, "_SIZE", 5) == 0)
+            {
+                is_size = 1;
+                suffix += 5;
+            }
+
+            slot = atoi(suffix);
+
+            if (slot >= 1 && slot <= TE_CFG_TTF_FALLBACKS)
+            {
+                int idx = slot - 1;
+
+                if (is_size)
+                {
+                    char val[16];
+                    int v;
+
+                    get_token(rest, val, sizeof(val));
+                    v = atoi(val);
+
+                    if (v >= 6 && v <= 96)
+                        cfg->ttf_fallback_size[idx] = v;
+                    else
+                        cfg->ttf_fallback_size[idx] = 0;
+                }
+                else
+                {
+                    char tmp[TE_CFG_STR_MAX];
+
+                    copy_rest(rest, tmp, sizeof(tmp));
+                    strip_quotes(tmp);
+                    strncpy(cfg->ttf_fallback[idx], tmp, sizeof(cfg->ttf_fallback[idx]) - 1);
+
+                    cfg->ttf_fallback[idx][sizeof(cfg->ttf_fallback[idx]) - 1] = '\0';
+                }
+            }*/
+        }
         else if (strcasecmp(word, "DEFAULT_BG_COLOR") == 0)
         {
             char val[24];
@@ -684,6 +736,8 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 {
     FILE *f;
     int i;
+    int fi;
+    int wrote = 0;
 
     f = fopen(path, "w");
 
@@ -727,6 +781,32 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(f, "TTF_ANTIALIAS %s\n", cfg->ttf_antialias == 2 ? "ON" : cfg->ttf_antialias == 1 ? "OFF"
                                                                                               : "AUTO");
     fprintf(f, "TTF_USE_UTF8 %s\n\n", cfg->ttf_use_utf8 ? "ON" : "OFF");
+
+    fprintf(f, "# Fallback TTF fonts.  Up to %d slots.  Codepoints missing\n",
+            TE_CFG_TTF_FALLBACKS);
+    fprintf(f, "# from TTF_FONT are looked up here in order.  Typical use:\n");
+    fprintf(f, "#   TTF_FALLBACK1   FONTS:_ttf/NotoSansCJK-Regular.ttf\n");
+    fprintf(f, "#   TTF_FALLBACK2   FONTS:_ttf/NotoColorEmoji.ttf\n");
+    fprintf(f, "# Per-slot size override (default = TTF_SIZE):\n");
+    fprintf(f, "#   TTF_FALLBACK_SIZE1   16\n");
+
+    for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
+    {
+        if (cfg->ttf_fallback[fi][0])
+        {
+            fprintf(f, "TTF_FALLBACK%d   %s\n", fi + 1, cfg->ttf_fallback[fi]);
+
+            if (cfg->ttf_fallback_size[fi] > 0)
+                fprintf(f, "TTF_FALLBACK_SIZE%d  %d\n", fi + 1, cfg->ttf_fallback_size[fi]);
+
+            wrote = 1;
+        }
+    }
+
+    if (!wrote)
+        fprintf(f, "# (no fallback fonts configured)\n");
+
+    fprintf(f, "\n");
 
     fprintf(f, "# Default background color for COLOR_PAIR(0) (Amiga, 0-7)\n");
     fprintf(f, "DEFAULT_BG_COLOR %d\n\n", cfg->default_bg_color);
