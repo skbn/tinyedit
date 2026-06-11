@@ -32,7 +32,7 @@ UIDIR = $(HERE)ui
 # Object files in objs/
 CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
             $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/ncursesw_amiga.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o
 ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS)
@@ -71,6 +71,9 @@ $(OBJDIR)/editor.o: $(COMPDIR)/editor.c $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)/config.o: $(COMPDIR)/config.c $(COMPDIR)/config.h $(COREDIR)/charset.h | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h $(COREDIR)/utf8.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # UI objects
