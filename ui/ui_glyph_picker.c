@@ -196,16 +196,25 @@ static const char *block_name_at(int flat_idx)
 static int ui_block_pick(int initial)
 {
     int y, x, h, w;
-    int want_h = NUM_BLOCKS + 4;
+    int want_h = LINES - 4;
     int want_w = 36;
+    int i;
     int sel, top;
     int visible;
     int dirty = 1;
     int rc;
     wint_t wch;
 
-    if (want_h > LINES - 2)
-        want_h = LINES - 2;
+    /* Calculate width based on longest block name */
+    for (i = 0; i < NUM_BLOCKS; i++)
+    {
+        int len = (int)strlen(s_blocks[i].name);
+        if (len + 6 > want_w)
+            want_w = len + 6;
+    }
+
+    if (want_h < 14)
+        want_h = 14;
 
     sel = (initial < 0) ? 0 : (initial + 1);
 
