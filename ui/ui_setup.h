@@ -15,10 +15,7 @@
 
 #include "../components/config.h"
 
-/* Run the setup screen.
- * cfg       : live config struct (modified in place on save)
- * cfg_path  : path to write the config file, or NULL.
- * Returns 1 if saved (caller should re-apply colors), 0 if cancelled */
+/* Run setup screen: modify cfg in place, return 1 if saved, 0 if cancelled */
 int ui_setup_run(TeConfig *cfg, const char *cfg_path);
 
 #endif /* TINYEDIT_UI_SETUP_H */

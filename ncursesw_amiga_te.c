@@ -79,16 +79,10 @@ static int s_ttf_size = 14;
 static int s_ttf_antialias = 0;    /* 0=off (MONO), 1=on (GRAY antialias) -- internal */
 static int s_ttf_aa_auto = 1;      /* 1 = decide AA at apply-time based on screen depth */
 static int s_ttf_proportional = 0; /* 1 = render per-cell (proportional font detected) */
-static int s_ansi_mode = 0;        /* 1 = app is in ANSI-art viewing mode; draw block glyphs
-                                    * (U+2580..U+259F) via RectFill instead of TE_RenderText
-                                    * for pixel-perfect tiling */
+static int s_ansi_mode = 0;        /* ANSI mode: draw block glyphs via RectFill for pixel-perfect tiling */
 static int s_ttf_use_utf8 = 1;     /* Uses UTF-8 natively */
 
-/* Fallback TTF fonts. Slots are populated by main BEFORE initscr() via
- * amiga_add_ttf_fallback(); during initscr() each non-empty slot is
- * passed to TE_FontAdd() after the primary font, in array order. The
- * te_rastport engine looks them up when a codepoint isn't found in the
- * primary face -- typical use is CJK / colour emoji coverage */
+/* Fallback TTF fonts populated by main via amiga_add_ttf_fallback() before initscr() */
 #define AMI_TTF_FALLBACKS 8
 static char s_ttf_fallback_file[AMI_TTF_FALLBACKS][512];
 static int s_ttf_fallback_size[AMI_TTF_FALLBACKS];
@@ -101,13 +95,10 @@ static int s_echo_mode = 0;
 static int s_keypad_mode = 1;
 static int s_nodelay_mode = 0;
 
-/* Cursor outline pen (defaults to pen 1 = text). Configurable via
- * amiga_set_cursor_pen() so the app can pick a contrasting color */
+/* Cursor outline pen (configurable via amiga_set_cursor_pen()) */
 static UBYTE s_cursor_pen = 1;
 
-/* Default fg/bg used when a cell has no color pair (pair == 0 or
- * unitialized). Configurable via amiga_set_default_colors(). Stored as
- * ncurses color indices (0..15), mapped to pens via s_pen[] in apply_colors */
+/* Default fg/bg when pair == 0 or uninitialized (configurable via amiga_set_default_colors()) */
 static short s_default_fg = COLOR_WHITE;
 static short s_default_bg = 0; /* Updated dynamically from config */
 
@@ -144,19 +135,10 @@ static int s_key_queue_pos = 0;
 /* Cell helpers */
 #define CELL(win, r, c) (&(win)->cells[(r) * (win)->_maxx + (c)])
 
-/* A glyph whose wcswidth() == 2 (CJK ideograph, wide emoji, etc.) occupies
- * two cells in the buffer: a LEAD cell with the actual codepoint, followed
- * by a TRAILING cell with this sentinel. The TRAILING cell is skipped by
- * the renderer (its pixels are painted by the lead glyph's wide bitmap) but
- * counted for RectFill area and shadow tracking
- *
- * The sentinel value 0xFFFE is U+FFFE, a Unicode non-character that cannot
- * appear in valid text
- */
+/* Wide glyph trailing sentinel (U+FFFE) - occupies second cell of wide glyphs */
 #define TE_CELL_WIDE_TRAILING 0x0000FFFEUL
 
-/* wcswidth() lives in ui_editor_helper.c; declare it here since there's no
- * shared header for it */
+/* wcswidth() from ui_editor_helper.c */
 extern int wcswidth(const wchar_t *wcs, size_t n);
 
 static int px(int col) { return bx + col * fw; }
@@ -201,26 +183,27 @@ static int utf32_to_utf8(uint32_t codepoint, char *buf)
     return 3;
 }
 
-/* Compute dirty bitmap for row r into s_dirty_row[0..COLS-1]
- * Returns 1 if any cell in the row is dirty, 0 otherwise */
+/* Compute dirty bitmap for row r into s_dirty_row[0..COLS-1] */
 static int compute_dirty_row(int r)
 {
     int c;
     int any = 0;
     int cols = COLS;
     int countdown = 0;
-    int has_wide;
+    int has_wide = 0;
 
     if (cols > SHADOW_DIRTY_MAX_COLS)
         cols = SHADOW_DIRTY_MAX_COLS;
 
-    /* Raw per-cell diff vs shadow */
+    /* Raw per-cell diff vs shadow + wide-glyph detection in single sweep */
     if (!s_shadow || s_shadow_dirty)
     {
+        /* Forced full redraw: skip wide check */
         for (c = 0; c < cols; c++)
             s_dirty_tmp[c] = 1;
 
         any = (cols > 0);
+        has_wide = 1; /* paint everything */
     }
     else
     {
@@ -230,9 +213,26 @@ static int compute_dirty_row(int r)
         {
             Cell *cc = CELL(stdscr, r, c);
             int d = (cc->ch != row_sh[c].ch) || (cc->attrs != row_sh[c].attrs);
+            ULONG ch;
 
             s_dirty_tmp[c] = (unsigned char)d;
             any |= d;
+
+            if (has_wide)
+                continue;
+
+            ch = (ULONG)cc->ch;
+
+            if (ch == TE_CELL_WIDE_TRAILING ||
+                (ch >= 0x2190 && ch <= 0x21FF) || /* Arrows         */
+                (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block    */
+                (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric      */
+                (ch >= 0x2600 && ch <= 0x26FF) || /* Misc symbols   */
+                (ch >= 0x2700 && ch <= 0x27BF) || /* Dingbats       */
+                (ch >= 0x2B00 && ch <= 0x2BFF))   /* Misc symbols 2 */
+            {
+                has_wide = 1;
+            }
         }
     }
 
@@ -244,51 +244,6 @@ static int compute_dirty_row(int r)
         return 0;
     }
 
-    /* If the row contains wide-glyph cells (CJK lead+trailing, or any
-     * codepoint in a Unicode range we render as 2-cells wide), force
-     * the entire row dirty. Wide glyphs and visually-wide symbols
-     * (arrows, dingbats, geometric shapes...) often render pixels that
-     * extend outside their reported cell width. Repainting only a
-     * limited bleed range crops those extensions on adjacent cells that
-     * happened to not be in the dirty zone
-     *
-     * The cost is one extra row repaint per frame in rows containing
-     * wide content, which is negligible compared to a corrupted visual */
-    has_wide = 0;
-
-    for (c = 0; c < cols; c++)
-    {
-        Cell *cc = CELL(stdscr, r, c);
-        ULONG ch = (ULONG)cc->ch;
-        wchar_t wc;
-
-        if (ch == TE_CELL_WIDE_TRAILING)
-        {
-            has_wide = 1;
-            break;
-        }
-
-        /* Codepoints that visually render wider than one cell even
-         * though wcwidth() says 1. Detected here so the dirty
-         * propagation covers them too. Keep this list short -- it
-         * is a heuristic for "this row may have glyph overflow" */
-        /* TODO */
-        /*wc = (wchar_t)ch;
-        has_wide = (wcswidth(&wc, 1) == 2);
-        break;*/
-
-        if ((ch >= 0x2190 && ch <= 0x21FF) || /* Arrows         */
-            (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block    */
-            (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric      */
-            (ch >= 0x2600 && ch <= 0x26FF) || /* Misc symbols   */
-            (ch >= 0x2700 && ch <= 0x27BF) || /* Dingbats       */
-            (ch >= 0x2B00 && ch <= 0x2BFF))   /* Misc symbols 2 */
-        {
-            has_wide = 1;
-            break;
-        }
-    }
-
     if (has_wide)
     {
         for (c = 0; c < cols; c++)
@@ -297,10 +252,7 @@ static int compute_dirty_row(int r)
         return 1;
     }
 
-    /* Propagate dirty by ±SHADOW_BLEED_CELLS using a sweep with a
-     * running countdown - O(cols), no inner loop. After the forward sweep,
-     * s_dirty_row[c] is set if any cell in [c-K..c] was base-dirty (handles
-     * left→right bleed). The backward sweep adds right→left bleed */
+    /* Propagate dirty by ±SHADOW_BLEED_CELLS using running countdown (O(cols)) */
     for (c = 0; c < cols; c++)
     {
         if (s_dirty_tmp[c])
@@ -357,23 +309,15 @@ static void apply_colors(int pair, int attrs)
     fg_pen = s_pen[fg_idx];
     bg_pen = s_pen[bg_idx];
 
-    SetBPen(ami_rp, bg_pen);
+    /* Always set both pens */
     SetAPen(ami_rp, fg_pen);
-    SetDrMd(ami_rp, JAM2);
+    SetBPen(ami_rp, bg_pen);
+
+    if (ami_rp->DrawMode != JAM2)
+        SetDrMd(ami_rp, JAM2);
 }
 
-/* Direct block-glyph rendering (Unicode U+2580..U+259F)
- *
- * These 32 codepoints are precisely-defined geometric blocks/shades that
- * are MEANT to tile seamlessly to form solid shapes (ANSI art). TTF fonts
- * render them as actual glyphs, but the glyph height = ascender+descender
- * may be smaller than our cell height (which includes accent room for
- * Á, É, Ñ, etc.), leaving 1-2 px gaps between rows
- *
- * In ANSI viewing mode we bypass the font and draw these blocks ourselves
- * with RectFill / SetAfPt so they tile pixel-perfect, matching what topaz
- * does on the bitmap path. Bonus: faster than rasterizing through TTengine
- */
+/* Direct block-glyph rendering (U+2580..U+259F) - bypass font for pixel-perfect tiling in ANSI mode */
 static int is_block_glyph(uint32_t cp)
 {
     return (cp >= 0x2580 && cp <= 0x259F);
@@ -381,8 +325,7 @@ static int is_block_glyph(uint32_t cp)
 
 static void draw_block_glyph(uint32_t cp, int x, int y, int cw, int ch_, UBYTE fg)
 {
-    /* Standard Amiga area-fill patterns (16-pixel wide, 2-row repeating)
-     * We feed these to SetAfPt() so RectFill paints them */
+    /* Standard Amiga area-fill patterns (16-pixel wide, 2-row repeating) */
     static UWORD pat_25[2] = {0x8888, 0x2222}; /* ░ light shade  */
     static UWORD pat_50[2] = {0x5555, 0xAAAA}; /* ▒ medium shade (checker) */
     static UWORD pat_75[2] = {0x7777, 0xDDDD}; /* ▓ dark shade   */
@@ -542,14 +485,7 @@ static void render_cell(int row, int col, chtype ch, int attrs)
     if (!ami_rp || row < 0 || row >= LINES || col < 0 || col >= COLS)
         return;
 
-    /* WIDE-CELL HANDLING -- two cases:
-     *  - If (row,col) holds a TRAILING sentinel, the visual glyph belongs to
-     *    the LEAD at col-1. Snap the repaint to the lead position; we'll
-     *    cover 2*fw pixels and render the lead's codepoint
-     *  - If (row,col) holds a LEAD whose next cell is TRAILING, widen the
-     *    repaint to 2*fw so the right half of the wide bitmap gets cleared
-     *    and redrawn
-     * In all other cases the original 1-cell semantics apply */
+    /* WIDE-CELL HANDLING: TRAILING snaps to LEAD, LEAD widens to 2*fw */
     if (stdscr && stdscr->cells)
     {
         if (ch == TE_CELL_WIDE_TRAILING && col > 0)
@@ -582,18 +518,14 @@ static void render_cell(int row, int col, chtype ch, int attrs)
     RectFill(ami_rp, x, y, x + cell_w - 1, y + fh - 1);
     SetAPen(ami_rp, saved);
 
-    /* Draw char. Bitmap path: 8-bit only. TTF path: TE_RenderText
-     * If we resolved a TRAILING to its LEAD above, draw_ch is now the
-     * lead codepoint, never the WIDE_TRAILING_CP sentinel */
+    /* Draw char: bitmap path (8-bit only) or TTF path (TE_RenderText) */
     if (s_use_ttf)
     {
         uint32_t wc = (uint32_t)(draw_ch & 0xFFFFFFFF);
 
         if (wc >= 0x20 && wc != TE_CELL_WIDE_TRAILING)
         {
-            /* ANSI mode + block glyph > draw directly with RectFill so the
-             * block tiles seamlessly to its neighbors. Outside ANSI mode (or
-             * for any non-block char), fall through to TE_RenderText path */
+            /* ANSI mode + block glyph: draw directly with RectFill for seamless tiling */
             if (s_ansi_mode && is_block_glyph(wc))
             {
                 draw_block_glyph(wc, x, y, fw, fh, saved);
@@ -625,10 +557,7 @@ static void render_cell(int row, int col, chtype ch, int attrs)
 
 static void shadow_invalidate() { s_shadow_dirty = 1; }
 
-/* Full screen redraw from cell buffer (diff against
- * shadow buffer to minimise expensive AmigaOS RectFill+Text per cell)
- * Run-length: groups contiguous changed cells with same color/attrs into one
- * RectFill+Text instead of per-cell -- ~10x fewer graphics calls on 68k */
+/* Full screen redraw from cell buffer (diff against shadow buffer to minimise AmigaOS calls) */
 static void render_all();
 
 /* Force complete redraw (call after font change) */
@@ -667,8 +596,7 @@ static void render_all()
 
     for (r = 0; r < LINES; r++)
     {
-        /* Compute dirty bitmap with bleed propagation for this row. If nothing
-         * is dirty, skip the row entirely — saves the inner while() walk */
+        /* Compute dirty bitmap with bleed propagation; skip row if nothing dirty */
         if (!compute_dirty_row(r))
             continue;
 
@@ -690,9 +618,7 @@ static void render_all()
                 continue;
             }
 
-            /* Start a run of contiguous dirty cells with same color/attrs
-             * Wide-glyph TRAILING cells are part of the run for shadow/area
-             * purposes but are NOT counted as glyphs in run_buf/urun */
+            /* Start run of contiguous dirty cells with same color/attrs */
             run_start = c;
             run_pair = (cell->attrs & A_COLOR) >> 8;
             run_attrs = cell->attrs;
@@ -712,10 +638,7 @@ static void render_all()
                 if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
                     break;
 
-                /* TRAILING cell of a wide glyph: don't add to run_buf (no
-                 * glyph to draw -- the lead already covered this pixel area)
-                 * but DO advance c and update shadow so the row count and
-                 * RectFill area match the visual extent */
+                /* TRAILING cell: skip run_buf but advance c for area/RectFill */
                 if (cc->ch == TE_CELL_WIDE_TRAILING)
                 {
                     if (s_shadow)
@@ -727,9 +650,7 @@ static void render_all()
                     continue;
                 }
 
-                /* run_buf is used in bitmap mode (8-bit only). For TTF mode
-                 * we ALSO build urun[] below from cc->ch directly, preserving
-                 * the full BMP codepoint */
+                /* run_buf for bitmap mode (8-bit), urun for TTF mode (full BMP codepoint) */
                 run_buf[run_len++] = (char)(cc->ch & 0xFF);
 
                 if (s_shadow)
@@ -755,9 +676,7 @@ static void render_all()
             y = py(r);
             rx = px(run_start + run_len) - 1;
 
-            /* One wide RectFill for the whole run background. Width covers
-             * the full visual extent including trailing cells of any wide
-             * glyphs at the run boundary */
+            /* One wide RectFill for whole run background (includes trailing cells) */
             saved = ami_rp->FgPen;
             SetAPen(ami_rp, ami_rp->BgPen);
             RectFill(ami_rp, x, y, rx, y + fh - 1);
@@ -774,17 +693,7 @@ static void render_all()
 
             if (s_use_ttf)
             {
-                /* Pre-scan: does this run contain any wide-glyph cells?
-                 * If yes, force per-cell rendering even in monospace mode
-                 * Rationale: in batched mode the FT pen advances per the
-                 * glyph's natural advance (e.g. 2*fw for CJK / wide emoji)
-                 * If the font's advance isn't EXACTLY 2*fw (subpixel
-                 * rounding, font metric quirks), drift accumulates and the
-                 * line "recolocates" between full re-renders and partial
-                 * re-renders driven by the cursor + bleed propagation
-                 * Per-cell rendering pins every glyph at its cell-aligned
-                 * pixel position -> zero drift, no recolocation.  Narrow
-                 * only runs keep the batched fast path */
+                /* Pre-scan: does this run contain any wide-glyph cells? */
                 int run_has_wide = 0;
                 {
                     int u2;
@@ -801,11 +710,13 @@ static void render_all()
                     }
                 }
 
-                /* Per-cell render is needed if the font is proportional, if
-                 * we are in ANSI mode, or if the run contains wide glyphs */
+                /* Per-cell render needed for proportional, ANSI mode, or wide glyphs */
                 if (s_ttf_proportional || s_ansi_mode || run_has_wide)
                 {
                     int u;
+
+                    TE_SetColorPen(ami_te_dc, ami_te_screen, (LONG)ami_rp->FgPen, (LONG)ami_rp->BgPen);
+
                     for (u = 0; u < run_len; u++)
                     {
                         Cell *cc = CELL(stdscr, r, run_start + u);
@@ -816,20 +727,13 @@ static void render_all()
                         char ubuf[5];
                         int ulen;
 
-                        /* TRAILING cells were already painted by their lead
-                         * glyph's wide bitmap. Skip */
+                        /* TRAILING cells already painted by lead glyph's wide bitmap */
                         if (wc == TE_CELL_WIDE_TRAILING)
                             continue;
 
-                        /*if (wc < 0x20)
-                            wc = (uint32_t)' ';*/
-
                         fg_pen = ami_rp->FgPen;
 
-                        /* The outer run RectFill already cleared this cell's
-                         * background (and the trailing cell area for wide
-                         * glyphs). No need for per-cell RectFill here -- the
-                         * shadow bleed propagation handles cross-frame cleanup */
+                        /* Outer run RectFill already cleared background (no per-cell RectFill needed) */
 
                         /* ANSI mode + block glyph: draw directly (no font) */
                         if (s_ansi_mode && is_block_glyph(wc))
@@ -838,18 +742,9 @@ static void render_all()
                             continue;
                         }
 
-                        Move(ami_rp, cx, y + fb);
-
-                        /* TE_RenderText always expects UTF-8. The previous
-                         * UTF-16 path here was a no-op (TE parsed the UWORD
-                         * stream as UTF-8 bytes, found no valid glyphs, drew
-                         * nothing). Always go through UTF-8 */
-
+                        /* TE_RenderText always expects UTF-8 */
                         ulen = utf32_to_utf8(wc, ubuf);
-
                         ubuf[ulen] = '\0';
-
-                        TE_SetColorPen(ami_te_dc, ami_te_screen, (LONG)fg_pen, (LONG)ami_rp->BgPen);
 
                         pos.x = (WORD)cx;
                         pos.y = (WORD)(y + fb);
@@ -859,10 +754,7 @@ static void render_all()
                 }
                 else
                 {
-                    /* MONOSPACE: batched TE_RenderText for the whole run
-                     * Skip TRAILING cells when building the UTF-8 stream
-                     * the wide lead glyph's advance covers two cell widths
-                     * so positions stay aligned automatically */
+                    /* MONOSPACE: batched TE_RenderText for whole run, skip TRAILING cells */
                     static char urun[2048]; /* 512 chars * 4 bytes max */
                     struct TEDrawPosition pos;
                     int u;
@@ -905,10 +797,7 @@ static void render_all()
 
     s_shadow_dirty = 0;
 
-    /* Cursor handling -- track previous cursor cell so we can redraw it
-     * cleanly when the cursor moves. Forces redraw of (a) previous cell
-     * to wipe the old outline, and (b) current cell so the outline
-     * reappears on top */
+    /* Cursor handling: track previous cursor cell to redraw cleanly on move */
     s_last_cur_y = -1;
     s_last_cur_x = -1;
     cy_cell = stdscr ? stdscr->_cury : -1;
@@ -916,12 +805,7 @@ static void render_all()
     prev_y = s_last_cur_y;
     prev_x = s_last_cur_x;
 
-    /* If the cursor was at a different cell, redraw that cell from
-     * the live buffer so the outline disappears.  render_cell() is now
-     * wide-aware: a single call handles narrow + lead + trailing cases
-     * correctly (TRAILING is snapped to its LEAD, and a LEAD's bitmap
-     * extends naturally over the trailing area).  We just need to keep
-     * the shadow in sync for both halves of a wide pair */
+    /* Redraw previous cursor cell to wipe outline (render_cell handles wide glyphs) */
     if (s_shadow && prev_y >= 0 && prev_x >= 0 && prev_y < LINES && prev_x < COLS && (prev_y != cy_cell || prev_x != cx_cell))
     {
         Cell *cell = CELL(stdscr, prev_y, prev_x);
@@ -929,8 +813,7 @@ static void render_all()
 
         render_cell(prev_y, prev_x, cell->ch, cell->attrs);
 
-        /* If prev was a TRAILING, the lead lives one to the left -- shadow
-         * sync target is the lead */
+        /* If prev was TRAILING, shadow sync target is the lead at col-1 */
         if (cell->ch == TE_CELL_WIDE_TRAILING && prev_x > 0)
             sync_lead = prev_x - 1;
 
@@ -953,11 +836,7 @@ static void render_all()
         int draw_x_cell = cx_cell;
         int trailing_x_cell = -1; /* -1 = none */
 
-        /* Determine cursor visual width based on what's under it
-         * Two wide-glyph cases for the cursor:
-         *  - on LEAD (cell[c+1] == TRAILING)  ->  2*fw outline at cell c
-         *  - on TRAILING (cell[c] is sentinel) -> 2*fw outline snapped to c-1
-         */
+        /* Determine cursor visual width: LEAD (2*fw) or TRAILING (2*fw at col-1) */
         if (stdscr && stdscr->cells)
         {
             Cell *cur = CELL(stdscr, cy_cell, cx_cell);
@@ -993,9 +872,7 @@ static void render_all()
         Move(ami_rp, cx + cursor_w - 1, cy);
         Draw(ami_rp, cx + cursor_w - 1, cy + fh - 1);
 
-        /* Force the next render to redraw under the cursor. Both halves
-         * of a wide pair must be marked, otherwise the bleed propagation
-         * could miss the unmodified half */
+        /* Force next render to redraw under cursor (mark both halves of wide pair) */
         if (s_shadow)
         {
             s_shadow[cy_cell * COLS + draw_x_cell].ch ^= 0x10000;
@@ -1023,8 +900,7 @@ static int ami_ttf_try_open()
     if (!s_ttf_file[0])
         return 0; /* TTF disabled in config */
 
-    /* Static TE engine -- no library to open, no base pointer
-     * The TE_ContextCreate() call also initialises FreeType */
+    /* Static TE engine: no library to open, TE_ContextCreate initialises FreeType */
     ami_te_dc = TE_ContextCreate();
 
     if (!ami_te_dc)
@@ -1051,10 +927,7 @@ static int ami_ttf_try_open()
         return 0;
     }
 
-    /* Load fallback fonts. These cover codepoints missing from the
-     * primary face -- typical setup is a Latin/monospace primary plus
-     * CJK and/or colour emoji fallbacks. A fallback that fails to load
-     * is reported but doesn't abort initialisation */
+    /* Load fallback fonts for codepoints missing from primary face (CJK/emoji) */
     for (fi = 0; fi < s_ttf_fallback_count; fi++)
     {
         const char *fp = s_ttf_fallback_file[fi];
@@ -1082,8 +955,7 @@ static int ami_ttf_try_open()
     return 1;
 }
 
-/* Apply to rastport and re-measure cell metrics via TE_GetMetrics
- * + TE_MeasureText (same technique as UniTextEditor) */
+/* Apply to rastport and re-measure cell metrics via TE_GetMetrics + TE_MeasureText */
 static void ami_ttf_apply_to_rastport(struct RastPort *rp)
 {
     struct TEGlyphMetrics metric;
@@ -1124,14 +996,11 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
     if (!s_ttf_proportional && mw >= 4 && mw <= 64)
         fw = (int)mw;
 
-    /* Register screen for CLUT colour mapping (needed for antialias
-     * on indexed screens like AGA). Safe to call with NULL */
+    /* Register screen for CLUT colour mapping (needed for antialias on indexed screens like AGA) */
     if (ami_te_screen)
         TE_UpdatePalette(ami_te_dc, ami_te_screen);
 
-    /* AUTO antialias: decide based on screen depth now that we know it
-     * On AGA (depth <= 8) the AA path is slow and on a 4-bit screen looks
-     * worse than MONO, so default to OFF. RTG (>=15 bit) gets AA */
+    /* AUTO antialias: decide based on screen depth (AGA <=8 bits OFF, RTG >=15 bits ON) */
     /*if (s_ttf_aa_auto && ami_te_screen)*/
 
     prefs = TE_GetFlags(ami_te_dc);
@@ -1149,11 +1018,7 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
             prefs &= ~TE_FLAG_ANTIALIAS;
     }
 
-    /* If the detected font is monospace, tell TE to advance every
-     * glyph by monospace_advance instead of the glyph's own advance
-     * This is essential for fixed-cell terminal layouts -- without it,
-     * glyphs with quirky per-glyph advances (notably GNU Unifont in
-     * GRAY mode) bunch together and become illegible or invisible */
+    /* If font is monospace, tell TE to advance every glyph by monospace_advance (essential for fixed-cell layouts) */
     if (!s_ttf_proportional)
         prefs |= TE_FLAG_FIXEDWIDTH;
     else
@@ -1248,8 +1113,7 @@ WINDOW *initscr()
     }
     else
     {
-        /* fw/fh/fb are provisional; refined after window opens (see below)
-         * Skip diskfont loading entirely — the RastPort will use TE_RenderText */
+        /* fw/fh/fb are provisional; refined after window opens, skip diskfont loading */
         ami_font_normal = NULL;
         ami_font_ansi = NULL;
         ami_font = NULL;
@@ -1309,6 +1173,10 @@ WINDOW *initscr()
     if (s_use_ttf)
     {
         ami_te_screen = ami_win->WScreen;
+
+        /* TODO: AGA mode only, no colors, crashes in te_rastport.c LockBitMapTags */
+        TE_SetScreen(ami_te_dc, ami_te_screen);
+
         ami_ttf_apply_to_rastport(ami_rp);
     }
 
@@ -1383,9 +1251,7 @@ int endwin()
 
     curscr = NULL;
 
-    /* Close TTF (TE_ContextRelease + CloseLibrary) BEFORE the window goes
-     * away, then close the library. ami_ttf_close() is a no-op if TTF
-     * was never opened, so it's safe to call unconditionally */
+    /* Close TTF (TE_ContextRelease) before window closes */
     ami_ttf_close();
 
     if (ami_win)
@@ -1919,9 +1785,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
             w->_curx < 0 || w->_curx >= w->_maxx)
             continue;
 
-        /* Visual width: only meaningful in TTF mode (bitmap fonts are 8-bit
-         * single-byte chars).  wcswidth returns 2 for CJK/wide emoji, 1 for
-         * narrow, 0/-1 for control chars (treated as 1) */
+        /* Visual width: TTF mode only (wcswidth returns 2 for CJK/wide, 1 for narrow) */
         cw = 1;
 
         if (s_use_ttf)
@@ -1933,8 +1797,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
                 cw = 2;
         }
 
-        /* If a wide doesn't fit in the remaining row, write a space at the
-         * current cell and advance */
+        /* If wide doesn't fit in remaining row, write space and advance */
         if (cw == 2 && w->_curx + 1 >= w->_maxx)
         {
             cell = CELL(w, w->_cury, w->_curx);
@@ -1946,10 +1809,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
         else
         {
             /* Cleanup edge cases when overwriting existing wide glyphs */
-            /* Case A: writing on top of a TRAILING cell -> the lead to our
-             * left is now orphaned (its trailing is being overwritten)
-             * Replace the lead with a space so it doesn't render as wide
-             * with no trailing */
+            /* Case A: writing on TRAILING -> lead at col-1 orphaned, replace with space */
             if (w->_curx > 0)
             {
                 Cell *cur = CELL(w, w->_cury, w->_curx);
@@ -1962,9 +1822,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
                 }
             }
 
-            /* Case B: writing a NARROW char into what was a LEAD of a wide
-             * (the cell to our right is TRAILING). The trailing is now
-             * orphaned -> replace with a space */
+            /* Case B: writing NARROW into LEAD -> trailing at col+1 orphaned, replace with space */
             if (cw == 1 && w->_curx + 1 < w->_maxx)
             {
                 Cell *nxt = CELL(w, w->_cury, w->_curx + 1);
@@ -1976,9 +1834,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
                 }
             }
 
-            /* Case C: writing a WIDE char whose trailing slot was the LEAD of
-             * a previous wide. The cell at curx+2 was its trailing -> orphan,
-             * replace with space */
+            /* Case C: writing WIDE whose trailing slot was LEAD -> cell at curx+2 orphaned, replace with space */
             if (cw == 2 && w->_curx + 2 < w->_maxx)
             {
                 Cell *thd = CELL(w, w->_cury, w->_curx + 2);
@@ -2277,8 +2133,7 @@ int assume_default_colors(int fg, int bg)
 
 /* Amiga-specific extensions */
 
-/* Set the pen used to draw the cursor outline. Accepts a raw Amiga pen
- * index (0..255). Returns previous pen so the caller can restore it */
+/* Set cursor outline pen (0..255), returns previous pen */
 int amiga_set_cursor_pen(int pen)
 {
     int old = s_cursor_pen;
@@ -2294,10 +2149,7 @@ int amiga_set_cursor_pen(int pen)
     return old;
 }
 
-/* Set the default fg/bg used by apply_colors when a cell has no color
- * pair (pair == 0 or uninitialized). fg/bg are ncurses color indices
- * (COLOR_BLACK..COLOR_WHITE, 0..15). Forces a full redraw so existing
- * unattributed cells get repainted with the new background */
+/* Set default fg/bg for cells with no color pair (ncurses indices 0..15), forces full redraw */
 int amiga_set_default_colors(short fg, short bg)
 {
     if (fg < 0 || fg > 15 || bg < 0 || bg > 15)
@@ -2310,9 +2162,7 @@ int amiga_set_default_colors(short fg, short bg)
     return OK;
 }
 
-/* Set the default background color for COLOR_PAIR(0). Must be called
- * before initscr(). color is an ncurses color index (COLOR_BLACK..COLOR_WHITE)
- * Returns previous color so the caller can restore it */
+/* Set default background color for COLOR_PAIR(0) (must call before initscr()) */
 int amiga_set_default_bg_color(int color)
 {
     int old = s_default_bg_color;
@@ -2330,8 +2180,7 @@ int amiga_set_default_bg_color(int color)
     return old;
 }
 
-/* Set the font name for Amiga. Must be called before initscr()
- * If font_name is NULL or empty, uses "topaz.font" as default */
+/* Set font name for Amiga (must call before initscr(), defaults to topaz.font) */
 int amiga_set_font_name(const char *font_name)
 {
     if (font_name && font_name[0])
@@ -2348,8 +2197,7 @@ int amiga_set_font_name(const char *font_name)
     return 0;
 }
 
-/* Set the ANSI font name for Amiga. Used when ANSI mode is active
- * If font_name is NULL or empty, uses "topaz.font" as default */
+/* Set ANSI font name for Amiga (used when ANSI mode active, defaults to topaz.font) */
 int amiga_set_ansi_font_name(const char *font_name)
 {
     if (font_name && font_name[0])
@@ -2366,11 +2214,7 @@ int amiga_set_ansi_font_name(const char *font_name)
     return 0;
 }
 
-/* Configure TrueType font. Must be called BEFORE initscr(). With ttf_file =
- * NULL or empty, TTF is disabled and the bitmap font (amiga_set_font_name)
- * is used. With a valid path, tinyedit will try to open ttengine.library
- * v6+ and the TTF at initscr() time; on any failure it falls back to the
- * bitmap font automatically */
+/* Configure TrueType font (must call BEFORE initscr(), NULL/empty disables TTF) */
 int amiga_set_ttf(const char *ttf_file, int size, int antialias)
 {
     if (ttf_file && ttf_file[0])
@@ -2388,8 +2232,7 @@ int amiga_set_ttf(const char *ttf_file, int size, int antialias)
     else
         s_ttf_size = 14;
 
-    /* Convention from config.c: 0 = AUTO, 1 = OFF, 2 = ON
-     * AUTO: decide based on screen depth at apply-time */
+    /* Convention: 0=AUTO, 1=OFF, 2=ON (AUTO decides based on screen depth) */
     if (antialias == 1)
     {
         /* OFF -- force MONO */
@@ -2404,8 +2247,7 @@ int amiga_set_ttf(const char *ttf_file, int size, int antialias)
     }
     else
     {
-        /* AUTO -- defer decision until we know the screen depth
-         * Default to OFF until then; apply_to_rastport will adjust */
+        /* AUTO: defer decision until screen depth known (default OFF until then) */
         s_ttf_antialias = 0;
         s_ttf_aa_auto = 1;
     }
@@ -2413,8 +2255,7 @@ int amiga_set_ttf(const char *ttf_file, int size, int antialias)
     return 0;
 }
 
-/* Uses UTF-8 natively — encoding is fixed
- * This stub is kept for API compatibility with the ttengine variant */
+/* Set UTF-8 encoding (stub for API compatibility, encoding is fixed) */
 int amiga_set_ttf_encoding(int use_utf8)
 {
     if (s_ttf_use_utf8 != (use_utf8 ? 1 : 0))
@@ -2426,10 +2267,7 @@ int amiga_set_ttf_encoding(int use_utf8)
     return 0;
 }
 
-/* Add one fallback TTF font.  Must be called BEFORE initscr() -- the
- * fonts are loaded as a chain at TE_ContextCreate() time, alongside the
- * primary TTF font.  Returns 0 on success, -1 if no slot available or
- * path invalid.  A NULL/empty path silently succeeds (no-op). */
+/* Add fallback TTF font (must call BEFORE initscr(), returns 0 on success, -1 on failure) */
 int amiga_add_ttf_fallback(const char *path, int size)
 {
     int idx;
@@ -2452,8 +2290,7 @@ int amiga_add_ttf_fallback(const char *path, int size)
     return 0;
 }
 
-/* Clear all configured fallback fonts. Idempotent. Call before
- * re-applying fallbacks (e.g., after reloading the config file) */
+/* Clear all configured fallback fonts (idempotent, call before re-applying) */
 void amiga_clear_ttf_fallbacks(void)
 {
     int i;
@@ -2467,8 +2304,7 @@ void amiga_clear_ttf_fallbacks(void)
     s_ttf_fallback_count = 0;
 }
 
-/* Switch font (call after toggling ANSI mode)
- * use_ansi: 1 = use ANSI font, 0 = use regular font */
+/* Switch font (call after toggling ANSI mode, use_ansi: 1=ANSI font, 0=regular) */
 int amiga_change_font(int use_ansi)
 {
     struct TextFont *target_font;
@@ -2505,10 +2341,7 @@ int amiga_change_font(int use_ansi)
     return 0;
 }
 
-/* Reload TTF with new font path and/or size
- * Flushes the current DrawContext fonts and reloads at the new size
- * reapplies metrics and resizes the window
- * Returns 1 on success, 0 on failure (old font remains active) */
+/* Reload TTF with new font path/size, returns 1 on success, 0 on failure */
 int amiga_reload_ttf(const char *font_path, int new_size)
 {
     char old_file[512];
@@ -2594,8 +2427,7 @@ int amiga_reload_ttf(const char *font_path, int new_size)
         int want_w = COLS * fw + bw;
         int want_h = LINES * fh + bh;
 
-        /* BorderTop already includes the title bar pixel height on a
-         * backdrop window, so no extra offset needed here */
+        /* BorderTop already includes title bar height on backdrop window */
         int win_x = ami_win->LeftEdge;
         int win_y = ami_win->TopEdge;
 
@@ -2627,11 +2459,7 @@ int amiga_reload_ttf(const char *font_path, int new_size)
             TE_UpdatePalette(ami_te_dc, scr);
         }
 
-        /* ChangeWindowBox is asynchronous: Intuition will send IDCMP_NEWSIZE
-         * once the resize is done and the window frame is repainted
-         * The IDCMP_NEWSIZE handler in wgetch() recalculates COLS/LINES and
-         * redraws everything. We just mark the shadow dirty so that redraw
-         * is full, then let the event loop do the rest */
+        /* ChangeWindowBox is asynchronous: IDCMP_NEWSIZE handler recalculates COLS/LINES and redraws */
         s_shadow_dirty = 1;
 
         if (s_shadow)
@@ -2651,9 +2479,7 @@ int amiga_reload_ttf(const char *font_path, int new_size)
 
 /* Keyboard input */
 
-/* Pending bytes from a single MapRawKey() call (dead-key + vowel can
- * generate up to a handful of Latin-1 bytes that we must deliver one
- * at a time to the caller) */
+/* Pending bytes from MapRawKey() (dead-key + vowel can generate multiple Latin-1 bytes) */
 static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 {
     struct InputEvent ie;
@@ -2664,8 +2490,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
     if (code & IECODE_UP_PREFIX)
         return ERR;
 
-    /* Modified arrows MUST be checked before the bare-arrow switch below,
-     * otherwise modified keys would fall through and return bare KEY_LEFT/RIGHT */
+    /* Modified arrows must be checked before bare-arrow switch below */
     if (qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT))
     {
         if (code == 0x4F)
@@ -2741,12 +2566,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
     }
 
     /* TODO Check */
-    /* Right-Amiga + V = paste from clipboard. Amiga keyboards lack an
-     * Insert key, so the editor's "Shift+Insert" shortcut is unreachable
-     * Right-Amiga is the user-app modifier (left-Amiga is reserved for
-     * Workbench menu shortcuts), so RAmiga+V is the idiomatic paste
-     * chord. We synthesise a Ctrl-V byte (0x16) so the existing global
-     * paste handler in ui_editor.c picks it up unchanged */
+    /* Right-Amiga + V = paste (Amiga lacks Insert key, synthesise Ctrl-V for paste handler) */
     if ((qual & IEQUALIFIER_RCOMMAND) && code == 0x34) /* 0x34 = V */
         return 0x16;
 

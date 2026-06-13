@@ -34,7 +34,6 @@ typedef struct
     int modified;
 } EdInfo;
 
-/* Line: dynamic wchar_t array */
 typedef struct
 {
     wchar_t *wcs; /* malloc'd, always NUL-terminated */
@@ -42,29 +41,28 @@ typedef struct
     int cap;      /* allocated wchar_t slots */
 } EdLine;
 
-/* Operation types for undo/redo log */
 typedef enum
 {
-    OP_INSERT,   /* inserted wchar_t text at (row,col) */
-    OP_DELETE,   /* deleted wchar_t text at (row,col) */
-    OP_SPLIT,    /* Enter: split line at (row,col) */
-    OP_JOIN,     /* Backspace at col 0: join row with row-1, col=join_col */
-    OP_SNAPSHOT, /* Full document snapshot: text = full document UTF-8 */
-    OP_PASTE     /* Paste UTF-8 text at (row,col): text = UTF-8 string */
+    OP_INSERT,        /* inserted wchar_t text at (row,col) */
+    OP_DELETE,        /* deleted wchar_t text at (row,col) */
+    OP_SPLIT,         /* Enter: split line at (row,col) */
+    OP_JOIN,          /* Backspace at col 0: join row with row-1, col=join_col */
+    OP_SNAPSHOT,      /* Full document snapshot: text = full document UTF-8 */
+    OP_PASTE,         /* Paste UTF-8 text at (row,col): text = UTF-8 string */
+    OP_SNAPSHOT_RANGE /* Localized snapshot of [row, row+end_row) lines */
 } UndoOpType;
 
-/* Single atomic edit operation */
 typedef struct
 {
     UndoOpType type;
-    int row, col;        /* position where op occurred */
-    wchar_t *text;       /* owned; used by OP_INSERT and OP_DELETE */
-    int len;             /* chars in text */
-    int join_col;        /* for OP_JOIN: length of previous line before join */
-    char *utf8_snapshot; /* owned; used by OP_SNAPSHOT: full document UTF-8 */
-    int hard_wrap_mode;  /* used by OP_SNAPSHOT: 0=soft-wrap, 1=hard-wrap */
-    /* For OP_PASTE: block coordinates */
-    int end_row, end_col; /* end position after paste */
+    int row, col;            /* position where op occurred */
+    wchar_t *text;           /* owned; used by OP_INSERT and OP_DELETE */
+    int len;                 /* chars in text */
+    int join_col;            /* for OP_JOIN: length of previous line before join */
+    char *utf8_snapshot;     /* owned; used by OP_SNAPSHOT: full document UTF-8 */
+    char *utf8_snapshot_new; /* owned; used by OP_SNAPSHOT_RANGE for redo */
+    int hard_wrap_mode;      /* used by OP_SNAPSHOT: 0=soft-wrap, 1=hard-wrap */
+    int end_row, end_col;    /* For OP_PASTE: block coordinates end position after paste */
 } UndoOp;
 
 /* Group of ops treated as one undo/redo step */
@@ -118,8 +116,9 @@ struct Ed
 
 Ed *ed_new();
 void ed_free(Ed *ed);
-void ed_load(Ed *ed, const char *utf8_text); /* UTF-8 in */
-char *ed_to_string(const Ed *ed);            /* UTF-8 out (caller frees) */
+void ed_load(Ed *ed, const char *utf8_text);                /* UTF-8 in */
+char *ed_to_string(const Ed *ed);                           /* UTF-8 out (caller frees) */
+char *ed_range_to_string(const Ed *ed, int start, int end); /* serialise only [start, end) */
 
 /* Cursor movement */
 void ed_move_up(Ed *ed);

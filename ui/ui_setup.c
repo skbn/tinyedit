@@ -23,8 +23,13 @@
 #include "../core/keys.h"
 
 /* Tabs */
+#if defined(PLATFORM_AMIGA)
 #define ST_TAB_COUNT 3
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF Fallbacks"};
+#else
+#define ST_TAB_COUNT 2
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
+#endif
 
 /* Field types */
 typedef enum
@@ -85,10 +90,12 @@ static const SetupField st_fields[] =
         {1, "Border", FT_COLORPAIR, F_OFF(color_fg) + COL_BORDER * sizeof(int), 0},
         {1, "Search", FT_COLORPAIR, F_OFF(color_fg) + COL_SEARCH_MATCH * sizeof(int), 0},
         {1, "Cursor color", FT_INT, F_OFF(cursor_color), 0},
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "Default BG", FT_INT, F_OFF(default_bg_color), 0},
+#endif
 
 /* TTF Fallbacks */
-#ifdef PLATFORM_AMIGA
+#if defined(PLATFORM_AMIGA) && defined(AMIGA_TTF_TE)
         {2, "Fallback 1", FT_STR, F_OFF(ttf_fallback[0]), TE_CFG_STR_MAX},
         {2, "Fallback 1 Size", FT_INT, F_OFF(ttf_fallback_size[0]), 0},
         {2, "Fallback 2", FT_STR, F_OFF(ttf_fallback[1]), TE_CFG_STR_MAX},
@@ -529,6 +536,8 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
     int key;
     int dirty = 0;
     int i;
+    int nfields;
+    int visible_fields;
 
     if (!cfg)
         return 0;
@@ -538,7 +547,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
     for (;;)
     {
         int row, c, tabx;
-        int nfields = st_tab_field_count(tab);
+        nfields = st_tab_field_count(tab);
 
         erase();
 
@@ -570,7 +579,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
         }
 
         /* Fields */
-        int visible_fields = LINES - 6;
+        visible_fields = LINES - 6;
 
         if (visible_fields < 1)
             visible_fields = 1;
@@ -688,15 +697,13 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
                 if (strcmp(cfg->ttf_font, work.ttf_font) != 0 || cfg->ttf_size != work.ttf_size || fallbacks_changed)
                 {
                     extern int amiga_reload_ttf(const char *font_path, int new_size);
+#ifdef AMIGA_TTF_TE
                     extern int amiga_add_ttf_fallback(const char *path, int size);
                     extern void amiga_clear_ttf_fallbacks(void);
 
-                    /* Push the new fallback set into the backend's internal
-                     * table BEFORE amiga_reload_ttf() iterates it. Without
-                     * this the reload would re-add the previous (stale)
-                     * fallback list, leaving the new entries in the config
-                     * file but not in the running engine */
+                    /* Push new fallback set into backend before reload to avoid stale list */
                     amiga_clear_ttf_fallbacks();
+
                     for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
                     {
                         if (work.ttf_fallback[fi][0])
@@ -705,7 +712,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
                             amiga_add_ttf_fallback(work.ttf_fallback[fi], sz);
                         }
                     }
-
+#endif
                     amiga_reload_ttf(work.ttf_font, work.ttf_size);
                 }
             }

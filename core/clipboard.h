@@ -14,6 +14,12 @@
 #ifndef WRAPPER_CLIPBOARD_H
 #define WRAPPER_CLIPBOARD_H
 
+#ifdef PLATFORM_AMIGA
+#include <exec/types.h>
+#include <exec/libraries.h>
+extern struct Library *IFFParseBase;
+#endif
+
 char *clipboard_paste();
 int clipboard_copy(const char *utf8);
 

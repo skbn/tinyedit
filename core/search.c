@@ -17,8 +17,7 @@
 #include <ctype.h>
 #include "search.h"
 
-/* Case-insensitive (ASCII) memmem. Returns first match offset in
- * hay or -1. n=length of hay, m=length of needle */
+/* Case-insensitive ASCII memmem, returns match offset or -1 */
 static int memcasestr(const char *hay, int n, const char *needle, int m)
 {
     int i, j;
@@ -137,8 +136,7 @@ void search_free(SearchSession *s)
     }
 }
 
-/* Copy at most cap-1 chars + NUL terminator from src into dst
- * src is assumed null-terminated; we just trim */
+/* Copy at most cap-1 chars + NUL from src to dst (src is null-terminated) */
 static void clip_copy(char *dst, int cap, const char *src)
 {
     int i = 0;
@@ -207,9 +205,7 @@ static int record_hit(SearchSession *s, int line, int col, const char *preview)
     return 1;
 }
 
-/* Search text buffer. text_lines is array of UTF-8 strings, nlines is count
- * Records hits into s->hits. Returns number of hits found, or -1 if cancelled
- * preview_chars is how many characters of context to include in preview */
+/* Search text buffer, record hits, return count or -1 if cancelled */
 int search_text(SearchSession *s, const char **text_lines, int nlines, int preview_chars)
 {
     int i, hits_before;

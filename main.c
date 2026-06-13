@@ -35,6 +35,7 @@ const char __attribute__((used)) binkd_stack_size[] = "$STACK:65536";
 #include "ui/te.h"
 #include "core/charset.h"
 #include "components/config.h"
+#include "core/clipboard.h"
 
 /* Read a whole file into a malloc'd UTF-8 buffer with charset conversion */
 static char *load_file(const char *path, TeApp *app)
@@ -129,6 +130,11 @@ int main(int argc, char **argv)
 
     setlocale(LC_ALL, "");
 
+#ifdef PLATFORM_AMIGA
+    /* Open iffparse.library for clipboard operations */
+    IFFParseBase = OpenLibrary("iffparse.library", 0L);
+#endif
+
     /* Resolve config path */
 #if defined(PLATFORM_WIN32)
 
@@ -185,8 +191,8 @@ int main(int argc, char **argv)
         amiga_set_ttf(cfg.ttf_font, cfg.ttf_size, cfg.ttf_antialias);
         amiga_set_ttf_encoding(cfg.ttf_use_utf8);
 
-        /* Pass any TTF_FALLBACK<N> entries to the engine. Empty slots
-         * are skipped by amiga_add_ttf_fallback() */
+#ifdef AMIGA_TTF_TE
+        /* Pass any TTF_FALLBACK<N> entries to the engine. Empty slots are skipped by amiga_add_ttf_fallback() */
         amiga_clear_ttf_fallbacks();
 
         for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
@@ -198,12 +204,15 @@ int main(int argc, char **argv)
                 amiga_add_ttf_fallback(cfg.ttf_fallback[fi], sz);
             }
         }
+#endif
     }
     else
     {
         /* Explicitly disable TTF when ttf_enabled=0 */
         amiga_set_ttf(NULL, 0, 0);
+#ifdef AMIGA_TTF_TE
         amiga_clear_ttf_fallbacks();
+#endif
     }
 #endif
 
@@ -404,6 +413,12 @@ int main(int argc, char **argv)
 #endif
 
     endwin();
+
+#ifdef PLATFORM_AMIGA
+    /* Close iffparse.library */
+    if (IFFParseBase)
+        CloseLibrary(IFFParseBase);
+#endif
 
     return 0;
 }

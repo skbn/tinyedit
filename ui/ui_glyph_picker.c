@@ -77,8 +77,7 @@ static const struct GlyphBlock s_blocks[] =
 #endif
 #define GRID_COLS 16
 
-/* Active filter. -1 = "all blocks" (linear concatenation); 0..N-1 =
- * show only that block. Static so reopening remembers the choice */
+/* Active filter: -1=all blocks, 0..N-1=specific block (static for persistence) */
 static int s_filter = -1;
 
 static int glyph_total(void)
@@ -191,8 +190,7 @@ static const char *block_name_at(int flat_idx)
     return "";
 }
 
-/* Sub-popup: block selector. Returns the chosen
- * block index (-1 for "All blocks") or -2 on cancel */
+/* Block selector popup: returns chosen block index or -2 on cancel */
 static int ui_block_pick(int initial)
 {
     int y, x, h, w;
@@ -423,11 +421,7 @@ long ui_glyph_pick(void)
             mvaddnstr(popup_y + 3, popup_x + 2, info, popup_w - 4);
             attroff(COLOR_PAIR(COL_POPUP));
 
-            /* Grid: each cell is CELL_W columns wide. Paint background
-             * with mvaddnstr (ASCII) first, then place the glyph with
-             * mvaddnwstr and an EXPLICIT length of 1. mvaddwstr() must
-             * be avoided here -- before the fix in ncursesw_amiga_te.c,
-             * waddnwstr(n=-1) was a no-op and the grid showed nothing */
+            /* Grid: paint background with ASCII, place glyph with mvaddnwstr(len=1) to avoid ncursesw_amiga bug */
             for (row = 0; row < visible_rows; row++)
             {
                 int col;

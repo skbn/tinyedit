@@ -56,9 +56,7 @@ uint32_t charset_byte_to_unicode(const char *charset, unsigned char byte);
 /* Case-insensitive substring search for wchar_t (returns pointer or NULL, empty needle returns hay) */
 const wchar_t *wcs_casestr(const wchar_t *hay, const wchar_t *needle);
 
-/* wcswidth implementation based on Markus Kuhn's wcwidth.c
- * Returns number of column positions needed for wide-character string
- * Compatible with POSIX.1-2001 standard for Unicode terminal display */
+/* wcswidth: column positions for wide-char string (POSIX.1-2001 compatible) */
 int wcswidth(const wchar_t *wcs, size_t n);
 
 #endif

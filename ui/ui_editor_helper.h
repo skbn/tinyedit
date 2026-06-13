@@ -21,6 +21,7 @@ void clear_search_highlights(TeApp *app);
 
 /* Functions from ui_editor.c needed by ui_editor_helper.c */
 void soft_reset_desired(void);
+void soft_reset_viewport_to_cursor(TeApp *app, int width);
 int editor_eff_wrap(const TeApp *app);
 char *wrap_paste_text(const char *utf8, int col);
 
@@ -43,17 +44,12 @@ int ui_editor_goto_end(TeApp *app);
 int ui_editor_export(TeApp *app);
 int rewrap(TeApp *app);
 
-/* On Amiga we ship our own wcswidth (Markus Kuhn's tables). Declare it
- * here so any TU can use it without pulling in the full implementation
- * file. On Unix/Windows the system one is used */
+/* On Amiga: declare wcswidth (Markus Kuhn's tables) for use without pulling in full implementation */
 #if defined(PLATFORM_AMIGA) && !defined(wcswidth)
 int wcswidth(const wchar_t *wcs, size_t n);
 #endif
 
-/* Visual width in display columns of n wchars starting at s
- * Wide glyphs (CJK ideographs, wide emoji) count as 2, normal as 1
- * non-printable/control as 1. Used wherever the editor needs to map a
- * wchar offset to a column-on-screen offset */
+/* Visual width in display columns: wide glyphs=2, normal=1, control=1 */
 int wcs_vwidth(const wchar_t *s, int n);
 
 #endif /* UI_EDITOR_HELPER_H */

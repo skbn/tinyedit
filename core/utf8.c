@@ -751,12 +751,7 @@ int wcswidth(const wchar_t *wcs, size_t n)
 
     for (i = 0; i < n && wcs[i] != L'\0'; i++)
     {
-        /* Based on East Asian Width properties:
-         * Wide (W) and Full-width (F) characters = 2 columns
-         * Emoji ranges = 2 columns (most modern terminals)
-         * All other printable characters = 1 column
-         * Implementation follows Unicode TR#11 and POSIX standards
-         */
+        /* East Asian Width: wide/full-width/emoji = 2 columns, others = 1 */
         if ((wcs[i] >= 0x1100 && wcs[i] <= 0x115F) ||   /* Hangul Jamo */
             (wcs[i] >= 0x2190 && wcs[i] <= 0x21FF) ||   /* Arrows */
             (wcs[i] >= 0x2600 && wcs[i] <= 0x26FF) ||   /* Miscellaneous Symbols */

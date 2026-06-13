@@ -29,10 +29,7 @@ static int s_soft_desired_vcol = -1;
 /* Forward declarations for static functions */
 static int ui_paste_char_width(wchar_t ch);
 
-/* Visual width in display columns of n wchars starting at s. Wide chars
- * (CJK ideographs, wide emoji) count 2, narrow 1, control/non-printable 1
- * Used by ui_editor.c to convert wchar offsets into visual column offsets
- * when positioning mvaddnwstr() within a line that contains wide glyphs */
+/* Visual width in display columns: wide chars=2, narrow=1, control=1 */
 int wcs_vwidth(const wchar_t *s, int n)
 {
     int v = 0;
@@ -76,7 +73,7 @@ void clear_search_highlights(TeApp *app)
     app->search.match_total = 0;
 }
 
-/* Navigate to previous match in editor.  Wraps at the start. */
+/* Navigate to previous match in editor.  Wraps at the start */
 int search_prev(TeApp *app)
 {
     int match_row;
@@ -97,7 +94,7 @@ int search_prev(TeApp *app)
     return 1;
 }
 
-/* Navigate to next match in editor.  Wraps at the end. */
+/* Navigate to next match in editor.  Wraps at the end */
 int search_next(TeApp *app)
 {
     int match_row;
@@ -380,8 +377,7 @@ int do_search(TeApp *app)
         return 1;
     }
 
-    /* Multiple matches: show the picker popup; user chooses one. */
-
+    /* Multiple matches: show the picker popup; user chooses one */
     choice = ui_popup_search_results_popup(app, app->search.query, rows, cols, match_count);
 
     if (choice >= 0)
@@ -395,15 +391,14 @@ int do_search(TeApp *app)
     }
     else
     {
-        /* User cancelled the picker -- keep the matches armed so
-         * F3/F4 still work, just leave the cursor in place */
+        /* User cancelled: keep matches armed for F3/F4, leave cursor in place */
         te_status(app, "Search cancelled");
+
         app->search.current_match = 0;
         app->search.match_current = 1;
     }
 
-    /* Save matches for highlighting and activate search mode
-     * (don't free rows/cols -- ownership transfers to the struct) */
+    /* Save matches for highlighting, activate search mode (ownership transfers) */
     app->search.rows = rows;
     app->search.cols = cols;
     app->search.count = match_count;
@@ -515,6 +510,10 @@ int ui_editor_goto_line(TeApp *app)
         {
             ed_goto_line(app->editor, n - 1);
             ed_ensure_visible(app->editor);
+
+            /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
+            if (!app->hard_wrap)
+                soft_reset_viewport_to_cursor(app, COLS);
         }
     }
 
@@ -577,6 +576,11 @@ int ui_editor_goto_start(TeApp *app)
 {
     ed_set_pos(app->editor, 0, 0);
     ed_ensure_visible(app->editor);
+
+    /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
+    if (!app->hard_wrap)
+        soft_reset_viewport_to_cursor(app, COLS);
+
     return 1;
 }
 
@@ -591,6 +595,10 @@ int ui_editor_goto_end(TeApp *app)
 
         ed_set_pos(app->editor, ll, ed_line_len(app->editor, ll));
         ed_ensure_visible(app->editor);
+
+        /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
+        if (!app->hard_wrap)
+            soft_reset_viewport_to_cursor(app, COLS);
     }
 
     return 1;
@@ -628,7 +636,6 @@ int ui_editor_export(TeApp *app)
 int rewrap(TeApp *app)
 {
     int col = (app->wrap_col > 0) ? app->wrap_col : 75;
-    ed_save_undo(app->editor);
 
     if (ed_rewrap_paragraph(app->editor, col) == 0)
     {

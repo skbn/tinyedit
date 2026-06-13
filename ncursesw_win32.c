@@ -28,6 +28,66 @@
 /* Sentinel value for trailing cells of wide glyphs (same as amiga_te) */
 #define WIN32_CELL_WIDE_TRAILING 0x0000FFFEUL
 
+/* Return 1 if cp is 2-cell-wide glyph (East Asian Wide/Fullwidth + emoji). MSVCRT's wcswidth() is unreliable, so we use table-driven check */
+static int is_wide_cp(unsigned int cp)
+{
+    /* Combining marks and control: not wide */
+    if (cp < 0x1100)
+        return 0;
+
+    /* Ranges for real-world text and emoji. Others not wide; dirty propagation handles overflow */
+    if (cp >= 0x1100 && cp <= 0x115F)
+        return 1; /* Hangul Jamo */
+    if (cp >= 0x2329 && cp <= 0x232A)
+        return 1; /* Angle brackets */
+    if (cp >= 0x2E80 && cp <= 0x303E)
+        return 1; /* CJK Radicals  */
+    if (cp >= 0x3041 && cp <= 0x33FF)
+        return 1; /* Hiragana, Katakana, CJK Symbols */
+    if (cp >= 0x3400 && cp <= 0x4DBF)
+        return 1; /* CJK Ext A */
+    if (cp >= 0x4E00 && cp <= 0x9FFF)
+        return 1; /* CJK Unified */
+    if (cp >= 0xA000 && cp <= 0xA4CF)
+        return 1; /* Yi */
+    if (cp >= 0xAC00 && cp <= 0xD7A3)
+        return 1; /* Hangul Syllables */
+    if (cp >= 0xF900 && cp <= 0xFAFF)
+        return 1; /* CJK Compat */
+    if (cp >= 0xFE30 && cp <= 0xFE4F)
+        return 1; /* CJK Compat Forms */
+    if (cp >= 0xFF00 && cp <= 0xFF60)
+        return 1; /* Fullwidth ASCII */
+    if (cp >= 0xFFE0 && cp <= 0xFFE6)
+        return 1; /* Fullwidth signs */
+    if (cp >= 0x1F000 && cp <= 0x1F02F)
+        return 1; /* Mahjong */
+    if (cp >= 0x1F0A0 && cp <= 0x1F0FF)
+        return 1; /* Playing cards */
+    if (cp >= 0x1F100 && cp <= 0x1F64F)
+        return 1; /* Enclosed alphanumerics, emoticons */
+    if (cp >= 0x1F680 && cp <= 0x1F6FF)
+        return 1; /* Transport */
+    if (cp >= 0x1F700 && cp <= 0x1F77F)
+        return 1; /* Alchemical */
+    if (cp >= 0x1F780 && cp <= 0x1F7FF)
+        return 1; /* Geometric shapes ext */
+    if (cp >= 0x1F800 && cp <= 0x1F8FF)
+        return 1; /* Supplemental arrows-C */
+    if (cp >= 0x1F900 && cp <= 0x1F9FF)
+        return 1; /* Supplemental symbols and pictographs */
+    if (cp >= 0x1FA00 && cp <= 0x1FA6F)
+        return 1; /* Chess */
+    if (cp >= 0x1FA70 && cp <= 0x1FAFF)
+        return 1; /* Symbols extended-A */
+    if (cp >= 0x20000 && cp <= 0x2FFFD)
+        return 1; /* CJK Ext B..F */
+    if (cp >= 0x30000 && cp <= 0x3FFFD)
+        return 1; /* CJK Ext G */
+
+    return 0;
+}
+
 /* Screen dimensions */
 int LINES = 25;
 int COLS = 80;
@@ -511,21 +571,17 @@ static void render_cell(int row, int col, chtype ch, attr_t attrs)
     if (ch == WIN32_CELL_WIDE_TRAILING)
         return;
 
-    /* WIDE-CELL HANDLING -- use wcswidth for consistency */
+    /* WIDE-CELL HANDLING -- our own is_wide_cp() because MSVCRT's wcswidth() returns -1 for most non-ASCII codepoints */
     if (stdscr && stdscr->cells)
     {
-        wchar_t wc = (wchar_t)ch;
-        int w = wcswidth(&wc, 1);
-
-        if (w == 2)
+        if (is_wide_cp((unsigned int)ch))
             cell_w = 2 * fw;
     }
 
     pair = (int)((attrs & A_COLOR) >> 8);
     apply_colors(pair, attrs);
 
-    /* Background - use current background color like Amiga BgPen
-     * Clear over the actual visual extent (1 or 2 cells) */
+    /* Background - use current background color like Amiga BgPen. Clear over actual visual extent (1 or 2 cells) */
     rect.left = col * fw;
     rect.top = row * fh;
     rect.right = rect.left + cell_w;
@@ -550,8 +606,7 @@ void win32_force_redraw(void)
     render_all();
 }
 
-/* Compute dirty bitmap for row r into s_dirty_row[0..COLS-1]
- * Returns 1 if any cell in the row is dirty, 0 otherwise */
+/* Compute dirty bitmap for row r into s_dirty_row[0..COLS-1]. Returns 1 if dirty, 0 otherwise */
 static int compute_dirty_row(int r)
 {
     int c;
@@ -593,16 +648,7 @@ static int compute_dirty_row(int r)
         return 0;
     }
 
-    /* If the row contains wide-glyph cells (CJK lead+trailing, or any
-     * codepoint in a Unicode range we render as 2-cells wide), force
-     * the entire row dirty. Wide glyphs and visually-wide symbols
-     * (arrows, dingbats, geometric shapes...) often render pixels that
-     * extend outside their reported cell width. Repainting only a
-     * limited bleed range crops those extensions on adjacent cells that
-     * happened to not be in the dirty zone
-     *
-     * The cost is one extra row repaint per frame in rows containing
-     * wide content, which is negligible compared to a corrupted visual */
+    /* If row contains wide-glyph cells, force entire row dirty. Wide glyphs render pixels outside their reported cell width */
     has_wide = 0;
 
     for (c = 0; c < cols; c++)
@@ -610,15 +656,22 @@ static int compute_dirty_row(int r)
         Cell *cc = CELL(stdscr, r, c);
         ULONG ch = (ULONG)cc->ch;
 
-        /* Codepoints that visually render wider than one cell even
-         * though they report as 1 cell. Detected here so the dirty
-         * propagation covers them too. Keep this list short -- it
-         * is a heuristic for "this row may have glyph overflow" */
-        if ((ch >= 0x2190 && ch <= 0x21FF) || /* Arrows         */
-            (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block    */
-            (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric      */
-            (ch >= 0x2600 && ch <= 0x26FF) || /* Misc symbols   */
-            (ch >= 0x2700 && ch <= 0x27BF) || /* Dingbats       */
+        /* Check if this is a wide character */
+        if (ch != WIN32_CELL_WIDE_TRAILING)
+        {
+            if (is_wide_cp((unsigned int)ch))
+            {
+                has_wide = 1;
+                break;
+            }
+        }
+
+        /* Codepoints that visually render wider than one cell. Heuristic for glyph overflow */
+        if ((ch >= 0x2190 && ch <= 0x21FF) || /* Arrows */
+            (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block */
+            (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric */
+            (ch >= 0x2600 && ch <= 0x26FF) || /* Misc symbols */
+            (ch >= 0x2700 && ch <= 0x27BF) || /* Dingbats */
             (ch >= 0x2B00 && ch <= 0x2BFF))   /* Misc symbols 2 */
         {
             has_wide = 1;
@@ -634,10 +687,7 @@ static int compute_dirty_row(int r)
         return 1;
     }
 
-    /* Propagate dirty by ±SHADOW_BLEED_CELLS using a sweep with a
-     * running countdown - O(cols), no inner loop. After the forward sweep,
-     * s_dirty_row[c] is set if any cell in [c-K..c] was base-dirty (handles
-     * left→right bleed). The backward sweep adds right→left bleed */
+    /* Propagate dirty by ±SHADOW_BLEED_CELLS using sweep with running countdown */
     for (c = 0; c < cols; c++)
     {
         if (s_dirty_tmp[c])
@@ -710,8 +760,7 @@ static void render_all(void)
 
     for (r = 0; r < LINES; r++)
     {
-        /* Compute dirty bitmap with bleed propagation for this row. If nothing
-         * is dirty, skip the row entirely — saves the inner while() walk */
+        /* Compute dirty bitmap with bleed propagation for this row. If nothing dirty, skip row entirely */
         if (!compute_dirty_row(r))
             continue;
 
@@ -757,10 +806,7 @@ static void render_all(void)
                 if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
                     break;
 
-                /* TRAILING cell of a wide glyph: don't add to run_buf (no
-                 * glyph to draw -- the lead already covered this pixel area)
-                 * but DO advance c and update shadow so the row count and
-                 * FillRect area match the visual extent */
+                /* TRAILING cell of wide glyph: don't add to run_buf (no glyph to draw -- lead already covered). DO advance c and update shadow so row count and FillRect area match visual extent */
                 if (cc->ch == WIN32_CELL_WIDE_TRAILING)
                 {
                     if (s_shadow)
@@ -788,8 +834,7 @@ static void render_all(void)
                 continue;
             }
 
-            /* Pre-scan: does this run contain any wide-glyph cells?
-             * If yes, force per-cell rendering. Check for TRAILING cells */
+            /* Pre-scan: does this run contain any wide-glyph cells? If yes, force per-cell rendering. Check for TRAILING cells */
             int run_has_wide = 0;
             {
                 int u2;
@@ -816,8 +861,7 @@ static void render_all(void)
 
             if (run_has_wide)
             {
-                /* Per-cell rendering for wide glyphs.
-                 * Similar to amiga_te.c: pin each glyph at cell-aligned position */
+                /* Per-cell rendering for wide glyphs. Similar to amiga_te.c: pin each glyph at cell-aligned position */
                 int u;
                 int actual_pos = run_start;
                 Cell *cc;
@@ -840,8 +884,8 @@ static void render_all(void)
                         continue;
                     }
 
-                    /* Check if this is a wide glyph using wcswidth */
-                    is_wide = (wcswidth(&wc, 1) == 2);
+                    /* Check if this is a wide glyph */
+                    is_wide = is_wide_cp((unsigned int)wc);
 
                     /* Clear this cell's exact rectangle (or 2 cells if wide) */
                     rect.left = cx;
@@ -904,10 +948,25 @@ static void render_all(void)
         Cell *cell = CELL(stdscr, prev_y, prev_x);
         int sync_lead = prev_x;
 
-        render_cell(prev_y, prev_x, cell->ch, cell->attrs);
+        /* GDI fonts (ClearType) anti-alias on subpixel boundaries -- glyph pixels can bleed into neighbouring cell. Repaint small bleed window around cell to avoid ghosting. Same idea as SHADOW_BLEED_CELLS in compute_dirty_row */
+        {
+            int b;
+            int bleed_lo = prev_x - SHADOW_BLEED_CELLS;
+            int bleed_hi = prev_x + SHADOW_BLEED_CELLS;
 
-        /* If prev was a TRAILING, the lead lives one to the left -- shadow
-         * sync target is the lead */
+            if (bleed_lo < 0)
+                bleed_lo = 0;
+            if (bleed_hi >= COLS)
+                bleed_hi = COLS - 1;
+
+            for (b = bleed_lo; b <= bleed_hi; b++)
+            {
+                Cell *cb = CELL(stdscr, prev_y, b);
+                render_cell(prev_y, b, cb->ch, cb->attrs);
+            }
+        }
+
+        /* If prev was a TRAILING, the lead lives one to the left -- shadow sync target is the lead */
         if (cell->ch == WIN32_CELL_WIDE_TRAILING && prev_x > 0)
             sync_lead = prev_x - 1;
 
@@ -932,11 +991,7 @@ static void render_all(void)
         int draw_x_cell = cx_cell;
         int trailing_x_cell = -1; /* -1 = none */
 
-        /* Determine cursor visual width based on what's under it
-         * Two wide-glyph cases for the cursor:
-         *  - on LEAD (cell[c+1] == TRAILING)  ->  2*fw outline at cell c
-         *  - on TRAILING (cell[c] is sentinel) -> 2*fw outline snapped to c-1
-         */
+        /* Determine cursor visual width based on what's under it. Two wide-glyph cases: on LEAD (cell[c+1] == TRAILING) -> 2*fw outline at cell c; on TRAILING (cell[c] is sentinel) -> 2*fw outline snapped to c-1 */
         if (stdscr && stdscr->cells)
         {
             Cell *cur = CELL(stdscr, cy_cell, cx_cell);
@@ -978,8 +1033,7 @@ static void render_all(void)
         SelectObject(hMemDC, oldPen);
         DeleteObject(hPen);
 
-        /* Force next render to redraw under cursor
-         * Mark both cells if cursor is wide */
+        /* Force next render to redraw under cursor. Mark both cells if cursor is wide */
         if (s_shadow)
         {
             s_shadow[cy_cell * COLS + draw_x_cell].ch ^= 0x10000;
@@ -1522,8 +1576,7 @@ int waddch(WINDOW *win, const chtype ch)
     attrs |= COLOR_PAIR(win->color_pair);
 
     /* Cleanup edge cases when overwriting existing wide glyphs */
-    /* Case A: writing on top of a TRAILING cell -> the lead to our
-     * left is now orphaned. Replace the lead with a space */
+    /* Case A: writing on TRAILING -> replace orphaned LEAD with space */
     if (c > 0)
     {
         Cell *cur = CELL(win, r, c);
@@ -1535,16 +1588,11 @@ int waddch(WINDOW *win, const chtype ch)
         }
     }
 
-    /* Get character width using wcswidth */
+    /* Get character width using is_wide_cp */
     wc = (wchar_t)ch_out;
-    cw = wcswidth(&wc, 1);
+    cw = is_wide_cp((unsigned int)ch_out) ? 2 : 1;
 
-    if (cw < 1)
-        cw = 1;
-
-    /* Case B: writing a NARROW char into what was a LEAD of a wide
-     * (the cell to our right is TRAILING). The trailing is now
-     * orphaned -> replace with a space */
+    /* Case B: writing NARROW into LEAD of wide -> replace orphaned TRAILING with space */
     if (cw == 1 && c + 1 < win->_maxx)
     {
         Cell *nxt = CELL(win, r, c + 1);
@@ -1556,9 +1604,7 @@ int waddch(WINDOW *win, const chtype ch)
         }
     }
 
-    /* Case C: writing a WIDE char whose trailing slot was the LEAD of
-     * a previous wide. The cell at curx+2 was its trailing -> orphan,
-     * replace with space */
+    /* Case C: writing WIDE char over previous wide's LEAD -> replace orphaned with space */
     if (cw == 2 && c + 2 < win->_maxx)
     {
         Cell *thd = CELL(win, r, c + 2);
@@ -1649,10 +1695,7 @@ int waddstr(WINDOW *win, const char *str)
     return waddnstr(win, str, (int)strlen(str));
 }
 
-/* Decode UTF-8 sequence to codepoint; fallback to Latin-1 on errors
- * Needed because crashedit uses UTF-8 but old waddnstr stored each
- * byte separately, so ▀ (U+2580 = E2 96 80) became three cells showing
- * 'â' '–' '€' — causing screen full of 'â's in ANSI mode */
+/* Decode UTF-8 sequence to codepoint; fallback to Latin-1 on errors */
 static int utf8_decode_one(const unsigned char *p, int max, wchar_t *out, int *consumed)
 {
     unsigned char b0;
@@ -2688,13 +2731,7 @@ int resize_term(int nlines, int ncols)
         hBitmap = CreateCompatibleBitmap(hDC, COLS * fw, LINES * fh);
         if (!hBitmap)
         {
-            /* Bitmap recreation failed: restore cell buffer to old size to
-             * prevent indexing past allocation or NULL deref. Order matters:
-             * restore LINES/COLS first, then reallocate cell buffer. If
-             * restore-malloc fails, drop _maxy/_maxx to 0 so CELL() callers
-             * see out-of-bounds and bail via bounds check instead of crashing
-             * on NULL deref. Previous code left _maxy/_maxx pointing at bogus
-             * size, so NULL cells pointer would pass bounds check and SEGV on next addch */
+            /* Bitmap recreation failed: restore cell buffer to old size */
             COLS = old_cols;
             LINES = old_lines;
 
@@ -2766,12 +2803,7 @@ int win32_set_cursor_pen(int color)
     return old;
 }
 
-/* copywin -- copy rectangle of cells from src to dst. Matches ncurses contract:
- * destination rectangle is (dminrow,dmincol)..(dmaxrow,dmaxcol); source top-left
- * corner is (sminrow,smincol). When overlay is non-zero, copy is non-destructive
- * (blank source cells skipped) like overlay(); when zero it overwrites every cell
- * Indices clipped to both windows to prevent buffer overflow. crashedit uses this
- * for popup save/restore */
+/* copywin -- copy rectangle of cells from src to dst */
 int copywin(const WINDOW *src, WINDOW *dst, int sminrow, int smincol, int dminrow, int dmincol, int dmaxrow, int dmaxcol, int overlay)
 {
     int drow, dcol;
@@ -2803,7 +2835,7 @@ int copywin(const WINDOW *src, WINDOW *dst, int sminrow, int smincol, int dminro
             sc = &src->cells[srow * src->_maxx + scol];
             dc = &dst->cells[drow * dst->_maxx + dcol];
 
-            /* Non-destructive overlay: leave dst where src is blank. */
+            /* Non-destructive overlay: leave dst where src is blank */
             if (overlay && (sc->ch == ' ' || sc->ch == 0))
                 continue;
 

@@ -85,4 +85,7 @@ void TE_UpdatePalette(struct TERenderContext *dc, struct Screen *screen);
  * Call once at app shutdown after the last TE_ContextRelease() */
 void TE_GlobalCleanup(void);
 
+/* Debug control - set debug level (0=none, 1=error, 2=warn, 3=info, 4=verbose, 5=all) */
+void TE_SetDebugLevel(int level);
+
 #endif /* TE_RASTPORT_H */

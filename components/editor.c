@@ -30,6 +30,7 @@ static void record_join(Ed *ed, int row, int join_col);
 /* Forward declarations for undo group functions */
 int ed_undo_open_group(Ed *ed);
 static int undo_push_op(Ed *ed, UndoOpType type, int row, int col, const wchar_t *text, int len, int join_col);
+static int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col);
 
 /* Forward declarations for helper functions */
 wchar_t *line_to_wcs(EdLine *ln);
@@ -371,13 +372,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
     old_width = ed->prefix_width;
     old_base = ed->prefix_base;
 
-    /* CASE A: cache invalid, width changed, or dirty marked
-     * No sliding possible -- but we can still avoid the O(n) base scan if
-     * the new window is anchored where we can reuse the old base
-     * If we have a valid cache with same width and start_line >= old_start
-     * we can incrementally bump base forward without iterating from 0
-     * Otherwise (jump backward or width change) we MUST iterate 0..start-1
-     * which is O(start) -- unavoidable for cold cache */
+    /* Cold cache or width change: compute base by iterating 0..start_line-1 */
     if (!ed->prefix_valid || old_width != width)
     {
         /* COLD start: compute base by iterating 0..start_line-1. O(start) */
@@ -411,10 +406,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
         }
         else /* start_line < old_start */
         {
-            /* Window moved backward.  How far?
-             * If close (within old window), subtract wrap_counts from base
-             * If far (before old start, no overlap), we have no choice but to
-             * iterate from 0 to start_line */
+            /* Window moved backward: subtract if close, recompute from 0 if far */
             if (start_line >= 0 && old_start - start_line <= range_size * 2)
             {
                 /* Close: subtract */
@@ -445,8 +437,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
         }
     }
 
-    /* Build prefix[] for the new range.  prefix[i] = visual rows from
-     * start_line up to and including start_line+i */
+    /* Build prefix[]: visual rows from start_line to start_line+i */
     total = 0;
 
     for (i = start_line; i <= end_line; i++)
@@ -485,21 +476,11 @@ int ed_prefix_get(const Ed *ed, int line)
         return ed->prefix_base + ed->prefix[line - ed->prefix_start];
     }
 
-    /* Just before the window: by definition prefix_base == vrows up to
-     * prefix_start - 1 (inclusive).  O(1) */
+    /* Just before window: prefix_base == vrows up to prefix_start-1 */
     if (line == ed->prefix_start - 1)
         return ed->prefix_base;
 
-    /* Outside the window.  The caller forgot to ed_prefix_rebuild_range()
-     * to cover this line.  We could iterate to compute it, but that's the
-     * O(n) trap we're trying to avoid.  Instead return a conservative
-     * approximation -- the caller should detect this and rebuild
-     *
-     * For lines AFTER the window: extrapolate using prefix_end's value
-     * plus an estimate of 1 vrow per missing line (correct for narrow
-     * lines, undercount for long ones)
-     * For lines BEFORE the window: extrapolate prefix_base backward by
-     * 1 vrow per missing line */
+    /* Outside window: return conservative estimate (caller should rebuild) */
     if (line > ed->prefix_end)
     {
         int last = ed->prefix_base + ed->prefix[ed->prefix_end - ed->prefix_start];
@@ -735,6 +716,7 @@ static void undo_group_clear(UndoGroup *g)
     {
         free(g->ops[i].text);
         free(g->ops[i].utf8_snapshot);
+        free(g->ops[i].utf8_snapshot_new);
     }
 
     free(g->ops);
@@ -984,6 +966,89 @@ char *ed_to_string(const Ed *ed)
 
     *p = '\0';
 
+    free(parts);
+
+    return out;
+}
+
+/* Serialise line range to UTF-8 for efficient paragraph-only snapshot */
+char *ed_range_to_string(const Ed *ed, int start, int end)
+{
+    char **parts;
+    int i;
+    int n;
+    int total = 0;
+    char *out;
+    char *p;
+
+    if (!ed || start < 0 || end <= start || start >= ed->count)
+        return NULL;
+
+    if (end > ed->count)
+        end = ed->count;
+
+    n = end - start;
+
+    parts = (char **)malloc((size_t)n * sizeof(char *));
+
+    if (!parts)
+        return NULL;
+
+    for (i = 0; i < n; i++)
+    {
+        EdLine *ln = ed->lines[start + i];
+
+        parts[i] = wcs_to_utf8(ln->wcs, ln->len);
+
+        if (!parts[i])
+        {
+            parts[i] = (char *)malloc(1);
+
+            if (!parts[i])
+            {
+                int j;
+
+                for (j = 0; j < i; j++)
+                    free(parts[j]);
+
+                free(parts);
+
+                return NULL;
+            }
+
+            parts[i][0] = 0;
+        }
+
+        total += (int)strlen(parts[i]) + 1; /* +1 for \n */
+    }
+
+    out = (char *)malloc((size_t)(total + 1));
+
+    if (!out)
+    {
+        for (i = 0; i < n; i++)
+            free(parts[i]);
+
+        free(parts);
+
+        return NULL;
+    }
+
+    p = out;
+
+    for (i = 0; i < n; i++)
+    {
+        int slen = (int)strlen(parts[i]);
+
+        memcpy(p, parts[i], (size_t)slen);
+
+        p += slen;
+        *p++ = '\n';
+
+        free(parts[i]);
+    }
+
+    *p = '\0';
     free(parts);
 
     return out;
@@ -1451,13 +1516,28 @@ int ed_delete_line(Ed *ed)
         }
         else
         {
-            ed_save_undo(ed);
-            ed_redo_clear(ed);
+            /* Append \n to distinguish delete line from delete chars for undo */
+            int dlen = (int)wcslen(deleted_text);
+            wchar_t *with_nl = (wchar_t *)malloc((size_t)(dlen + 2) * sizeof(wchar_t));
 
-            if (ed_undo_open_group(ed) == 0)
+            if (with_nl)
             {
-                undo_push_op(ed, OP_DELETE, deleted_row, 0, deleted_text, wcslen(deleted_text), 0);
-                ed->undo_open = 0;
+                if (dlen > 0)
+                    memcpy(with_nl, deleted_text, (size_t)dlen * sizeof(wchar_t));
+
+                with_nl[dlen] = L'\n';
+                with_nl[dlen + 1] = L'\0';
+
+                ed_save_undo(ed);
+                ed_redo_clear(ed);
+
+                if (ed_undo_open_group(ed) == 0)
+                {
+                    undo_push_op(ed, OP_DELETE, deleted_row, 0, with_nl, dlen + 1, 0);
+                    ed->undo_open = 0;
+                }
+
+                free(with_nl);
             }
 
             free(deleted_text);
@@ -1522,8 +1602,14 @@ int ed_delete_word_left(Ed *ed)
     if (!ed)
         return -1;
 
+    if (ed_undo_open_group(ed) != 0)
+        return -1;
+
     if (ed->col == 0)
+    {
+        ed->undo_open = 0;
         return ed_backspace(ed);
+    }
 
     ln = ed->lines[ed->row];
     w = ln->wcs;
@@ -1538,6 +1624,9 @@ int ed_delete_word_left(Ed *ed)
     /* Save text before deletion */
     if (ed->col > target)
         deleted_text = line_to_wcs_range(ln, target, ed->col);
+
+    /* Capture length before loop (ed->col changes during deletion) */
+    int del_len = ed->col - target;
 
     while (ed->col > target)
     {
@@ -1554,11 +1643,20 @@ int ed_delete_word_left(Ed *ed)
         }
         else
         {
-            undo_push_op(ed, OP_DELETE, ed->row, target, deleted_text, ed->col - target, 0);
+            if (undo_push_op(ed, OP_DELETE, ed->row, target, deleted_text, del_len, 0) != 0)
+            {
+                free(deleted_text);
+
+                ed->undo_open = 0;
+
+                return -1;
+            }
+
             free(deleted_text);
         }
     }
 
+    ed->undo_open = 0;
     ed->modified = 1;
     ed_prefix_invalidate_from(ed, ed->row);
 
@@ -1575,10 +1673,16 @@ int ed_delete_word_right(Ed *ed)
     if (!ed)
         return -1;
 
+    if (ed_undo_open_group(ed) != 0)
+        return -1;
+
     ln = ed->lines[ed->row];
 
     if (ed->col >= ln->len)
+    {
+        ed->undo_open = 0;
         return ed_delete(ed);
+    }
 
     target = ed->col;
 
@@ -1607,11 +1711,19 @@ int ed_delete_word_right(Ed *ed)
         }
         else
         {
-            undo_push_op(ed, OP_DELETE, ed->row, ed->col, deleted_text, wcslen(deleted_text), 0);
+            if (undo_push_op(ed, OP_DELETE, ed->row, ed->col, deleted_text, wcslen(deleted_text), 0) != 0)
+            {
+                free(deleted_text);
+
+                ed->undo_open = 0;
+                return -1;
+            }
+
             free(deleted_text);
         }
     }
 
+    ed->undo_open = 0;
     ed->modified = 1;
     ed_prefix_invalidate_from(ed, ed->row);
 
@@ -1978,6 +2090,13 @@ int ed_block_delete(Ed *ed)
     int r2;
     int c2;
     int i;
+    int old_count;
+    int new_count;
+    char *snapshot_before;
+    char *snapshot_after;
+    EdLine *first;
+    EdLine *last;
+    UndoGroup *g;
 
     if (!ed || !ed->block.active)
         return -1;
@@ -1991,61 +2110,27 @@ int ed_block_delete(Ed *ed)
     if (ed_undo_open_group(ed) != 0)
         return -1;
 
+    /* Save snapshot of affected range before deletion */
+    old_count = r2 - r1 + 1;
+    snapshot_before = ed_range_to_string(ed, r1, r2 + 1);
+
+    if (!snapshot_before)
+    {
+        ed->undo_open = 0;
+        return -1;
+    }
+
     if (r1 == r2)
     {
         if (c1 < c2)
         {
-            /* Save deleted text */
-            wchar_t *deleted = line_to_wcs_range(ed->lines[r1], c1, c2);
-
-            if (deleted)
-            {
-                undo_push_op(ed, OP_DELETE, r1, c1, deleted, c2 - c1, 0);
-                free(deleted);
-            }
-
             line_delete_range(ed->lines[r1], c1, c2 - c1);
         }
     }
     else
     {
-        EdLine *first = ed->lines[r1], *last = ed->lines[r2];
-
-        /* Record deletion of middle lines */
-        for (i = r1 + 1; i < r2; i++)
-        {
-            wchar_t *line_text = line_to_wcs(ed->lines[i]);
-
-            if (line_text)
-            {
-                undo_push_op(ed, OP_DELETE, i, 0, line_text, wcslen(line_text), 0);
-                free(line_text);
-            }
-        }
-
-        /* Record truncation of first line */
-        if (c1 < first->len)
-        {
-            wchar_t *truncated = line_to_wcs_range(first, c1, first->len);
-
-            if (truncated)
-            {
-                undo_push_op(ed, OP_DELETE, r1, c1, truncated, wcslen(truncated), 0);
-                free(truncated);
-            }
-        }
-
-        /* Record deletion from last line */
-        if (c2 < last->len)
-        {
-            wchar_t *deleted = line_to_wcs_range(last, 0, c2);
-
-            if (deleted)
-            {
-                undo_push_op(ed, OP_DELETE, r1, c1, deleted, wcslen(deleted), 0);
-                free(deleted);
-            }
-        }
+        first = ed->lines[r1];
+        last = ed->lines[r2];
 
         line_truncate(first, c1);
 
@@ -2067,6 +2152,31 @@ int ed_block_delete(Ed *ed)
     ed->modified = 1;
     ed_prefix_invalidate_from(ed, r1);
     ed_ensure_visible(ed);
+
+    /* Save snapshot of affected range after deletion */
+    new_count = 1;
+    snapshot_after = ed_range_to_string(ed, r1, r1 + 1);
+
+    if (!snapshot_after)
+    {
+        free(snapshot_before);
+
+        ed_block_clear(ed);
+        return -1;
+    }
+
+    /* Push OP_SNAPSHOT_RANGE with both snapshots */
+    if (undo_push_snapshot_range(ed, r1, c1, snapshot_before, snapshot_after, old_count, new_count, r1, c1, r1, c1) != 0)
+    {
+        free(snapshot_before);
+        free(snapshot_after);
+
+        ed_block_clear(ed);
+        return -1;
+    }
+
+    /* Clear block selection after delete */
+    ed_block_clear(ed);
 
     return 0;
 }
@@ -2132,8 +2242,7 @@ int ed_undo_stack_make_room(UndoGroup **stack, int *top, int *cap, int max)
 
     if (nc <= *cap)
     {
-        /* At max depth: drop oldest. Defensive: only valid when at
-         * least one entry exists in the stack */
+        /* At max depth: drop oldest entry */
         if (*top <= 0)
             return -1;
 
@@ -2211,6 +2320,7 @@ static int undo_push_op(Ed *ed, UndoOpType type, int row, int col, const wchar_t
     op->join_col = join_col;
     op->text = NULL;
     op->utf8_snapshot = NULL;
+    op->utf8_snapshot_new = NULL;
 
     if ((type == OP_INSERT || type == OP_DELETE) && text && (len > 0 || (type == OP_DELETE && col == 0)))
     {
@@ -2225,6 +2335,56 @@ static int undo_push_op(Ed *ed, UndoOpType type, int row, int col, const wchar_t
         wmemcpy(op->text, text, (size_t)len);
         op->text[len] = L'\0';
     }
+
+    return 0;
+}
+
+/* Push an OP_SNAPSHOT_RANGE operation to the current undo group */
+static int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col)
+{
+    UndoGroup *g;
+    UndoOp *t;
+    int nc;
+
+    if (ed->undo_top <= 0)
+        return -1;
+
+    g = &ed->undo_stack[ed->undo_top - 1];
+
+    g->cur_row = cur_row;
+    g->cur_col = cur_col;
+    g->end_row = end_row;
+    g->end_col = end_col;
+
+    if (g->count >= g->cap)
+    {
+        nc = (g->cap > 0) ? (g->cap * 2) : 4;
+        t = (UndoOp *)realloc(g->ops, (size_t)nc * sizeof(UndoOp));
+
+        if (!t)
+        {
+            free(snapshot_before);
+            free(snapshot_after);
+
+            return -1;
+        }
+
+        g->ops = t;
+        g->cap = nc;
+    }
+
+    g->ops[g->count].type = OP_SNAPSHOT_RANGE;
+    g->ops[g->count].row = row;
+    g->ops[g->count].col = col;
+    g->ops[g->count].len = 0;
+    g->ops[g->count].join_col = 0;
+    g->ops[g->count].text = NULL;
+    g->ops[g->count].utf8_snapshot = snapshot_before;
+    g->ops[g->count].utf8_snapshot_new = snapshot_after;
+    g->ops[g->count].hard_wrap_mode = ed->hard_wrap;
+    g->ops[g->count].end_row = old_count;
+    g->ops[g->count].end_col = new_count;
+    g->count++;
 
     return 0;
 }
@@ -2329,8 +2489,7 @@ static int undo_coalesce_delete_append(Ed *ed, wchar_t ch)
     return 0;
 }
 
-/* Record an insert of ch at (row, col)
- * Coalesces with the previous insert if possible */
+/* Record insert at (row, col), coalescing with previous if possible */
 static void record_insert(Ed *ed, int row, int col, wchar_t ch)
 {
     if (ed->undo_max <= 0)
@@ -2523,6 +2682,106 @@ static int ed_backspace_no_undo(Ed *ed)
     return 0;
 }
 
+/* Replace line range with UTF-8 text for OP_SNAPSHOT_RANGE undo/redo */
+static int doc_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text)
+{
+    const char *p;
+    int i;
+    int inserted = 0;
+    int at;
+
+    if (!ed || start < 0)
+        return -1;
+
+    if (start > ed->count)
+        start = ed->count;
+
+    /* Remove old lines */
+    for (i = 0; i < count_to_remove && start < ed->count; i++)
+        line_free(doc_remove_line(ed, start));
+
+    /* Parse UTF-8 and insert */
+    at = start;
+    p = utf8_text;
+
+    if (!p)
+    {
+        /* No new content -- ensure at least one line in doc */
+        if (ed->count == 0)
+        {
+            EdLine *ln = line_empty();
+
+            if (ln)
+                doc_insert_line(ed, 0, ln);
+        }
+
+        return 0;
+    }
+
+    while (*p)
+    {
+        const char *line_start = p;
+        int blen;
+        char *line_utf8;
+        wchar_t *wcs;
+        int wlen;
+        EdLine *ln;
+
+        while (*p && *p != '\r' && *p != '\n')
+            p++;
+
+        blen = (int)(p - line_start);
+
+        line_utf8 = (char *)malloc((size_t)(blen + 1));
+
+        if (!line_utf8)
+        {
+            if (*p == '\r')
+                p++;
+
+            if (*p == '\n')
+                p++;
+
+            continue;
+        }
+
+        memcpy(line_utf8, line_start, (size_t)blen);
+        line_utf8[blen] = '\0';
+
+        wcs = utf8_to_wcs(line_utf8, &wlen);
+        free(line_utf8);
+
+        if (wcs)
+        {
+            ln = line_new(wcs, wlen);
+            free(wcs);
+
+            if (ln)
+            {
+                doc_insert_line(ed, at++, ln);
+                inserted++;
+            }
+        }
+
+        if (*p == '\r')
+            p++;
+
+        if (*p == '\n')
+            p++;
+    }
+
+    /* Document must always have at least one line */
+    if (ed->count == 0)
+    {
+        EdLine *ln = line_empty();
+
+        if (ln)
+            doc_insert_line(ed, 0, ln);
+    }
+
+    return inserted;
+}
+
 static int apply_group_reverse(Ed *ed, UndoGroup *g)
 {
     int i;
@@ -2555,8 +2814,7 @@ static int apply_group_reverse(Ed *ed, UndoGroup *g)
             /* Undo delete: re-insert the deleted chars */
             if (op->row < ed->count && op->text)
             {
-                /* Check if this is a line deletion (text contains newline)
-                 * or character deletion */
+                /* Check if this is a line deletion (text contains newline) or character deletion */
                 int is_line_delete = 0;
                 int k;
 
@@ -2643,6 +2901,22 @@ static int apply_group_reverse(Ed *ed, UndoGroup *g)
                 ed->hard_wrap = op->hard_wrap_mode;
                 ed_set_pos(ed, op->row, op->col);
                 min_row = 0; /* Snapshot affects entire document */
+            }
+
+            break;
+
+        case OP_SNAPSHOT_RANGE:
+            /* Undo range snapshot: replace NEW range with OLD lines */
+            if (op->utf8_snapshot)
+            {
+                int start = op->row;
+                int newc = op->end_col;
+
+                doc_replace_range_from_utf8(ed, start, newc, op->utf8_snapshot);
+                ed_set_pos(ed, op->row, op->col);
+
+                if (start < min_row)
+                    min_row = start;
             }
 
             break;
@@ -2796,6 +3070,23 @@ static int apply_group_forward(Ed *ed, UndoGroup *g)
             }
             break;
 
+        case OP_SNAPSHOT_RANGE:
+            /* Redo range snapshot: replace OLD range with NEW lines */
+            if (op->utf8_snapshot_new)
+            {
+                int start = op->row;
+                int oldc = op->end_row;
+
+                doc_replace_range_from_utf8(ed, start, oldc, op->utf8_snapshot_new);
+
+                /* Jump to end cursor position stored when snapshot was taken */
+                ed_set_pos(ed, op->row, op->col);
+
+                if (start < min_row)
+                    min_row = start;
+            }
+            break;
+
         case OP_PASTE:
             /* Redo paste: paste the UTF-8 text */
             if (op->utf8_snapshot)
@@ -2922,8 +3213,8 @@ void ed_set_undo_levels(Ed *ed, int levels)
     if (levels < 1)
         levels = 1;
 
-    if (levels > 1000)
-        levels = 1000;
+    if (levels > 10000)
+        levels = 10000;
 
     ed->undo_max = levels;
     ed->redo_max = levels;

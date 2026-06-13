@@ -29,8 +29,7 @@ typedef struct
     /* Auto-wrap column; 0 = disabled (default 75) */
     int autowrap_col;
 
-    /* 0 = soft-wrap (visual only, no CR inserted)
-     * 1 = hard-wrap (CR inserted at autowrap_col) */
+    /* 0=soft-wrap (visual only), 1=hard-wrap (CR inserted at autowrap_col) */
     int hard_wrap;
 
     /* Show line numbers: 0 = disabled, 1 = enabled */
@@ -39,8 +38,6 @@ typedef struct
     /* UI font name (Amiga: "topaz.font"; unused on Linux) */
     char font[TE_CFG_STR_MAX];
 
-    /* TrueType font support (Amiga via ttengine.library; ignored elsewhere)
-     * Empty ttf_font[] means use the bitmap `font` above */
     int ttf_enabled;               /* 0=disabled, 1=enabled */
     char ttf_font[TE_CFG_STR_MAX]; /* e.g. "FONTS:_ttf/DejaVuSansMono.ttf" */
     int ttf_size;                  /* point size, default 14 */

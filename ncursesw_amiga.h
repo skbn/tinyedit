@@ -174,10 +174,7 @@ extern int COLORS;
 #define KEY_EVENT 0x19B
 #define KEY_MAX 0x1FF
 
-/* Modifier-key codes returned by wgetch()
- * These intentionally sit above KEY_MAX so they cannot collide
- * with any standard KEY_* value. See ui/ui_internal.h for the
- * matching cross-platform definitions used by the editor */
+/* Modifier-key codes returned by wgetch() (sit above KEY_MAX to avoid collision) */
 #ifndef KEY_ALT
 #define KEY_ALT(c) (0x800 + ((unsigned int)(c) & 0xFF))
 #endif
@@ -425,16 +422,7 @@ int amiga_set_default_bg_color(int color);
 int amiga_set_font_name(const char *font_name);
 int amiga_set_ansi_font_name(const char *font_name);
 
-/* TrueType font support (via ttengine.library v6+)
- * Call BEFORE initscr(). If ttf_file is non-empty and ttengine.library is
- * available at runtime, tinyedit will render text with the TTF instead of
- * the bitmap font set by amiga_set_font_name(). Falls back automatically
- * if either condition fails. Safe to call with NULL/empty path = disabled
- *
- *   ttf_file   : path to a .ttf file (e.g. "FONTS:_ttf/DejaVuSansMono.ttf")
- *   size       : point size 6..96 (typically 12..16 for editing)
- *   antialias  : 0=auto, 1=off, 2=on
- */
+/* TrueType font support (via ttengine.library v6+): call BEFORE initscr(), falls back if unavailable */
 int amiga_set_ttf(const char *ttf_file, int size, int antialias);
 int amiga_set_ttf_encoding(int use_utf8);
 int amiga_reload_ttf_size(int new_size);

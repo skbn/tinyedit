@@ -38,36 +38,24 @@ typedef struct
     int pat_len; /* cached strlen(pattern), -1 if empty */
     int case_sensitive;
 
-    /* Results buffer: malloc'd to max_hits entries in search_new
-     * The cap is whatever you configure (clamped only by
-     * SEARCH_HITS_HARD_MAX to keep the allocation sane). When it
-     * fills, hit_limit_reached is set and the scan stops */
+    /* Results buffer: malloc'd to max_hits, clamped by SEARCH_HITS_HARD_MAX */
     SearchHit *hits;
     int n_hits;
     int max_hits; /* allocated capacity of hits[] */
     int hit_limit_reached;
 
-    /* Progress / cancellation. cancel is set from outside (by the UI)
-     * and polled inside the scan loop */
+    /* Progress/cancellation: cancel set by UI, polled during scan */
     int cancel;
     int scanned_lines;
     int total_lines;
 } SearchSession;
 
-/* Allocate a session. pattern is copied. Returns NULL on bad args or
- * OOM. case_sensitive=0 enables ASCII-insensitive matching (the
- * locale-aware kind isn't worth the trouble for a per-byte scan)
- * max_hits is the capacity of the results buffer, malloc'd here;
- * values <= 0 use SEARCH_DEFAULT_MAX, and it is capped only by
- * SEARCH_HITS_HARD_MAX. If the allocation for that many hits fails,
- * search_new returns NULL (the caller reports out-of-memory) */
+/* Allocate session, copy pattern, return NULL on bad args or OOM */
 SearchSession *search_new(const char *pattern, int case_sensitive, int max_hits);
 
 void search_free(SearchSession *s);
 
-/* Search text buffer. text_lines is array of UTF-8 strings, nlines is count
- * Records hits into s->hits. Returns number of hits found, or -1 if cancelled
- * preview_chars is how many characters of context to include in preview */
+/* Search text buffer, record hits, return count or -1 if cancelled */
 int search_text(SearchSession *s, const char **text_lines, int nlines, int preview_chars);
 
 #endif /* CRASHEDIT_SEARCH_H */

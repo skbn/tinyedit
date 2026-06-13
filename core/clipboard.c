@@ -61,258 +61,213 @@ static char *normalise_newlines(char *s)
 
 #ifdef PLATFORM_AMIGA
 
+/* AmigaOS clipboard via iffparse.library (minimal, no Delay/retry) */
+
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <devices/clipboard.h>
+#include <libraries/iffparse.h>
 #include <proto/exec.h>
-#include <clib/alib_protos.h>
+#include <proto/iffparse.h>
 
-/* IFF FOURCC helpers */
-#define MAKE_ID(a, b, c, d) ((ULONG)(a) << 24 | (ULONG)(b) << 16 | (ULONG)(c) << 8 | (ULONG)(d))
-#define ID_FORM MAKE_ID('F', 'O', 'R', 'M')
+extern struct Library *IFFParseBase;
+
+#ifndef MAKE_ID
+#define MAKE_ID(a, b, c, d) \
+    ((ULONG)(a) << 24 | (ULONG)(b) << 16 | (ULONG)(c) << 8 | (ULONG)(d))
+#endif
+
 #define ID_FTXT MAKE_ID('F', 'T', 'X', 'T')
 #define ID_CHRS MAKE_ID('C', 'H', 'R', 'S')
 
-static LONG clip_write(struct IOClipReq *io, APTR data, ULONG length)
+#define CLIPBOARD_MAX_BYTES (16UL * 1024UL * 1024UL)
+
+char *clipboard_paste(void)
 {
-    io->io_Command = CMD_WRITE;
-    io->io_Data = (STRPTR)data;
-    io->io_Length = length;
+    struct IFFHandle *iff;
+    struct ClipboardHandle *clip;
+    char *out = NULL;
+    char *malloc_copy;
+    ULONG total = 0;
+    ULONG alloc = 0;
+    LONG error;
 
-    DoIO((struct IORequest *)io);
+    if (!IFFParseBase)
+        return NULL;
 
-    return io->io_Actual;
-}
+    iff = AllocIFF();
 
-static LONG clip_write_long(struct IOClipReq *io, ULONG val)
-{
-    return clip_write(io, &val, sizeof(ULONG));
+    if (!iff)
+        return NULL;
+
+    clip = OpenClipboard(0);
+
+    if (!clip)
+    {
+        FreeIFF(iff);
+        return NULL;
+    }
+
+    iff->iff_Stream = (ULONG)clip;
+
+    InitIFFasClip(iff);
+
+    if (OpenIFF(iff, IFFF_READ) != 0)
+    {
+        CloseClipboard(clip);
+        FreeIFF(iff);
+        return NULL;
+    }
+
+    StopChunk(iff, ID_FTXT, ID_CHRS);
+
+    while ((error = ParseIFF(iff, IFFPARSE_SCAN)) == 0)
+    {
+        struct ContextNode *cn = CurrentChunk(iff);
+        ULONG size;
+        char *grown;
+        ULONG new_alloc;
+        LONG got;
+
+        if (!cn || cn->cn_ID != ID_CHRS)
+            continue;
+
+        size = (ULONG)cn->cn_Size;
+
+        if (size == 0)
+            continue;
+
+        if (size > CLIPBOARD_MAX_BYTES)
+            break;
+
+        if (total > CLIPBOARD_MAX_BYTES - size - 1)
+            break;
+
+        if (total + size + 1 > alloc)
+        {
+            new_alloc = alloc ? alloc * 2 : 1024;
+
+            while (new_alloc < total + size + 1)
+                new_alloc *= 2;
+
+            if (new_alloc > CLIPBOARD_MAX_BYTES + 1)
+                new_alloc = CLIPBOARD_MAX_BYTES + 1;
+
+            grown = (char *)AllocVec(new_alloc, MEMF_PUBLIC);
+
+            if (!grown)
+                break;
+
+            if (out)
+            {
+                memcpy(grown, out, total);
+                FreeVec(out);
+            }
+
+            out = grown;
+            alloc = new_alloc;
+        }
+
+        got = ReadChunkBytes(iff, out + total, (LONG)size);
+
+        if (got < 0)
+            break;
+
+        total += (ULONG)got;
+
+        if ((ULONG)got != size)
+            break;
+    }
+
+    CloseIFF(iff);
+    CloseClipboard(clip);
+
+    FreeIFF(iff);
+
+    if (!out)
+        return NULL;
+
+    out[total] = '\0';
+
+    malloc_copy = (char *)malloc(total + 1);
+
+    if (malloc_copy)
+    {
+        memcpy(malloc_copy, out, total + 1);
+        FreeVec(out);
+
+        return normalise_newlines(malloc_copy);
+    }
+
+    FreeVec(out);
+
+    return NULL;
 }
 
 int clipboard_copy(const char *utf8)
 {
-    struct MsgPort *mp = NULL;
-    struct IOClipReq *io = NULL;
-    ULONG form_size;
-    ULONG chrs_size;
+    struct IFFHandle *iff;
+    struct ClipboardHandle *clip;
+    LONG len;
     int result = -1;
 
     if (!utf8 || !utf8[0])
         return -1;
 
-    mp = CreatePort(NULL, 0);
-
-    if (!mp)
+    if (!IFFParseBase)
         return -1;
 
-    io = (struct IOClipReq *)CreateExtIO(mp, sizeof(struct IOClipReq));
+    len = (LONG)strlen(utf8);
 
-    if (!io)
+    if ((ULONG)len > CLIPBOARD_MAX_BYTES)
+        len = (LONG)CLIPBOARD_MAX_BYTES;
+
+    clip = OpenClipboard(0);
+
+    if (!clip)
+        return -1;
+
+    iff = AllocIFF();
+
+    if (!iff)
     {
-        DeletePort(mp);
+        CloseClipboard(clip);
         return -1;
     }
 
-    if (OpenDevice((STRPTR) "clipboard.device", 0, (struct IORequest *)io, 0))
+    iff->iff_Stream = (ULONG)clip;
+    InitIFFasClip(iff);
+
+    if (OpenIFF(iff, IFFF_WRITE) != 0)
     {
-        DeleteExtIO((struct IORequest *)io);
-        DeletePort(mp);
+        CloseClipboard(clip);
+        FreeIFF(iff);
         return -1;
     }
 
-    io->io_ClipID = 0;
-    io->io_Offset = 0;
-    io->io_Error = 0;
-
-    chrs_size = (ULONG)strlen(utf8);
-
-    if (chrs_size == 0)
+    if (PushChunk(iff, ID_FTXT, ID_FORM, IFFSIZE_UNKNOWN) == 0)
     {
-        result = 0;
-    }
-    else
-    {
-        /* IFF FORM/FTXT/CHRS: form_size = 4 (FTXT) + 8 (CHRS hdr) + chrs_size + pad */
-        ULONG chrs_pad = (chrs_size & 1) ? 1 : 0;
-
-        form_size = 4 /* FTXT */ + 8 /* CHRS hdr */ + chrs_size + chrs_pad;
-
-        /* Write to clipboard via sequential clip_write calls */
-        io->io_ClipID = 0;
-        io->io_Offset = 0;
-
-        if (clip_write_long(io, ID_FORM) == sizeof(ULONG) &&
-            clip_write_long(io, form_size) == sizeof(ULONG) &&
-            clip_write_long(io, ID_FTXT) == sizeof(ULONG) &&
-            clip_write_long(io, ID_CHRS) == sizeof(ULONG) &&
-            clip_write_long(io, chrs_size) == sizeof(ULONG) &&
-            clip_write(io, (APTR)utf8, chrs_size) == (LONG)chrs_size)
+        if (PushChunk(iff, 0, ID_CHRS, len) == 0)
         {
-            /* Odd-length CHRS chunk needs a pad byte */
-            if (chrs_pad)
-            {
-                UBYTE pad = 0;
-                clip_write(io, &pad, 1);
-            }
+            if (WriteChunkBytes(iff, (APTR)utf8, len) == len)
+                result = 0;
 
-            result = 0;
+            PopChunk(iff);
         }
+
+        PopChunk(iff);
     }
 
-    CloseDevice((struct IORequest *)io);
-    DeleteExtIO((struct IORequest *)io);
-    DeletePort(mp);
+    CloseIFF(iff);
+    CloseClipboard(clip);
+    FreeIFF(iff);
 
     return result;
 }
 
-static LONG clip_read(struct IOClipReq *io, APTR data, ULONG length)
-{
-    /* Sequential read: device tracks position by io_ClipID, don't reset */
-    io->io_Command = CMD_READ;
-    io->io_Data = (STRPTR)data;
-    io->io_Length = length;
+#endif /* PLATFORM_AMIGA */
 
-    DoIO((struct IORequest *)io);
-
-    return io->io_Actual;
-}
-
-static void clip_skip(struct IOClipReq *io, ULONG n)
-{
-    char dump[64];
-
-    while (n > 0)
-    {
-        ULONG step = n > sizeof(dump) ? sizeof(dump) : n;
-
-        if (clip_read(io, dump, step) != (LONG)step)
-            return;
-
-        n -= step;
-    }
-}
-
-/* Walk IFF FORM/FTXT and concatenate CHRS payloads
- * Returns malloc'd UTF-8 buffer or NULL */
-static char *read_ftxt_payload(struct IOClipReq *io)
-{
-    ULONG hdr[3]; /* FORM, size, FTXT */
-    ULONG type, size;
-    char *out = NULL;
-    size_t out_len = 0;
-    LONG remaining;
-    int ok = 1;
-
-    if (clip_read(io, hdr, sizeof(hdr)) != (LONG)sizeof(hdr))
-        return NULL;
-
-    if (hdr[0] != ID_FORM || hdr[2] != ID_FTXT)
-        return NULL;
-
-    remaining = (LONG)hdr[1] - 4;
-
-    while (ok && remaining >= 8)
-    {
-        ULONG chdr[2];
-
-        if (clip_read(io, chdr, sizeof(chdr)) != (LONG)sizeof(chdr))
-            break;
-
-        type = chdr[0];
-        size = chdr[1];
-        remaining -= 8;
-
-        if (size > (ULONG)remaining)
-            size = (ULONG)remaining;
-
-        if (type == ID_CHRS && size > 0)
-        {
-            size_t new_cap = out_len + size + 1;
-
-            /* Use exponential growth to reduce number of reallocs */
-            if (new_cap < out_len * 2)
-                new_cap = out_len * 2;
-
-            char *grown = (char *)realloc(out, new_cap);
-
-            if (!grown)
-            {
-                free(out);
-                out = NULL;
-                ok = 0;
-            }
-            else
-            {
-                out = grown;
-
-                if (clip_read(io, out + out_len, size) != (LONG)size)
-                {
-                    ok = 0;
-                }
-                else
-                {
-                    out_len += size;
-                    out[out_len] = '\0';
-                }
-            }
-        }
-        else if (size > 0)
-        {
-            clip_skip(io, size);
-        }
-
-        remaining -= size;
-
-        if ((size & 1) && remaining > 0)
-        {
-            clip_skip(io, 1);
-            remaining--;
-        }
-    }
-
-    return out;
-}
-
-char *clipboard_paste()
-{
-    struct MsgPort *mp;
-    struct IOClipReq *io;
-    char *out;
-
-    mp = CreatePort(NULL, 0);
-
-    if (!mp)
-        return NULL;
-
-    io = (struct IOClipReq *)CreateExtIO(mp, sizeof(struct IOClipReq));
-
-    if (!io)
-    {
-        DeletePort(mp);
-        return NULL;
-    }
-
-    if (OpenDevice((STRPTR) "clipboard.device", 0, (struct IORequest *)io, 0))
-    {
-        DeleteExtIO((struct IORequest *)io);
-        DeletePort(mp);
-        return NULL;
-    }
-
-    io->io_ClipID = 0;
-    io->io_Offset = 0;
-    io->io_Error = 0;
-    out = read_ftxt_payload(io);
-
-    CloseDevice((struct IORequest *)io);
-    DeleteExtIO((struct IORequest *)io);
-    DeletePort(mp);
-
-    return normalise_newlines(out);
-}
-
-#elif defined(PLATFORM_WIN32)
+#ifdef PLATFORM_WIN32
 
 int clipboard_copy(const char *utf8)
 {
@@ -375,7 +330,9 @@ char *clipboard_paste()
     return normalise_newlines(out);
 }
 
-#else
+#endif /* PLATFORM_WIN32 */
+
+#ifdef PLATFORM_UNIX
 
 /* POSIX implementation: try xclip, xsel, wl-paste, pbpaste */
 #include <unistd.h>
@@ -427,7 +384,7 @@ static char *try_cmd(const char *cmd)
 
     if (pclose(fp) != 0)
     {
-        /* Tool failed (not installed, or empty selection) */
+        /* Tool failed or not installed */
         free(out);
         return NULL;
     }
@@ -443,8 +400,7 @@ static char *try_cmd(const char *cmd)
 
 char *clipboard_paste()
 {
-    /* Order: Wayland, X11 (xclip), X11 (xsel), MacOS
-     * stderr suppressed so users without one of these don't see noise */
+    /* Try Wayland, X11 (xclip/xsel), MacOS in order, stderr suppressed */
     static const char *const cmds[] =
         {
             "wl-paste --no-newline 2>/dev/null",
@@ -475,7 +431,7 @@ static int try_copy_cmd(const char *cmd, const char *data)
     pid_t pid;
     int status;
 
-    /* Create temporary file with mkstemp */
+    /* Create temp file with mkstemp */
     snprintf(tmp_file, sizeof(tmp_file), "/tmp/tinyedit_clipboard_XXXXXX");
     tmp_fd = mkstemp(tmp_file);
 
@@ -518,7 +474,7 @@ static int try_copy_cmd(const char *cmd, const char *data)
 
     if (pid == 0)
     {
-        /* Child process - redirect file to stdin of clipboard tool */
+        /* Child: redirect file to stdin of clipboard tool */
         char cmd_with_file[512];
 
         snprintf(cmd_with_file, sizeof(cmd_with_file), "%s < %s", cmd, tmp_file);
@@ -526,7 +482,7 @@ static int try_copy_cmd(const char *cmd, const char *data)
         _exit(1);
     }
 
-    /* Parent process - wait for child */
+    /* Parent: wait for child */
     waitpid(pid, &status, 0);
 
     /* Restore ncurses state */
@@ -543,8 +499,7 @@ int clipboard_copy(const char *utf8)
     if (!utf8 || !utf8[0])
         return -1;
 
-    /* Order: Wayland, X11 (xclip), X11 (xsel), MacOS
-     * stderr suppressed so users without one of these don't see noise */
+    /* Try Wayland, X11 (xclip/xsel), MacOS in order, stderr suppressed */
     static const char *const cmds[] =
         {
             "wl-copy 2>/dev/null",
@@ -564,4 +519,4 @@ int clipboard_copy(const char *utf8)
     return -1;
 }
 
-#endif /* PLATFORM_AMIGA */
+#endif /* PLATFORM_UNIX */

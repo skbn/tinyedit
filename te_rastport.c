@@ -1,5 +1,5 @@
 /*
- * tinyedit - Text editor for AmigaOS
+ * te_rastport.c -- Glyph rendering with FreeType for tinyedit
  *
  * Copyright (C) 2026 Tanausú M. 39:190/101@amiganet 2:341/207@fidonet
  *
@@ -10,7 +10,6 @@
  */
 
 #include "te_rastport.h"
-#include "core/utf8.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,317 +22,228 @@
 #include <graphics/gfx.h>
 #include <graphics/gfxmacros.h>
 #include <graphics/rastport.h>
-#include <graphics/text.h>
 #include <graphics/view.h>
 
 #include <proto/exec.h>
-#include <proto/graphics.h>
 #include <proto/intuition.h>
-
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
-#include FT_BITMAP_H
-#include FT_OUTLINE_H
+#include <proto/graphics.h>
 
 #include <cybergraphx/cybergraphics.h>
 #include <proto/cybergraphics.h>
 
-struct Library *CyberGfxBase = NULL;
-static int s_cgx_tried = 0;
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_GLYPH_H
+#include FT_SYNTHESIS_H
 
-/* graphics.library v39+ probe & scratch RastPort helper for WritePixelArray8 */
-extern struct GfxBase *GfxBase;
+#include <stdarg.h>
 
-/* Tuneables */
-#define TE_GLYPH_HASH_BUCKETS 64
-#define TE_CACHE_BUDGET_BYTES (256 * 1024)
-#define TE_REPLACEMENT_CP 0xFFFDUL
+/* Debug levels */
+static int te_debug_level = 0;
+
+#define TE_DEBUG_LEVEL_NONE 0
+#define TE_DEBUG_LEVEL_ERROR 1
+#define TE_DEBUG_LEVEL_WARN 2
+#define TE_DEBUG_LEVEL_INFO 3
+#define TE_DEBUG_LEVEL_VERBOSE 4
+#define TE_DEBUG_LEVEL_ALL 5
+
+#define TE_DEBUG_ERROR(fmt, ...)                                    \
+    do                                                              \
+    {                                                               \
+        if (te_debug_level >= TE_DEBUG_LEVEL_ERROR)                 \
+        {                                                           \
+            fprintf(stderr, "[TE_ERROR] " fmt "\n", ##__VA_ARGS__); \
+        }                                                           \
+    } while (0)
+
+#define TE_DEBUG_WARN(fmt, ...)                                    \
+    do                                                             \
+    {                                                              \
+        if (te_debug_level >= TE_DEBUG_LEVEL_WARN)                 \
+        {                                                          \
+            fprintf(stderr, "[TE_WARN] " fmt "\n", ##__VA_ARGS__); \
+        }                                                          \
+    } while (0)
+
+#define TE_DEBUG_INFO(fmt, ...)                                    \
+    do                                                             \
+    {                                                              \
+        if (te_debug_level >= TE_DEBUG_LEVEL_INFO)                 \
+        {                                                          \
+            fprintf(stderr, "[TE_INFO] " fmt "\n", ##__VA_ARGS__); \
+        }                                                          \
+    } while (0)
+
+#define TE_DEBUG_VERBOSE(fmt, ...)                                    \
+    do                                                                \
+    {                                                                 \
+        if (te_debug_level >= TE_DEBUG_LEVEL_VERBOSE)                 \
+        {                                                             \
+            fprintf(stderr, "[TE_VERBOSE] " fmt "\n", ##__VA_ARGS__); \
+        }                                                             \
+    } while (0)
+
+#define TE_DEBUG_ALL(fmt, ...)                                    \
+    do                                                            \
+    {                                                             \
+        if (te_debug_level >= TE_DEBUG_LEVEL_ALL)                 \
+        {                                                         \
+            fprintf(stderr, "[TE_ALL] " fmt "\n", ##__VA_ARGS__); \
+        }                                                         \
+    } while (0)
+
+void TE_SetDebugLevel(int level)
+{
+    te_debug_level = level;
+}
+
+#define TE_MAX_FONTS 16
+#define TE_HASH_BUCKETS 256
 #define TE_PATH_MAX 256
 #define TE_DPI 72
-#define TE_MAX_FALLBACKS 16
+#define TE_NOTFOUND_CP 0xFFFFFFFFUL
+#define TE_REPLACEMENT_CP 0xFFFDUL
 
-/* Glyph cache pixel formats */
+/* Cache pixel formats */
 #define FMT_MONO 0
 #define FMT_GRAY 1
 #define FMT_RGBA 2
 
 struct TEGlyph
 {
-    struct TEGlyph *next; /* hash chain */
     ULONG codepoint;
-    UBYTE format; /* FMT_MONO / FMT_GRAY / FMT_RGBA */
-    UBYTE style;  /* TE_STY_* snapshot */
-    UBYTE pad[2];
+    UBYTE style;
+    UBYTE format;  /* FMT_MONO / FMT_GRAY / FMT_RGBA */
+    UBYTE in_chip; /* 1 if data was moved to CHIP for AGA blits */
+    UBYTE pad;
 
-    /* Glyph metrics in pixels */
-    WORD width;    /* bitmap width  in pixels */
-    WORD height;   /* bitmap height in pixels */
-    WORD bearingX; /* bitmap_left */
-    WORD bearingY; /* bitmap_top */
-    WORD advance;  /* pen advance (fixed integer pixels) */
-    WORD pitch;    /* bytes per row (MONO: padded to byte) */
+    WORD width;
+    WORD height;
+    WORD pitch;
+    WORD bearingX;
+    WORD bearingY;
+    WORD advance;
 
-    /* Bitmap data (allocated separately). Format-dependent:
-     *   MONO: pitch bytes/row, 1 bpp, MSB-first
-     *   GRAY: pitch == width, 1 byte per pixel = alpha
-     *   RGBA: pitch == width*4 (R,G,B,A) */
-    UBYTE *data;
+    UBYTE *data; /* AllocVec MEMF_CLEAR, in_chip determines region */
 
-    /* CLUT-remapped mirror for indexed-colour screens. Allocated lazily
-     * the first time the glyph is drawn on an indexed screen; freed on
-     * UpdateColorMap() or palette change */
-    UBYTE *clut_mirror;   /* pitch == width bytes, 1 pen index/pixel */
-    UBYTE *clut_mask;     /* 1 bit/pixel mask matching clut_mirror */
-    WORD clut_pitch_mask; /* pitch in bytes for clut_mask */
+    /* Lazy AGA mirrors -- allocated when indexed-colour blit needs them */
+    struct BitMap *clutBM;
+    struct BitMap *maskBM;
 
-    ULONG bytes_held; /* bytes accounted for in cache budget */
-    ULONG lastUse;    /* simple LRU counter */
+    struct TEGlyph *next; /* hash chain */
 };
 
 struct TEFont
 {
-    struct TEFont *next; /* singly linked list */
-
     FT_Face face;
+    LONG pointSize;
+    ULONG flags;
     char path[TE_PATH_MAX];
-    int pointSize;
-    ULONG flags; /* TE_FLAG_FIXEDWIDTH inheritance, etc */
 
-    /* Cached metrics (in pixels at pointSize) */
-    WORD ascender;
-    WORD descender;
-    WORD height;
-    WORD monospace_advance; /* advance of 'M' or first ASCII glyph */
-    UBYTE has_color;        /* 1 if face has color (CBDT/CBLC etc) */
-    UBYTE is_bitmap_only;   /* 1 if FT_FACE_FLAG_FIXED_SIZES only */
-    UBYTE reserved[2];
+    /* Bitmap-only fonts return strikes at native height; we scale to pointSize */
+    int scaleNum;
+    int scaleDen;
 
-    /* Per-font glyph cache */
-    struct TEGlyph *buckets[TE_GLYPH_HASH_BUCKETS];
-    int glyphCount;
-    ULONG bytesHeld;
+    int ascender;  /* scaled, in pixels */
+    int descender; /* scaled, positive value */
+    int height;    /* scaled, line height in pixels */
 };
 
 struct TERenderContext
 {
-    FT_Library ft;
+    FT_Library library;
+    struct TEFont fonts[TE_MAX_FONTS];
+    int numFonts;
 
-    struct TEFont *fonts; /* head of fallback chain */
-    int fontCount;
+    /* Cache */
+    struct TEGlyph *buckets[TE_HASH_BUCKETS];
 
-    ULONG prefs;     /* TE_FLAG_* bits */
-    ULONG style;     /* TE_STY_* bits */
-    ULONG tabSpaces; /* default 4 */
+    /* Style and prefs */
+    UBYTE style;
+    ULONG flags;
+    ULONG tabSpaces;
 
-    /* Colour state */
-    ULONG fgRGB; /* 0x00RRGGBB */
-    ULONG bgRGB; /* 0x00RRGGBB or ~0UL == transparent */
-    LONG fgPen;  /* last pen used, or -1 */
-    LONG bgPen;  /* last pen used, or -1 */
+    /* Colours. ARGB packed 0x00RRGGBB. Pens are -1 when never set; once set they take precedence */
+    ULONG textARGB;
+    ULONG bgARGB;
+    LONG txtPen;
+    LONG bgPen;
+    UBYTE pensValid;
 
-    /* Screen association for CLUT remap */
+    /* Screen association */
     struct Screen *screen;
-    UBYTE colorMap[4096]; /* 12-bit RGB -> closest CLUT pen */
-    UBYTE colorMapValid;
-    UBYTE screenIsRTG;  /* 1 if depth > 8 or CGX truecolor */
-    UBYTE screenPixFmt; /* CGX PIXFMT_* or 0 if unknown */
-    UBYTE reserved[1];
+    UBYTE screenIsRTG;
+    UBYTE screenPixFmt; /* CGX PIXFMT_* if isRTG */
     ULONG screenDepth;
 
-    /* LRU counter (simple monotonic) */
-    ULONG lruClock;
+    /* CLUT remap table (RGB444 -> pen) */
+    UBYTE clutRemap[4096];
+    UBYTE clutValid;
 
-    /* Premixed grey-level pens for indexed GRAY rendering: 17 levels of
-     * blend between bgPen and fgPen colours. Recomputed on color/palette
-     * change. The mapping is alpha (0..255) -> pen index */
-    UBYTE grayPens[17];
-    UBYTE grayPensValid;
+    /* 16-entry AA ramp: pen for each step of fg->bg */
+    UBYTE aaRamp[16];
+    UBYTE aaRampValid;
 
-    /* Scratch RastPort/BitMap for WritePixelArray8 (graphics.library v39+)
-     * Allocated lazily on first use; sized to fit the largest glyph drawn
-     * If allocation fails or graphics is pre-v39, te_draw_clut falls back
-     * to the RectFill-per-span path which works on every Amiga (OCS/ECS
-     * included) */
-    struct RastPort *scratch_rp;
-    struct BitMap *scratch_bm;
-    int scratch_w;
-    int scratch_h;
-    UBYTE scratch_depth;
-    UBYTE scratch_tried; /* 0 not tried, 1 in progress, 2 unsupported */
-
-    /* Reusable ARGB32 buffer for the read-modify-write AA blend path on
-     * RTG screens. Grown lazily to the largest glyph we encounter, kept
-     * alive across calls so the per-string cost is one realloc at most */
-    ULONG *aa_buf;
-    ULONG aa_buf_size; /* in pixels (w*h), not bytes */
-    UBYTE aa_disabled; /* 1 = ReadPixelArray failed once, stay on fallback */
+    /* Scratch buffer for WritePixelArray() on RTG screens */
+    UBYTE *scratch;
+    ULONG scratchBytes;
 };
 
-static struct TEGlyph *te_glyph_get(struct TERenderContext *dc, struct TEFont *fnt, ULONG cp);
+static int te_set_face_size(struct TEFont *fnt);
+static void te_compute_scale(struct TEFont *fnt);
+static void te_compute_metrics(struct TEFont *fnt);
+static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *fnt, FT_UInt gi, ULONG cp);
+static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp);
+static struct TEGlyph *te_make_notfound(struct TERenderContext *dc);
 static void te_glyph_free(struct TEGlyph *g);
-static void te_font_flush_cache(struct TEFont *fnt);
-static void te_glyph_flush_clut_mirrors(struct TEFont *fnt);
-static int te_decode_utf8(const UBYTE *p, const UBYTE *end, ULONG *cp_out, int *len_out);
-static int te_rasterise(struct TERenderContext *dc, struct TEFont *fnt, ULONG cp, struct TEGlyph **out);
+static void te_cache_flush(struct TERenderContext *dc);
+static void te_flush_clut_mirrors(struct TERenderContext *dc);
+static int te_screen_is_rtg(struct Screen *screen, UBYTE *pixfmt_out, ULONG *depth_out);
+static void te_rebuild_clut_remap(struct TERenderContext *dc, struct Screen *screen);
+static void te_rebuild_aa_ramp(struct TERenderContext *dc);
+static int te_pen_for_rgb(struct TERenderContext *dc, UBYTE r, UBYTE g, UBYTE b);
 static void te_draw_glyph(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int penX, int baseY);
-static void te_recompute_grays(struct TERenderContext *dc);
-static int te_screen_is_rtg(struct Screen *screen, UBYTE *fmt_out, ULONG *depth_out);
-static void te_evict_lru(struct TERenderContext *dc);
+static int te_decode_utf8(const UBYTE *p, const UBYTE *end, ULONG *cp_out, int *consumed_out);
 
-static void cgx_probe(void)
-{
-    if (s_cgx_tried)
-        return;
+/* CyberGraphX is opened lazily on first need and closed at TE_GlobalCleanup() */
+struct Library *CyberGfxBase = NULL;
+static int s_cgx_owned = 0;
 
-    s_cgx_tried = 1;
-
-    /* CyberGfxBase may stay NULL -- that's fine, we degrade to MONO */
-    CyberGfxBase = OpenLibrary("cybergraphics.library", 40L);
-}
-
-static void cgx_close(void)
+static int te_open_cgx(void)
 {
     if (CyberGfxBase)
+        return 1;
+
+    CyberGfxBase = OpenLibrary("cybergraphics.library", 41);
+
+    if (CyberGfxBase)
+    {
+        s_cgx_owned = 1;
+        return 1;
+    }
+
+    return 0;
+}
+
+void TE_GlobalCleanup(void)
+{
+    if (s_cgx_owned && CyberGfxBase)
     {
         CloseLibrary(CyberGfxBase);
         CyberGfxBase = NULL;
+        s_cgx_owned = 0;
     }
-
-    s_cgx_tried = 0;
 }
 
-/* UTF-8 decoder: returns 1 on valid sequence, 0 on error */
-static int te_decode_utf8(const UBYTE *p, const UBYTE *end, ULONG *cp_out, int *len_out)
+static unsigned int te_hash_cp_style(ULONG cp, UBYTE style)
 {
-    ULONG cp;
-    int n;
-    int i;
+    /* Fold style into upper bits so styled variants land in different buckets */
+    ULONG h = cp ^ ((ULONG)style << 21);
 
-    if (p >= end)
-    {
-        *cp_out = 0;
-        *len_out = 0;
-
-        return 0;
-    }
-
-    if (p[0] < 0x80)
-    {
-        *cp_out = (ULONG)p[0];
-        *len_out = 1;
-
-        return 1;
-    }
-
-    if ((p[0] & 0xE0) == 0xC0)
-    {
-        n = 2;
-        cp = p[0] & 0x1F;
-    }
-    else if ((p[0] & 0xF0) == 0xE0)
-    {
-        n = 3;
-        cp = p[0] & 0x0F;
-    }
-    else if ((p[0] & 0xF8) == 0xF0)
-    {
-        n = 4;
-        cp = p[0] & 0x07;
-    }
-    else
-    {
-        *cp_out = TE_REPLACEMENT_CP;
-        *len_out = 1;
-
-        return 1;
-    }
-
-    if (p + n > end)
-    {
-        *cp_out = TE_REPLACEMENT_CP;
-        *len_out = 1;
-
-        return 1;
-    }
-
-    for (i = 1; i < n; i++)
-    {
-        if ((p[i] & 0xC0) != 0x80)
-        {
-            *cp_out = TE_REPLACEMENT_CP;
-            *len_out = 1;
-
-            return 1;
-        }
-
-        cp = (cp << 6) | (p[i] & 0x3F);
-    }
-
-    /* surrogates and >0x10FFFF are not valid UTF-8 codepoints */
-    if (cp > 0x10FFFFUL || (cp >= 0xD800 && cp <= 0xDFFF))
-        cp = TE_REPLACEMENT_CP;
-
-    *cp_out = cp;
-    *len_out = n;
-
-    return 1;
-}
-
-/* Hash a codepoint to a bucket index */
-static int te_hash_cp(ULONG cp)
-{
-    /* FNV-ish mix, restricted to bucket count */
-    ULONG h = cp;
-
-    h ^= (h >> 16);
-    h *= 0x9E370001UL;
     h ^= (h >> 13);
 
-    return (int)(h & (TE_GLYPH_HASH_BUCKETS - 1));
-}
-
-static int te_screen_is_rtg(struct Screen *screen, UBYTE *fmt_out, ULONG *depth_out)
-{
-    ULONG depth = 0;
-    UBYTE fmt = 0;
-
-    *fmt_out = 0;
-    *depth_out = 0;
-
-    if (!screen || !screen->RastPort.BitMap)
-        return 0;
-
-    depth = (ULONG)GetBitMapAttr(screen->RastPort.BitMap, BMA_DEPTH);
-
-    cgx_probe();
-
-    if (CyberGfxBase)
-    {
-        ULONG isCgx = GetCyberMapAttr(screen->RastPort.BitMap, CYBRMATTR_ISCYBERGFX);
-
-        if (isCgx)
-        {
-            ULONG cdepth = GetCyberMapAttr(screen->RastPort.BitMap, CYBRMATTR_DEPTH);
-            ULONG cfmt = GetCyberMapAttr(screen->RastPort.BitMap, CYBRMATTR_PIXFMT);
-
-            if (cdepth > 0)
-                depth = cdepth;
-
-            if (cdepth > 8)
-            {
-                fmt = (UBYTE)cfmt;
-                *fmt_out = fmt;
-                *depth_out = depth;
-
-                return 1;
-            }
-        }
-    }
-
-    *depth_out = depth;
-
-    return 0;
+    return (unsigned int)(h & (TE_HASH_BUCKETS - 1));
 }
 
 struct TERenderContext *TE_ContextCreate(void)
@@ -341,261 +251,576 @@ struct TERenderContext *TE_ContextCreate(void)
     struct TERenderContext *dc;
     FT_Error err;
 
-    dc = (struct TERenderContext *)AllocVec(sizeof(*dc), MEMF_CLEAR | MEMF_PUBLIC);
+    dc = (struct TERenderContext *)AllocVec(sizeof(*dc), MEMF_PUBLIC | MEMF_CLEAR);
 
     if (!dc)
         return NULL;
 
-    err = FT_Init_FreeType(&dc->ft);
+    err = FT_Init_FreeType(&dc->library);
 
     if (err)
     {
         FreeVec(dc);
-
         return NULL;
     }
 
-    dc->prefs = 0;
-    dc->style = TE_STY_NORMAL;
     dc->tabSpaces = 4;
-    dc->fgRGB = 0x00FFFFFFUL;
-    dc->bgRGB = 0;
-    dc->fgPen = -1;
+    dc->textARGB = 0x00FFFFFFUL; /* white */
+    dc->bgARGB = 0x00000000UL;   /* black */
+    dc->txtPen = -1;
     dc->bgPen = -1;
+    dc->screenIsRTG = 0; /* initialized to 0, will be set by TE_SetScreen */
+
+    TE_DEBUG_INFO("TE_ContextCreate - screenIsRTG initialized to %d", dc->screenIsRTG);
+
+    te_open_cgx();
 
     return dc;
 }
 
 void TE_ContextRelease(struct TERenderContext *dc)
 {
+    int i;
+
     if (!dc)
         return;
 
-    while (dc->fonts)
+    te_cache_flush(dc);
+
+    for (i = 0; i < dc->numFonts; i++)
     {
-        struct TEFont *f = dc->fonts;
-
-        dc->fonts = f->next;
-        te_font_flush_cache(f);
-
-        if (f->face)
-            FT_Done_Face(f->face);
-
-        FreeVec(f);
+        if (dc->fonts[i].face)
+            FT_Done_Face(dc->fonts[i].face);
     }
 
-    /* Free WPA8 scratch RP/BM if we allocated them */
-    if (dc->scratch_rp)
-    {
-        FreeVec(dc->scratch_rp);
-        dc->scratch_rp = NULL;
-    }
+    if (dc->library)
+        FT_Done_FreeType(dc->library);
 
-    if (dc->scratch_bm)
-    {
-        FreeBitMap(dc->scratch_bm);
-        dc->scratch_bm = NULL;
-    }
-
-    /* Free the AA blend staging buffer if we ever grew one */
-    if (dc->aa_buf)
-    {
-        FreeVec(dc->aa_buf);
-
-        dc->aa_buf = NULL;
-        dc->aa_buf_size = 0;
-    }
-
-    if (dc->ft)
-        FT_Done_FreeType(dc->ft);
+    if (dc->scratch)
+        FreeVec(dc->scratch);
 
     FreeVec(dc);
 }
 
-/* Font management */
-LONG TE_FontAdd(struct TERenderContext *dc, CONST_STRPTR fontPath, LONG pointSize, ULONG flags)
+static int te_set_face_size(struct TEFont *fnt)
 {
-    struct TEFont *f;
     FT_Error err;
-    FT_Face face = NULL;
-    int n;
 
-    if (!dc || !fontPath || pointSize <= 0)
+    if (!fnt || !fnt->face)
         return 0;
 
-    if (dc->fontCount >= TE_MAX_FALLBACKS)
-        return 0;
-
-    err = FT_New_Face(dc->ft, (const char *)fontPath, 0, &face);
-
-    if (err || !face)
-        return 0;
-
-    /* For scalable faces use Set_Char_Size; for fixed-size
-     * bitmaps select the closest strike */
-    if (FT_IS_SCALABLE(face))
+    /* Bitmap-only font: pick the closest available strike */
+    if (!FT_IS_SCALABLE(fnt->face) && fnt->face->num_fixed_sizes > 0)
     {
-        err = FT_Set_Char_Size(face, 0, pointSize * 64, TE_DPI, TE_DPI);
+        int best = 0;
+        int bestDiff = abs(fnt->face->available_sizes[0].height - (int)fnt->pointSize);
+        int i;
 
-        if (err)
+        for (i = 1; i < fnt->face->num_fixed_sizes; i++)
         {
-            FT_Done_Face(face);
-            return 0;
-        }
-    }
-    else
-    {
-        /* Fixed strike: pick closest available */
-        int i, best = 0;
-        int target = pointSize;
-        int diff = 0x7FFFFFFF;
+            int sz = fnt->face->available_sizes[i].height;
+            int diff = abs(sz - (int)fnt->pointSize);
 
-        for (i = 0; i < face->num_fixed_sizes; i++)
-        {
-            int sz = face->available_sizes[i].height;
-            int d = (sz > target) ? (sz - target) : (target - sz);
-
-            if (d < diff)
+            if (diff < bestDiff)
             {
-                diff = d;
+                bestDiff = diff;
                 best = i;
             }
         }
 
-        err = FT_Select_Size(face, best);
+        err = FT_Select_Size(fnt->face, best);
 
-        if (err)
+        return (err == 0);
+    }
+
+    /* Outline font: set the requested size in 26.6 fixed point */
+    err = FT_Set_Char_Size(fnt->face, 0, (FT_F26Dot6)(fnt->pointSize * 64), TE_DPI, TE_DPI);
+
+    return (err == 0);
+}
+
+static void te_compute_scale(struct TEFont *fnt)
+{
+    fnt->scaleNum = 1;
+    fnt->scaleDen = 1;
+
+    if (!fnt || !fnt->face)
+        return;
+
+    /* the metric we have to scale FROM to reach pointSize */
+    if (!FT_IS_SCALABLE(fnt->face) && fnt->face->num_fixed_sizes > 0)
+    {
+        int cellH = (int)(fnt->face->size->metrics.height >> 6);
+
+        if (cellH > 0 && cellH != (int)fnt->pointSize)
         {
-            FT_Done_Face(face);
-            return 0;
+            fnt->scaleNum = (int)fnt->pointSize;
+            fnt->scaleDen = cellH;
+        }
+    }
+}
+
+static void te_compute_metrics(struct TEFont *fnt)
+{
+    int asc, dsc;
+
+    if (!fnt || !fnt->face)
+    {
+        if (fnt)
+        {
+            fnt->ascender = 0;
+            fnt->descender = 0;
+            fnt->height = 0;
+        }
+        return;
+    }
+
+    asc = (int)(fnt->face->size->metrics.ascender >> 6);
+    dsc = (int)(-(fnt->face->size->metrics.descender) >> 6);
+
+    /* Bitmap-only fonts sometimes report ascender==0; fall back to cell height in that case */
+    if (!FT_IS_SCALABLE(fnt->face) && fnt->face->num_fixed_sizes > 0)
+    {
+        int cellH = (int)(fnt->face->size->metrics.height >> 6);
+
+        if (asc <= 0)
+        {
+            asc = cellH;
+            dsc = 0;
         }
     }
 
-    f = (struct TEFont *)AllocVec(sizeof(*f), MEMF_CLEAR | MEMF_PUBLIC);
+    if (dsc < 0)
+        dsc = 0;
 
-    if (!f)
+    /* Apply per-font scale to bring everything to requested point size */
+    asc = (asc * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen;
+    dsc = (dsc * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen;
+
+    fnt->ascender = asc;
+    fnt->descender = dsc;
+    fnt->height = asc + dsc;
+
+    if (fnt->height <= 0)
+        fnt->height = (int)fnt->pointSize;
+}
+
+LONG TE_FontAdd(struct TERenderContext *dc, CONST_STRPTR fontPath, LONG pointSize, ULONG flags)
+{
+    struct TEFont *fnt;
+    FT_Error err;
+
+    if (!dc || !fontPath || pointSize <= 0)
+        return 0;
+
+    if (dc->numFonts >= TE_MAX_FONTS)
+        return 0;
+
+    fnt = &dc->fonts[dc->numFonts];
+
+    memset(fnt, 0, sizeof(*fnt));
+
+    err = FT_New_Face(dc->library, (const char *)fontPath, 0, &fnt->face);
+
+    if (err || !fnt->face)
     {
-        FT_Done_Face(face);
+        fnt->face = NULL;
         return 0;
     }
 
-    f->face = face;
-    f->pointSize = pointSize;
-    f->flags = flags;
+    strncpy(fnt->path, (const char *)fontPath, TE_PATH_MAX - 1);
 
-    n = (int)strlen((const char *)fontPath);
+    fnt->path[TE_PATH_MAX - 1] = '\0';
+    fnt->pointSize = pointSize;
+    fnt->flags = flags;
 
-    if (n >= TE_PATH_MAX)
-        n = TE_PATH_MAX - 1;
-
-    memcpy(f->path, fontPath, n);
-
-    f->path[n] = 0;
-
-    f->has_color = FT_HAS_COLOR(face) ? 1 : 0;
-    f->is_bitmap_only = (FT_HAS_FIXED_SIZES(face) && !FT_IS_SCALABLE(face)) ? 1 : 0;
-
-    /* Cache the line metrics in pixels */
-    if (face->size && face->size->metrics.y_ppem)
+    if (!te_set_face_size(fnt))
     {
-        f->ascender = (WORD)(face->size->metrics.ascender >> 6);
-        f->descender = (WORD)(-(face->size->metrics.descender) >> 6);
-        f->height = (WORD)((face->size->metrics.height) >> 6);
-
-        if (f->height == 0)
-            f->height = f->ascender + f->descender;
-    }
-    else
-    {
-        f->ascender = (WORD)pointSize;
-        f->descender = (WORD)(pointSize / 4);
-        f->height = f->ascender + f->descender;
+        FT_Done_Face(fnt->face);
+        fnt->face = NULL;
+        return 0;
     }
 
-    /* Estimate monospace advance from 'M' */
-    FT_UInt gi = FT_Get_Char_Index(face, 'M');
+    te_compute_scale(fnt);
+    te_compute_metrics(fnt);
 
-    if (gi && FT_Load_Glyph(face, gi, FT_LOAD_DEFAULT | FT_LOAD_NO_BITMAP) == 0)
-        f->monospace_advance = (WORD)(face->glyph->advance.x >> 6);
-
-    if (f->monospace_advance <= 0)
-        f->monospace_advance = (WORD)(pointSize * 6 / 10);
-
-    /* Append to end of list (preserves fallback order) */
-    if (!dc->fonts)
-    {
-        dc->fonts = f;
-    }
-    else
-    {
-        struct TEFont *t = dc->fonts;
-
-        while (t->next)
-            t = t->next;
-
-        t->next = f;
-    }
-
-    dc->fontCount++;
+    dc->numFonts++;
 
     return 1;
 }
 
-static void te_font_flush_cache(struct TEFont *fnt)
+void TE_FontRemove(struct TERenderContext *dc, CONST_STRPTR fontPath, LONG pointSize)
 {
-    int i;
+    int i, j;
 
-    if (!fnt)
+    if (!dc || !fontPath)
         return;
 
-    for (i = 0; i < TE_GLYPH_HASH_BUCKETS; i++)
+    for (i = 0; i < dc->numFonts; i++)
     {
-        struct TEGlyph *g = fnt->buckets[i];
-
-        while (g)
+        if (dc->fonts[i].pointSize == pointSize &&
+            strcmp(dc->fonts[i].path, (const char *)fontPath) == 0)
         {
-            struct TEGlyph *n = g->next;
+            if (dc->fonts[i].face)
+                FT_Done_Face(dc->fonts[i].face);
 
-            te_glyph_free(g);
-            g = n;
+            for (j = i; j < dc->numFonts - 1; j++)
+                dc->fonts[j] = dc->fonts[j + 1];
+
+            dc->numFonts--;
+
+            memset(&dc->fonts[dc->numFonts], 0, sizeof(dc->fonts[0]));
+
+            te_cache_flush(dc);
+            return;
         }
-
-        fnt->buckets[i] = NULL;
     }
-
-    fnt->glyphCount = 0;
-    fnt->bytesHeld = 0;
 }
 
-static void te_glyph_flush_clut_mirrors(struct TEFont *fnt)
+void TE_FontFlush(struct TERenderContext *dc)
 {
     int i;
 
-    if (!fnt)
+    if (!dc)
         return;
 
-    for (i = 0; i < TE_GLYPH_HASH_BUCKETS; i++)
+    te_cache_flush(dc);
+
+    for (i = 0; i < dc->numFonts; i++)
     {
-        struct TEGlyph *g = fnt->buckets[i];
+        if (dc->fonts[i].face)
+            FT_Done_Face(dc->fonts[i].face);
+    }
 
-        while (g)
+    memset(dc->fonts, 0, sizeof(dc->fonts));
+    dc->numFonts = 0;
+}
+
+void TE_FontResize(struct TERenderContext *dc, ULONG nPointSize, ULONG fontMask)
+{
+    int i;
+
+    if (!dc || nPointSize == 0)
+        return;
+
+    for (i = 0; i < dc->numFonts; i++)
+    {
+        struct TEFont *fnt = &dc->fonts[i];
+
+        if (!fnt->face)
+            continue;
+
+        fnt->pointSize = (LONG)nPointSize;
+
+        if (te_set_face_size(fnt))
         {
-            if (g->clut_mirror)
-            {
-                FreeVec(g->clut_mirror);
-                g->clut_mirror = NULL;
-            }
-
-            if (g->clut_mask)
-            {
-                FreeVec(g->clut_mask);
-                g->clut_mask = NULL;
-            }
-
-            g->clut_pitch_mask = 0;
-            g = g->next;
+            te_compute_scale(fnt);
+            te_compute_metrics(fnt);
         }
     }
+
+    te_cache_flush(dc);
+}
+
+void TE_SetFlags(struct TERenderContext *dc, ULONG flags)
+{
+    if (!dc)
+        return;
+
+    if (dc->flags != flags)
+    {
+        /* Anti-alias on/off changes rasterisation mode, so cache contents are no longer compatible */
+        if ((dc->flags ^ flags) & TE_FLAG_ANTIALIAS)
+            te_cache_flush(dc);
+
+        dc->flags = flags;
+    }
+}
+
+ULONG TE_GetFlags(const struct TERenderContext *dc)
+{
+    return dc ? dc->flags : 0;
+}
+
+void TE_CacheFlush(struct TERenderContext *dc)
+{
+    if (dc)
+        te_cache_flush(dc);
+}
+
+void TE_SetStyle(struct TERenderContext *dc, ULONG styleBits)
+{
+    if (!dc)
+        return;
+
+    dc->style = (UBYTE)(styleBits & 0xFF);
+}
+
+void TE_SetTabWidth(struct TERenderContext *dc, ULONG nSpaces)
+{
+    if (!dc)
+        return;
+
+    if (nSpaces < 1)
+        nSpaces = 1;
+
+    if (nSpaces > 16)
+        nSpaces = 16;
+
+    dc->tabSpaces = nSpaces;
+}
+
+void TE_SetColorRGB(struct TERenderContext *dc, ULONG textRGB, ULONG bgRGB)
+{
+    if (!dc)
+        return;
+
+    if (dc->textARGB != textRGB || dc->bgARGB != bgRGB)
+    {
+        /* CLUT mirrors are keyed by current draw colour. Drop them so next blit rebuilds with new colours */
+        te_flush_clut_mirrors(dc);
+
+        dc->aaRampValid = 0;
+    }
+
+    dc->textARGB = textRGB;
+    dc->bgARGB = bgRGB;
+    dc->txtPen = -1;
+    dc->bgPen = -1;
+    dc->pensValid = 0;
+}
+
+void TE_SetColorPen(struct TERenderContext *dc, struct Screen *screen, LONG txtPen, LONG bgPen)
+{
+    UBYTE r, g, b;
+
+    if (!dc)
+        return;
+
+    if (dc->pensValid && dc->txtPen == txtPen && dc->bgPen == bgPen)
+        return;
+
+    /* Drop AGA mirrors and AA ramp; both depend on current pens */
+    te_flush_clut_mirrors(dc);
+    dc->aaRampValid = 0;
+
+    dc->txtPen = txtPen;
+    dc->bgPen = bgPen;
+    dc->pensValid = 1;
+
+    /* Also derive ARGB equivalents from screen palette so RTG path can blend correctly */
+    if (screen && txtPen >= 0)
+    {
+        ULONG rgb[3];
+
+        GetRGB32(screen->ViewPort.ColorMap, (ULONG)txtPen, 1, rgb);
+
+        r = (UBYTE)(rgb[0] >> 24);
+        g = (UBYTE)(rgb[1] >> 24);
+        b = (UBYTE)(rgb[2] >> 24);
+
+        dc->textARGB = ((ULONG)r << 16) | ((ULONG)g << 8) | (ULONG)b;
+    }
+
+    if (screen && bgPen >= 0)
+    {
+        ULONG rgb[3];
+
+        GetRGB32(screen->ViewPort.ColorMap, (ULONG)bgPen, 1, rgb);
+
+        r = (UBYTE)(rgb[0] >> 24);
+        g = (UBYTE)(rgb[1] >> 24);
+        b = (UBYTE)(rgb[2] >> 24);
+
+        dc->bgARGB = ((ULONG)r << 16) | ((ULONG)g << 8) | (ULONG)b;
+    }
+}
+
+static int te_screen_is_rtg(struct Screen *screen, UBYTE *pixfmt_out, ULONG *depth_out)
+{
+    ULONG depth = 0;
+    UBYTE pixfmt = 0;
+
+    if (!screen || !screen->RastPort.BitMap)
+        return 0;
+
+    depth = (ULONG)GetBitMapAttr(screen->RastPort.BitMap, BMA_DEPTH);
+
+    TE_DEBUG_INFO("te_screen_is_rtg - BMA_DEPTH=%lu", depth);
+
+    if (depth_out)
+        *depth_out = depth;
+
+    if (CyberGfxBase)
+    {
+        ULONG d = (ULONG)GetCyberMapAttr(screen->RastPort.BitMap, CYBRMATTR_DEPTH);
+        ULONG fmt;
+
+        TE_DEBUG_INFO("te_screen_is_rtg - CYBRMATTR_DEPTH=%lu", d);
+
+        if (d > 8)
+        {
+            fmt = (ULONG)GetCyberMapAttr(screen->RastPort.BitMap, CYBRMATTR_PIXFMT);
+
+            TE_DEBUG_INFO("te_screen_is_rtg - CYBRMATTR_PIXFMT=%lu", fmt);
+
+            if ((LONG)fmt > 0)
+            {
+                if (pixfmt_out)
+                    *pixfmt_out = (UBYTE)fmt;
+
+                if (depth_out)
+                    *depth_out = d;
+
+                return 1;
+            }
+        }
+    }
+
+    if (pixfmt_out)
+        *pixfmt_out = pixfmt;
+
+    return 0;
+}
+
+void TE_SetScreen(struct TERenderContext *dc, struct Screen *screen)
+{
+    TE_DEBUG_INFO("TE_SetScreen called - dc->screen=%p, screen=%p", (void *)dc->screen, (void *)screen);
+
+    if (!dc || !screen)
+        return;
+
+    if (dc->screen != screen)
+    {
+        TE_DEBUG_INFO("Screen changed, calling te_flush_clut_mirrors");
+
+        /* New screen: drop all CLUT mirrors pen mapping changes */
+        te_flush_clut_mirrors(dc);
+        dc->clutValid = 0;
+        dc->aaRampValid = 0;
+    }
+
+    TE_DEBUG_INFO("Setting screen and calling te_screen_is_rtg");
+
+    dc->screen = screen;
+    dc->screenIsRTG = (UBYTE)te_screen_is_rtg(screen, &dc->screenPixFmt, &dc->screenDepth);
+
+    TE_DEBUG_INFO("screenIsRTG=%d", dc->screenIsRTG);
+
+    if (!dc->screenIsRTG)
+    {
+        TE_DEBUG_INFO("Calling te_rebuild_clut_remap");
+
+        te_rebuild_clut_remap(dc, screen);
+    }
+
+    TE_DEBUG_INFO("TE_SetScreen completed");
+}
+
+void TE_UpdatePalette(struct TERenderContext *dc, struct Screen *screen)
+{
+    if (!dc || !screen)
+        return;
+
+    te_flush_clut_mirrors(dc);
+    dc->aaRampValid = 0;
+    dc->clutValid = 0;
+
+    if (!dc->screenIsRTG)
+        te_rebuild_clut_remap(dc, screen);
+}
+
+static void te_rebuild_clut_remap(struct TERenderContext *dc, struct Screen *screen)
+{
+    static ULONG palette[256 * 3];
+    int ncol;
+    int r4, g4, b4;
+    int i;
+
+    if (!screen || !screen->ViewPort.ColorMap)
+        return;
+
+    ncol = 1 << (int)dc->screenDepth;
+
+    if (ncol > 256)
+        ncol = 256;
+
+    if (ncol <= 0)
+        ncol = 16;
+
+    GetRGB32(screen->ViewPort.ColorMap, 0, (ULONG)ncol, palette);
+
+    /* For each RGB444 key, find the closest screen pen */
+    for (r4 = 0; r4 < 16; r4++)
+    {
+        int r = (r4 << 4) | r4;
+
+        for (g4 = 0; g4 < 16; g4++)
+        {
+            int g = (g4 << 4) | g4;
+
+            for (b4 = 0; b4 < 16; b4++)
+            {
+                int b = (b4 << 4) | b4;
+                int bestDiff = 0x7FFFFFFF;
+                int bestPen = 0;
+
+                for (i = 0; i < ncol; i++)
+                {
+                    int pr = (int)(palette[i * 3 + 0] >> 24);
+                    int pg = (int)(palette[i * 3 + 1] >> 24);
+                    int pb = (int)(palette[i * 3 + 2] >> 24);
+                    int dr = pr - r;
+                    int dg = pg - g;
+                    int db = pb - b;
+                    int d = dr * dr + dg * dg + db * db;
+
+                    if (d < bestDiff)
+                    {
+                        bestDiff = d;
+                        bestPen = i;
+                    }
+                }
+
+                dc->clutRemap[((unsigned)r4 << 8) | ((unsigned)g4 << 4) | (unsigned)b4] = (UBYTE)bestPen;
+            }
+        }
+    }
+
+    dc->clutValid = 1;
+}
+
+static int te_pen_for_rgb(struct TERenderContext *dc, UBYTE r, UBYTE g, UBYTE b)
+{
+    if (!dc->clutValid)
+        return 1; /* fallback to pen 1 if no remap yet */
+
+    return (int)dc->clutRemap[(((unsigned)r >> 4) << 8) | (((unsigned)g >> 4) << 4) | ((unsigned)b >> 4)];
+}
+
+static void te_rebuild_aa_ramp(struct TERenderContext *dc)
+{
+    int i;
+    UBYTE fr = (UBYTE)((dc->textARGB >> 16) & 0xFF);
+    UBYTE fg = (UBYTE)((dc->textARGB >> 8) & 0xFF);
+    UBYTE fb = (UBYTE)(dc->textARGB & 0xFF);
+    UBYTE br = (UBYTE)((dc->bgARGB >> 16) & 0xFF);
+    UBYTE bg = (UBYTE)((dc->bgARGB >> 8) & 0xFF);
+    UBYTE bb = (UBYTE)(dc->bgARGB & 0xFF);
+
+    /* 16-step interpolation from bg -> fg. Step 0 ~= bg, step 15 ~= fg */
+    for (i = 0; i < 16; i++)
+    {
+        int t = i;
+        int u = 15 - i;
+        UBYTE rr = (UBYTE)((fr * t + br * u) / 15);
+        UBYTE gg = (UBYTE)((fg * t + bg * u) / 15);
+        UBYTE bb_ = (UBYTE)((fb * t + bb * u) / 15);
+
+        dc->aaRamp[i] = (UBYTE)te_pen_for_rgb(dc, rr, gg, bb_);
+    }
+
+    dc->aaRampValid = 1;
 }
 
 static void te_glyph_free(struct TEGlyph *g)
@@ -606,1478 +831,1014 @@ static void te_glyph_free(struct TEGlyph *g)
     if (g->data)
         FreeVec(g->data);
 
-    if (g->clut_mirror)
-        FreeVec(g->clut_mirror);
+    if (g->clutBM)
+        FreeBitMap(g->clutBM);
 
-    if (g->clut_mask)
-        FreeVec(g->clut_mask);
+    if (g->maskBM)
+        FreeBitMap(g->maskBM);
 
     FreeVec(g);
 }
 
-void TE_FontRemove(struct TERenderContext *dc, CONST_STRPTR fontPath, LONG pointSize)
+static void te_cache_flush(struct TERenderContext *dc)
 {
-    struct TEFont *prev = NULL, *f;
+    int i;
 
-    if (!dc || !fontPath)
-        return;
-
-    f = dc->fonts;
-
-    while (f)
-    {
-        if (f->pointSize == pointSize && strcmp(f->path, (const char *)fontPath) == 0)
-        {
-            if (prev)
-                prev->next = f->next;
-            else
-                dc->fonts = f->next;
-
-            te_font_flush_cache(f);
-
-            if (f->face)
-                FT_Done_Face(f->face);
-
-            FreeVec(f);
-
-            dc->fontCount--;
-
-            return;
-        }
-
-        prev = f;
-        f = f->next;
-    }
-}
-
-void TE_FontFlush(struct TERenderContext *dc)
-{
     if (!dc)
         return;
 
-    while (dc->fonts)
+    for (i = 0; i < TE_HASH_BUCKETS; i++)
     {
-        struct TEFont *f = dc->fonts;
+        struct TEGlyph *g = dc->buckets[i];
 
-        dc->fonts = f->next;
-        te_font_flush_cache(f);
+        while (g)
+        {
+            struct TEGlyph *next = g->next;
 
-        if (f->face)
-            FT_Done_Face(f->face);
+            te_glyph_free(g);
 
-        FreeVec(f);
+            g = next;
+        }
+
+        dc->buckets[i] = NULL;
     }
-
-    dc->fontCount = 0;
 }
 
-void TE_FontResize(struct TERenderContext *dc, ULONG nPointSize, ULONG fontMask)
+static void te_flush_clut_mirrors(struct TERenderContext *dc)
 {
-    struct TEFont *f;
-    int idx = 0;
+    int i;
 
-    if (!dc || nPointSize == 0)
+    if (!dc)
         return;
 
-    for (f = dc->fonts; f; f = f->next, idx++)
+    for (i = 0; i < TE_HASH_BUCKETS; i++)
     {
-        if (fontMask != 0 && !(fontMask & (1UL << idx)))
-            continue;
+        struct TEGlyph *g;
 
-        if (!f->face)
-            continue;
-
-        if (FT_IS_SCALABLE(f->face))
+        for (g = dc->buckets[i]; g; g = g->next)
         {
-            FT_Set_Char_Size(f->face, 0, nPointSize * 64, TE_DPI, TE_DPI);
-        }
-        else
-        {
-            int i, best = 0, diff = 0x7FFFFFFF;
-            int target = (int)nPointSize;
-
-            for (i = 0; i < f->face->num_fixed_sizes; i++)
+            if (g->clutBM)
             {
-                int sz = f->face->available_sizes[i].height;
-                int d = (sz > target) ? (sz - target) : (target - sz);
+                FreeBitMap(g->clutBM);
+                g->clutBM = NULL;
+            }
+            if (g->maskBM)
+            {
+                FreeBitMap(g->maskBM);
+                g->maskBM = NULL;
+            }
+        }
+    }
+}
 
-                if (d < diff)
+/* Nearest-neighbour scale blit from FreeType bitmap to cache buffer */
+static void te_blit_to_cache(FT_Bitmap *bm, UBYTE *dst, int dstW, int dstH, int dstPitch, int format)
+{
+    int srcW = (int)bm->width;
+    int srcH = (int)bm->rows;
+    ULONG dx, dy;
+    int x, y;
+
+    if (dstW <= 0 || dstH <= 0 || srcW <= 0 || srcH <= 0)
+        return;
+
+    dx = ((ULONG)srcW << 16) / (ULONG)dstW;
+    dy = ((ULONG)srcH << 16) / (ULONG)dstH;
+
+    switch (format)
+    {
+    case FMT_MONO:
+    {
+        /* MONO destination: 1 bit per pixel, MSB-first, word-aligned rows. Source can be MONO or GRAY */
+        ULONG accumY = 0;
+
+        for (y = 0; y < dstH; y++)
+        {
+            int sy = (int)(accumY >> 16);
+            UBYTE *drow = dst + (ULONG)y * (ULONG)dstPitch;
+            ULONG accumX = 0;
+
+            if (bm->pixel_mode == FT_PIXEL_MODE_MONO)
+            {
+                const UBYTE *srow = bm->buffer + sy * bm->pitch;
+
+                for (x = 0; x < dstW; x++)
                 {
-                    diff = d;
-                    best = i;
+                    int sx = (int)(accumX >> 16);
+                    int byte = sx >> 3;
+                    int bit = 7 - (sx & 7);
+
+                    if (srow[byte] & (1 << bit))
+                        drow[x >> 3] |= (UBYTE)(0x80 >> (x & 7));
+
+                    accumX += dx;
+                }
+            }
+            else if (bm->pixel_mode == FT_PIXEL_MODE_GRAY)
+            {
+                const UBYTE *srow = bm->buffer + sy * bm->pitch;
+
+                for (x = 0; x < dstW; x++)
+                {
+                    int sx = (int)(accumX >> 16);
+
+                    if (srow[sx] >= 128)
+                        drow[x >> 3] |= (UBYTE)(0x80 >> (x & 7));
+
+                    accumX += dx;
+                }
+            }
+            else if (bm->pixel_mode == FT_PIXEL_MODE_BGRA)
+            {
+                const UBYTE *srow = bm->buffer + sy * bm->pitch;
+
+                for (x = 0; x < dstW; x++)
+                {
+                    int sx = (int)(accumX >> 16);
+                    const UBYTE *sp = srow + sx * 4;
+
+                    if (sp[3] >= 128)
+                        drow[x >> 3] |= (UBYTE)(0x80 >> (x & 7));
+
+                    accumX += dx;
                 }
             }
 
-            FT_Select_Size(f->face, best);
+            accumY += dy;
         }
 
-        f->pointSize = (int)nPointSize;
+        break;
+    }
 
-        if (f->face->size && f->face->size->metrics.y_ppem)
+    case FMT_GRAY:
+    {
+        ULONG accumY = 0;
+
+        for (y = 0; y < dstH; y++)
         {
-            f->ascender = (WORD)(f->face->size->metrics.ascender >> 6);
-            f->descender = (WORD)(-(f->face->size->metrics.descender) >> 6);
-            f->height = (WORD)((f->face->size->metrics.height) >> 6);
+            int sy = (int)(accumY >> 16);
+            UBYTE *drow = dst + (ULONG)y * (ULONG)dstPitch;
+            ULONG accumX = 0;
 
-            if (f->height == 0)
-                f->height = f->ascender + f->descender;
-        }
-
-        te_font_flush_cache(f);
-    }
-
-    dc->grayPensValid = 0;
-}
-
-/* Preferences and style */
-void TE_SetFlags(struct TERenderContext *dc, ULONG flags)
-{
-    struct TEFont *f;
-    ULONG old;
-
-    if (!dc)
-        return;
-
-    if (dc->prefs == flags)
-        return;
-
-    old = dc->prefs;
-    dc->prefs = flags;
-
-    /* AA toggle invalidates the cache (MONO vs GRAY rasterisation differs)
-     * Also invalidate the CLUT mirrors and grayPens so the new AA mode
-     * picks them up properly on the next render */
-    for (f = dc->fonts; f; f = f->next)
-    {
-        te_font_flush_cache(f);
-        te_glyph_flush_clut_mirrors(f);
-    }
-
-    /* If AA just turned ON, recompute grayPens defensively so that any
-     * CLUT-path glyph rendered next has a valid greyscale palette */
-    if ((flags & TE_FLAG_ANTIALIAS) && !(old & TE_FLAG_ANTIALIAS))
-    {
-        dc->grayPensValid = 0;
-
-        if (dc->colorMapValid)
-            te_recompute_grays(dc);
-    }
-}
-
-ULONG TE_GetFlags(const struct TERenderContext *dc)
-{
-    return dc ? dc->prefs : 0;
-}
-
-void TE_CacheFlush(struct TERenderContext *dc)
-{
-    struct TEFont *f;
-
-    if (!dc)
-        return;
-
-    for (f = dc->fonts; f; f = f->next)
-        te_font_flush_cache(f);
-
-    dc->grayPensValid = 0;
-}
-
-void TE_SetStyle(struct TERenderContext *dc, ULONG styleBits)
-{
-    if (!dc)
-        return;
-
-    dc->style = styleBits & (TE_STY_BOLD | TE_STY_ITALIC);
-}
-
-void TE_SetTabWidth(struct TERenderContext *dc, ULONG n)
-{
-    if (!dc)
-        return;
-
-    if (n < 1)
-        n = 1;
-
-    if (n > 12)
-        n = 12;
-
-    dc->tabSpaces = n;
-}
-
-/* LRU eviction: drops oldest glyphs until below budget */
-static void te_evict_lru(struct TERenderContext *dc)
-{
-    ULONG total = 0;
-    struct TEFont *f;
-
-    for (f = dc->fonts; f; f = f->next)
-        total += f->bytesHeld;
-
-    if (total < TE_CACHE_BUDGET_BYTES)
-        return;
-
-    /* Drop ~25% by repeatedly evicting the single oldest glyph */
-    while (total > (TE_CACHE_BUDGET_BYTES * 3) / 4)
-    {
-        struct TEFont *bestF = NULL;
-        struct TEGlyph *bestG = NULL;
-        struct TEGlyph *prevOfBest = NULL;
-        int bucketOfBest = -1;
-        ULONG bestLRU = ~0UL;
-        int i;
-
-        for (f = dc->fonts; f; f = f->next)
-        {
-            for (i = 0; i < TE_GLYPH_HASH_BUCKETS; i++)
+            if (bm->pixel_mode == FT_PIXEL_MODE_MONO)
             {
-                struct TEGlyph *prev = NULL, *g = f->buckets[i];
+                const UBYTE *srow = bm->buffer + sy * bm->pitch;
 
-                while (g)
+                for (x = 0; x < dstW; x++)
                 {
-                    if (g->lastUse <= bestLRU)
-                    {
-                        bestLRU = g->lastUse;
-                        bestF = f;
-                        bestG = g;
-                        prevOfBest = prev;
-                        bucketOfBest = i;
-                    }
+                    int sx = (int)(accumX >> 16);
+                    int byte = sx >> 3;
+                    int bit = 7 - (sx & 7);
 
-                    prev = g;
-                    g = g->next;
+                    drow[x] = (srow[byte] & (1 << bit)) ? 0xFF : 0;
+                    accumX += dx;
                 }
             }
+            else if (bm->pixel_mode == FT_PIXEL_MODE_GRAY)
+            {
+                const UBYTE *srow = bm->buffer + sy * bm->pitch;
+
+                for (x = 0; x < dstW; x++)
+                {
+                    int sx = (int)(accumX >> 16);
+
+                    drow[x] = srow[sx];
+                    accumX += dx;
+                }
+            }
+            else if (bm->pixel_mode == FT_PIXEL_MODE_BGRA)
+            {
+                const UBYTE *srow = bm->buffer + sy * bm->pitch;
+
+                for (x = 0; x < dstW; x++)
+                {
+                    int sx = (int)(accumX >> 16);
+                    const UBYTE *sp = srow + sx * 4;
+
+                    drow[x] = sp[3];
+                    accumX += dx;
+                }
+            }
+
+            accumY += dy;
         }
 
-        if (!bestG || !bestF)
-            break;
+        break;
+    }
 
-        /* Unlink */
-        if (prevOfBest)
-            prevOfBest->next = bestG->next;
-        else
-            bestF->buckets[bucketOfBest] = bestG->next;
+    case FMT_RGBA:
+    {
+        ULONG accumY = 0;
 
-        bestF->bytesHeld -= bestG->bytes_held;
+        for (y = 0; y < dstH; y++)
+        {
+            int sy = (int)(accumY >> 16);
+            UBYTE *drow = dst + (ULONG)y * (ULONG)dstPitch;
+            ULONG accumX = 0;
 
-        if (total >= bestG->bytes_held)
-            total -= bestG->bytes_held;
-        else
-            total = 0;
+            if (bm->pixel_mode == FT_PIXEL_MODE_BGRA)
+            {
+                const UBYTE *srow = bm->buffer + sy * bm->pitch;
 
-        bestF->glyphCount--;
-        te_glyph_free(bestG);
+                for (x = 0; x < dstW; x++)
+                {
+                    int sx = (int)(accumX >> 16);
+                    const UBYTE *sp = srow + sx * 4;
+                    UBYTE *dp = drow + x * 4;
+
+                    /* FT_PIXEL_MODE_BGRA is byte-order B,G,R,A. We store R,G,B,A. Alpha is pre-multiplied by FreeType */
+                    dp[0] = sp[2];
+                    dp[1] = sp[1];
+                    dp[2] = sp[0];
+                    dp[3] = sp[3];
+
+                    accumX += dx;
+                }
+            }
+            else if (bm->pixel_mode == FT_PIXEL_MODE_GRAY)
+            {
+                /* GRAY upgraded to RGBA: alpha = coverage, rgb = white */
+                const UBYTE *srow = bm->buffer + sy * bm->pitch;
+
+                for (x = 0; x < dstW; x++)
+                {
+                    int sx = (int)(accumX >> 16);
+                    UBYTE *dp = drow + x * 4;
+
+                    dp[0] = 0xFF;
+                    dp[1] = 0xFF;
+                    dp[2] = 0xFF;
+                    dp[3] = srow[sx];
+
+                    accumX += dx;
+                }
+            }
+
+            accumY += dy;
+        }
+
+        break;
+    }
+
+    default:
+        break;
     }
 }
 
-/* Glyph fetch: hash lookup + rasterise on miss */
-static struct TEGlyph *te_glyph_get(struct TERenderContext *dc, struct TEFont *fnt, ULONG cp)
+static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *fnt, FT_UInt gi, ULONG cp)
 {
-    int bi;
     struct TEGlyph *g;
-
-    if (!dc || !fnt)
-        return NULL;
-
-    bi = te_hash_cp(cp);
-
-    for (g = fnt->buckets[bi]; g; g = g->next)
-    {
-        if (g->codepoint == cp && g->style == (UBYTE)dc->style)
-        {
-            g->lastUse = ++dc->lruClock;
-            return g;
-        }
-    }
-
-    /* Miss -- rasterise */
-    if (te_rasterise(dc, fnt, cp, &g) != 0 || !g)
-        return NULL;
-
-    g->next = fnt->buckets[bi];
-    fnt->buckets[bi] = g;
-    fnt->glyphCount++;
-    fnt->bytesHeld += g->bytes_held;
-    g->lastUse = ++dc->lruClock;
-
-    te_evict_lru(dc);
-    return g;
-}
-
-/* Glyph rasterisation */
-static int te_rasterise(struct TERenderContext *dc, struct TEFont *fnt, ULONG cp, struct TEGlyph **out)
-{
-    FT_Face face;
-    FT_UInt gi;
-    FT_Error err;
     FT_GlyphSlot slot;
-    FT_Int32 load_flags;
-    int want_aa;
-    int want_color;
-    struct TEGlyph *g;
-    UBYTE format;
-    int w, h, pitch;
-    ULONG bytes;
-    int i, j;
-
-    *out = NULL;
+    FT_Bitmap *bm;
+    int format;
+    int load_flags;
+    int srcW, srcH, dstW, dstH, pitch;
+    FT_Render_Mode rmode;
 
     if (!dc || !fnt || !fnt->face)
-        return -1;
+        return NULL;
 
-    face = fnt->face;
+    /* Reselect this face's size: when we have multiple bitmap-only fallbacks they all share same FT_Library */
+    te_set_face_size(fnt);
 
-    gi = FT_Get_Char_Index(face, (FT_ULong)cp);
+    /* Choose FreeType load flags based on AA setting and font type */
+    load_flags = FT_LOAD_RENDER | FT_LOAD_COLOR;
 
-    if (gi == 0)
-        return -1; /* Font does not have this glyph */
+    /* FT_LOAD_TARGET_MONO: requests 1-bit bitmap. Only valid for SCALABLE outlines. For bitmap-only colour emoji we MUST NOT set this */
+    if (!(dc->flags & TE_FLAG_ANTIALIAS) && FT_IS_SCALABLE(fnt->face) && !FT_HAS_COLOR(fnt->face))
+        load_flags |= FT_LOAD_TARGET_MONO;
 
-    want_aa = (dc->prefs & TE_FLAG_ANTIALIAS) ? 1 : 0;
-    want_color = fnt->has_color ? 1 : 0;
+    /* For colour emoji fonts, always ensure we get colour data by removing any MONO flag */
+    if (FT_HAS_COLOR(fnt->face))
+        load_flags &= ~FT_LOAD_TARGET_MONO;
 
-    /* On screens with very shallow palettes (OCS/ECS-style 4-16 colour
-     * displays), color emoji rasterise to RGBA but then get nearest-colour
-     * remapped to a tiny palette: the result looks terrible and the
-     * memory waste isn't worth it.  Force monochrome / grayscale on
-     * depth < 8 if we've been told the screen depth */
-    if (want_color && dc->screenDepth > 0 && dc->screenDepth < 8)
-        want_color = 0;
-
-    if (want_aa && dc->screenDepth > 0 && dc->screenDepth < 4)
-        want_aa = 0;
-
-    load_flags = FT_LOAD_DEFAULT;
-
-    if (want_color)
-        load_flags |= FT_LOAD_COLOR;
-
-    if (!want_aa && !want_color)
-        load_flags |= FT_LOAD_MONOCHROME | FT_LOAD_TARGET_MONO;
-    else if (want_aa)
-        load_flags |= FT_LOAD_TARGET_NORMAL;
-
-    err = FT_Load_Glyph(face, gi, load_flags);
-
-    if (err)
-        return -1;
-
-    /* Synthetic style transforms (only meaningful for outline fonts) */
-    if ((dc->style & TE_STY_ITALIC) && face->glyph->format == FT_GLYPH_FORMAT_OUTLINE)
+    /* Styled glyph (bold/italic) on scalable fonts: render in two steps so transform happens on the outline */
+    if (dc->style && FT_IS_SCALABLE(fnt->face))
     {
-        FT_Matrix shear;
+        int norender = FT_LOAD_COLOR;
 
-        shear.xx = 0x10000;
-        shear.xy = (FT_Fixed)(0.2 * 0x10000);
-        shear.yx = 0;
-        shear.yy = 0x10000;
+        if (!(dc->flags & TE_FLAG_ANTIALIAS) && !FT_HAS_COLOR(fnt->face))
+            norender |= FT_LOAD_TARGET_MONO;
 
-        FT_Outline_Transform(&face->glyph->outline, &shear);
-    }
+        if (FT_Load_Glyph(fnt->face, gi, norender))
+            return NULL;
 
-    if ((dc->style & TE_STY_BOLD) && face->glyph->format == FT_GLYPH_FORMAT_OUTLINE)
-        FT_Outline_Embolden(&face->glyph->outline, (FT_Pos)(fnt->pointSize * 64 / 24));
+        slot = fnt->face->glyph;
 
-    /* Render to bitmap if it isn't already one */
-    if (face->glyph->format != FT_GLYPH_FORMAT_BITMAP)
-    {
-        FT_Render_Mode rmode = want_aa ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO;
+        if (dc->style & TE_STY_BOLD)
+            FT_GlyphSlot_Embolden(slot);
+        if (dc->style & TE_STY_ITALIC)
+            FT_GlyphSlot_Oblique(slot);
 
-        err = FT_Render_Glyph(face->glyph, rmode);
+        rmode = (norender & FT_LOAD_TARGET_MONO) ? FT_RENDER_MODE_MONO : FT_RENDER_MODE_NORMAL;
 
-        if (err)
-            return -1;
-    }
-
-    slot = face->glyph;
-
-    /* Pick output format from the rendered bitmap's pixel mode */
-    switch (slot->bitmap.pixel_mode)
-    {
-    case FT_PIXEL_MODE_MONO:
-        format = FMT_MONO;
-        break;
-    case FT_PIXEL_MODE_GRAY:
-        format = FMT_GRAY;
-        break;
-    case FT_PIXEL_MODE_BGRA:
-        format = FMT_RGBA;
-        break;
-    default:
-        return -1;
-    }
-
-    w = (int)slot->bitmap.width;
-    h = (int)slot->bitmap.rows;
-
-    /* Still a valid glyph (e.g. SPACE) -- emit a 0-sized entry */
-    if (w == 0 || h == 0)
-    {
-        w = 0;
-        h = 0;
-    }
-
-    /* Compute pitch for our packed storage */
-    if (format == FMT_MONO)
-    {
-        /* BltTemplate's source modulo MUST be even (word-aligned) for the
-         * blitter on AGA. Round up to multiples of 2 bytes */
-        pitch = ((w + 15) >> 4) << 1;
-    }
-    else if (format == FMT_GRAY)
-    {
-        pitch = w;
+        if (FT_Render_Glyph(slot, rmode))
+            return NULL;
     }
     else
     {
-        pitch = w * 4;
+        if (FT_Load_Glyph(fnt->face, gi, load_flags))
+            return NULL;
+
+        slot = fnt->face->glyph;
     }
 
-    bytes = (ULONG)pitch * (ULONG)h + sizeof(struct TEGlyph);
+    bm = &slot->bitmap;
 
-    g = (struct TEGlyph *)AllocVec(sizeof(*g), MEMF_CLEAR | MEMF_PUBLIC);
+    /* Pick cache format. BGRA bitmaps (colour emoji) always use RGBA format to preserve original colours */
+    if (bm->pixel_mode == FT_PIXEL_MODE_BGRA)
+        format = FMT_RGBA;
+    else if (dc->flags & TE_FLAG_ANTIALIAS)
+        format = FMT_GRAY;
+    else
+        format = FMT_MONO;
+
+    srcW = (int)bm->width;
+    srcH = (int)bm->rows;
+
+    /* Scale to target size. For outline fonts scale = 1/1 so dst == src */
+    if (srcW == 0 || srcH == 0)
+    {
+        dstW = 0;
+        dstH = 0;
+    }
+    else
+    {
+        dstW = (srcW * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen;
+        dstH = (srcH * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen;
+
+        if (dstW < 1)
+            dstW = 1;
+        if (dstH < 1)
+            dstH = 1;
+    }
+
+    /* Row pitch -- MONO needs word-aligned rows for BltTemplate */
+    switch (format)
+    {
+    case FMT_MONO:
+        pitch = ((dstW + 15) >> 4) * 2;
+        break;
+    case FMT_GRAY:
+        pitch = dstW;
+        break;
+    case FMT_RGBA:
+        pitch = dstW * 4;
+        break;
+    default:
+        pitch = dstW;
+        break;
+    }
+
+    g = (struct TEGlyph *)AllocVec(sizeof(*g), MEMF_PUBLIC | MEMF_CLEAR);
 
     if (!g)
-        return -1;
+        return NULL;
 
-    g->codepoint = cp;
-    g->format = format;
-    g->style = (UBYTE)dc->style;
-    g->width = (WORD)w;
-    g->height = (WORD)h;
-    g->bearingX = (WORD)slot->bitmap_left;
-    g->bearingY = (WORD)slot->bitmap_top;
-    g->advance = (WORD)(slot->advance.x >> 6);
-    g->pitch = (WORD)pitch;
-    g->bytes_held = bytes;
-
-    if (w > 0 && h > 0)
+    if (dstW > 0 && dstH > 0)
     {
-        /* MONO data is consumed by BltTemplate -> blitter on AGA needs
-         * CHIP RAM. GRAY/RGBA never touch the blitter, FAST is fine */
-        ULONG memflags = (format == FMT_MONO) ? (MEMF_CHIP | MEMF_CLEAR) : (MEMF_PUBLIC | MEMF_CLEAR);
-
-        g->data = (UBYTE *)AllocVec((ULONG)pitch * (ULONG)h, memflags);
+        g->data = (UBYTE *)AllocVec((ULONG)pitch * (ULONG)dstH, MEMF_PUBLIC | MEMF_CLEAR);
 
         if (!g->data)
         {
             FreeVec(g);
-            return -1;
+            return NULL;
         }
 
-        if (format == FMT_MONO)
-        {
-            /* FT MONO bitmap has its own pitch (sometimes negative). Copy
-             * row by row, MSB-first byte order (BltTemplate-compatible) */
-            int src_pitch = slot->bitmap.pitch;
-            const UBYTE *src = slot->bitmap.buffer;
-            int sgn = (src_pitch < 0) ? -1 : 1;
-            int abs_pitch = sgn < 0 ? -src_pitch : src_pitch;
-            int copybytes = pitch < abs_pitch ? pitch : abs_pitch;
-
-            if (sgn < 0)
-                src += (h - 1) * abs_pitch;
-
-            for (i = 0; i < h; i++)
-            {
-                memcpy(g->data + i * pitch, src, copybytes);
-                src += sgn * abs_pitch;
-            }
-        }
-        else if (format == FMT_GRAY)
-        {
-            int src_pitch = slot->bitmap.pitch;
-            const UBYTE *src = slot->bitmap.buffer;
-            int sgn = (src_pitch < 0) ? -1 : 1;
-            int abs_pitch = sgn < 0 ? -src_pitch : src_pitch;
-            int copybytes = pitch < abs_pitch ? pitch : abs_pitch;
-
-            if (sgn < 0)
-                src += (h - 1) * abs_pitch;
-
-            for (i = 0; i < h; i++)
-            {
-                memcpy(g->data + i * pitch, src, copybytes);
-                src += sgn * abs_pitch;
-            }
-        }
-        else
-        {
-            /* FMT_RGBA -- FT emits BGRA, we store RGBA */
-            int src_pitch = slot->bitmap.pitch;
-            const UBYTE *src = slot->bitmap.buffer;
-            int sgn = (src_pitch < 0) ? -1 : 1;
-            int abs_pitch = sgn < 0 ? -src_pitch : src_pitch;
-
-            if (sgn < 0)
-                src += (h - 1) * abs_pitch;
-
-            for (i = 0; i < h; i++)
-            {
-                UBYTE *d = g->data + i * pitch;
-                const UBYTE *s = src;
-
-                for (j = 0; j < w; j++)
-                {
-                    UBYTE B = s[0], G = s[1], R = s[2], A = s[3];
-
-                    d[0] = R;
-                    d[1] = G;
-                    d[2] = B;
-                    d[3] = A;
-                    d += 4;
-                    s += 4;
-                }
-
-                src += sgn * abs_pitch;
-            }
-        }
+        te_blit_to_cache(bm, g->data, dstW, dstH, pitch, format);
     }
 
-    *out = g;
+    g->codepoint = cp;
+    g->style = dc->style;
+    g->format = (UBYTE)format;
+    g->width = (WORD)dstW;
+    g->height = (WORD)dstH;
+    g->pitch = (WORD)pitch;
+    g->bearingX = (WORD)((slot->bitmap_left * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen);
+    g->bearingY = (WORD)((slot->bitmap_top * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen);
+    g->advance = (WORD)(((slot->advance.x >> 6) * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen);
 
-    return 0;
+    if (g->advance <= 0)
+        g->advance = (WORD)dstW;
+
+    return g;
 }
 
-/* Build the 12-bit RGB -> 8-bit pen index lookup table from the screen's
- * colour map. Iterates 4096 entries and finds the closest match in the
- * screen's first 256 pens */
-static void te_build_color_map(struct TERenderContext *dc, struct Screen *screen)
+static struct TEGlyph *te_make_notfound(struct TERenderContext *dc)
 {
-    static ULONG palette[256 * 3];
-    int ncol;
-    int r4, g4, b4;
+    /* Build tofu-style rectangle outline glyph at primary font's cell size. Uses pure FMT_MONO so it always blits cheaply */
+    struct TEFont *primary;
+    struct TEGlyph *g;
+    int w, h, pitch;
+    int x, y;
+
+    if (!dc || dc->numFonts <= 0)
+        return NULL;
+
+    primary = &dc->fonts[0];
+
+    if (!primary->face)
+        return NULL;
+
+    h = primary->height;
+    if (h <= 0)
+        h = (int)primary->pointSize;
+
+    /* Roughly 0.6x cell height for the width (em-square heuristic) */
+    w = (h * 3) / 5;
+
+    if (w < 4)
+        w = 4;
+
+    if (h < 6)
+        h = 6;
+
+    pitch = ((w + 15) >> 4) * 2;
+
+    g = (struct TEGlyph *)AllocVec(sizeof(*g), MEMF_PUBLIC | MEMF_CLEAR);
+
+    if (!g)
+        return NULL;
+
+    g->data = (UBYTE *)AllocVec((ULONG)pitch * (ULONG)h, MEMF_PUBLIC | MEMF_CLEAR);
+
+    if (!g->data)
+    {
+        FreeVec(g);
+        return NULL;
+    }
+
+    /* Top and bottom edges */
+    for (x = 0; x < w; x++)
+    {
+        g->data[0 * pitch + (x >> 3)] |= (UBYTE)(0x80 >> (x & 7));
+        g->data[(h - 1) * pitch + (x >> 3)] |= (UBYTE)(0x80 >> (x & 7));
+    }
+
+    /* Left and right edges */
+    for (y = 0; y < h; y++)
+    {
+        g->data[y * pitch + (0 >> 3)] |= (UBYTE)(0x80 >> (0 & 7));
+        g->data[y * pitch + ((w - 1) >> 3)] |= (UBYTE)(0x80 >> ((w - 1) & 7));
+    }
+
+    g->codepoint = TE_NOTFOUND_CP;
+    g->style = 0;
+    g->format = FMT_MONO;
+    g->width = (WORD)w;
+    g->height = (WORD)h;
+    g->pitch = (WORD)pitch;
+    g->bearingX = 0;
+    g->bearingY = (WORD)(primary->ascender > 0 ? primary->ascender : h);
+    g->advance = (WORD)(w + 1);
+
+    return g;
+}
+
+static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
+{
+    struct TEGlyph *g;
+    struct TEFont *fnt;
+    FT_UInt gi = 0;
+    unsigned int h;
     int i;
 
-    if (!screen || !screen->ViewPort.ColorMap)
-    {
-        dc->colorMapValid = 0;
-        return;
-    }
-
-    ncol = (1 << (int)dc->screenDepth);
-
-    if (ncol > 256)
-        ncol = 256;
-
-    if (ncol <= 0)
-        ncol = 16;
-
-    /* GetRGB32 returns 32-bit R, G, B fixed for each pen (left-justified) */
-    GetRGB32(screen->ViewPort.ColorMap, 0, (ULONG)ncol, palette);
-
-    for (r4 = 0; r4 < 16; r4++)
-    {
-        for (g4 = 0; g4 < 16; g4++)
-        {
-            for (b4 = 0; b4 < 16; b4++)
-            {
-                int idx = (r4 << 8) | (g4 << 4) | b4;
-                int rr = (r4 << 4) | r4;
-                int gg = (g4 << 4) | g4;
-                int bb = (b4 << 4) | b4;
-                ULONG bestd = ~0UL;
-                int bestp = 0;
-
-                for (i = 0; i < ncol; i++)
-                {
-                    int pr = (int)((palette[i * 3 + 0] >> 24) & 0xFF);
-                    int pg = (int)((palette[i * 3 + 1] >> 24) & 0xFF);
-                    int pb = (int)((palette[i * 3 + 2] >> 24) & 0xFF);
-                    int dr = pr - rr, dg = pg - gg, db = pb - bb;
-
-                    ULONG d = (ULONG)(dr * dr) + (ULONG)(dg * dg) + (ULONG)(db * db);
-
-                    if (d < bestd)
-                    {
-                        bestd = d;
-                        bestp = i;
-                    }
-                }
-
-                dc->colorMap[idx] = (UBYTE)bestp;
-            }
-        }
-    }
-
-    dc->colorMapValid = 1;
-}
-
-/* Premixed greyscale pen ramp for indexed GRAY rendering. Computes
- * 17 levels from bgRGB to fgRGB and looks each one up in colorMap[] */
-static void te_recompute_grays(struct TERenderContext *dc)
-{
-    int i;
-    UBYTE fr, fg_, fb, br, bg_, bb;
-
-    if (!dc->colorMapValid)
-    {
-        dc->grayPensValid = 0;
-        return;
-    }
-
-    fr = (UBYTE)((dc->fgRGB >> 16) & 0xFF);
-    fg_ = (UBYTE)((dc->fgRGB >> 8) & 0xFF);
-    fb = (UBYTE)(dc->fgRGB & 0xFF);
-    br = (UBYTE)((dc->bgRGB >> 16) & 0xFF);
-    bg_ = (UBYTE)((dc->bgRGB >> 8) & 0xFF);
-    bb = (UBYTE)(dc->bgRGB & 0xFF);
-
-    for (i = 0; i <= 16; i++)
-    {
-        int alpha = (i * 255) / 16;
-        int rr = (br * (255 - alpha) + fr * alpha) / 255;
-        int gg = (bg_ * (255 - alpha) + fg_ * alpha) / 255;
-        int b = (bb * (255 - alpha) + fb * alpha) / 255;
-        int idx = ((rr >> 4) << 8) | ((gg >> 4) << 4) | (b >> 4);
-
-        dc->grayPens[i] = dc->colorMap[idx & 0xFFF];
-    }
-
-    dc->grayPensValid = 1;
-}
-
-void TE_SetColorRGB(struct TERenderContext *dc, ULONG fgRGB, ULONG bgRGB)
-{
-    struct TEFont *f;
-
     if (!dc)
-        return;
-
-    if (dc->fgRGB == fgRGB && dc->bgRGB == bgRGB)
-        return;
-
-    /* Both FG and BG affect CLUT mirrors -- GRAY mirrors use premixed
-     * pens between BG and FG, RGBA mirrors are independent of FG/BG but
-     * we flush them too for simplicity (cheap to rebuild lazily) */
-    for (f = dc->fonts; f; f = f->next)
-        te_glyph_flush_clut_mirrors(f);
-
-    dc->fgRGB = fgRGB;
-    dc->bgRGB = bgRGB;
-    dc->fgPen = -1;
-    dc->bgPen = -1;
-
-    te_recompute_grays(dc);
-}
-
-void TE_SetColorPen(struct TERenderContext *dc, struct Screen *screen, LONG txtPen, LONG bgPen)
-{
-    ULONG fg, bg;
-    ULONG pal[3];
-
-    if (!dc || !screen)
-        return;
-
-    if (!screen->ViewPort.ColorMap)
-        return;
-
-    if (txtPen >= 0 && txtPen < 256)
-    {
-        GetRGB32(screen->ViewPort.ColorMap, (ULONG)txtPen, 1, pal);
-        fg = ((pal[0] >> 8) & 0xFF0000UL) | ((pal[1] >> 16) & 0xFF00UL) | ((pal[2] >> 24) & 0xFFUL);
-    }
-    else
-    {
-        fg = dc->fgRGB;
-    }
-
-    if (bgPen >= 0 && bgPen < 256)
-    {
-        GetRGB32(screen->ViewPort.ColorMap, (ULONG)bgPen, 1, pal);
-        bg = ((pal[0] >> 8) & 0xFF0000UL) | ((pal[1] >> 16) & 0xFF00UL) | ((pal[2] >> 24) & 0xFFUL);
-    }
-    else
-    {
-        bg = dc->bgRGB;
-    }
-
-    /* Fast path: same pens -> avoid full SetDrawColor work */
-    if (txtPen == dc->fgPen && bgPen == dc->bgPen)
-    {
-        dc->fgRGB = fg;
-        dc->bgRGB = bg;
-        return;
-    }
-
-    /* Different pens but maybe same colors -- still update */
-    TE_SetColorRGB(dc, fg, bg);
-
-    dc->fgPen = txtPen;
-    dc->bgPen = bgPen;
-}
-
-/* Screen / palette association */
-void TE_SetScreen(struct TERenderContext *dc, struct Screen *screen)
-{
-    if (!dc || !screen)
-        return;
-
-    if (dc->screen == screen && dc->colorMapValid)
-        return;
-
-    dc->screen = screen;
-    dc->screenIsRTG = (UBYTE)te_screen_is_rtg(screen, &dc->screenPixFmt, &dc->screenDepth);
-
-    if (!dc->screenIsRTG)
-    {
-        te_build_color_map(dc, screen);
-        te_recompute_grays(dc);
-    }
-    else
-    {
-        dc->colorMapValid = 1; /* RTG doesn't need the LUT but mark ready */
-    }
-}
-
-void TE_UpdatePalette(struct TERenderContext *dc, struct Screen *screen)
-{
-    struct TEFont *f;
-
-    if (!dc || !screen)
-        return;
-
-    dc->screen = screen;
-    dc->screenIsRTG = (UBYTE)te_screen_is_rtg(screen, &dc->screenPixFmt, &dc->screenDepth);
-
-    if (!dc->screenIsRTG)
-    {
-        te_build_color_map(dc, screen);
-        te_recompute_grays(dc);
-    }
-    else
-    {
-        dc->colorMapValid = 1;
-    }
-
-    /* Palette changed -- discard CLUT-remapped mirrors so they get rebuilt */
-    for (f = dc->fonts; f; f = f->next)
-        te_glyph_flush_clut_mirrors(f);
-}
-
-/* Build CLUT-remapped mirror for indexed screen */
-static void te_build_clut_mirror(struct TERenderContext *dc, struct TEGlyph *g)
-{
-    int x, y;
-    int w = g->width, h = g->height;
-    int mask_pitch;
-
-    if (g->clut_mirror)
-        return;
-
-    if (w == 0 || h == 0)
-        return;
-
-    if (!dc->colorMapValid)
-        return;
-
-    mask_pitch = ((w + 15) >> 4) << 1; /* word-aligned bytes per mask row */
-
-    g->clut_mirror = (UBYTE *)AllocVec((ULONG)w * (ULONG)h, MEMF_CLEAR | MEMF_PUBLIC);
-
-    if (!g->clut_mirror)
-        return;
-
-    g->clut_mask = (UBYTE *)AllocVec((ULONG)mask_pitch * (ULONG)h, MEMF_CLEAR | MEMF_PUBLIC);
-
-    if (!g->clut_mask)
-    {
-        FreeVec(g->clut_mirror);
-        g->clut_mirror = NULL;
-        return;
-    }
-
-    g->clut_pitch_mask = (WORD)mask_pitch;
-
-    if (g->format == FMT_GRAY)
-    {
-        if (!dc->grayPensValid)
-            te_recompute_grays(dc);
-
-        for (y = 0; y < h; y++)
-        {
-            const UBYTE *src = g->data + y * g->pitch;
-            UBYTE *dst = g->clut_mirror + y * w;
-            UBYTE *msk = g->clut_mask + y * mask_pitch;
-
-            for (x = 0; x < w; x++)
-            {
-                UBYTE a = src[x];
-
-                if (a >= 8)
-                {
-                    int idx = a >> 4; /* 0..15 */
-
-                    dst[x] = dc->grayPensValid ? dc->grayPens[idx] : 1;
-                    msk[x >> 3] |= (UBYTE)(0x80 >> (x & 7));
-                }
-            }
-        }
-    }
-    else
-    {
-        /* FMT_RGBA */
-        for (y = 0; y < h; y++)
-        {
-            const UBYTE *src = g->data + y * g->pitch;
-            UBYTE *dst = g->clut_mirror + y * w;
-            UBYTE *msk = g->clut_mask + y * mask_pitch;
-
-            for (x = 0; x < w; x++)
-            {
-                UBYTE R = src[x * 4 + 0];
-                UBYTE G = src[x * 4 + 1];
-                UBYTE B = src[x * 4 + 2];
-                UBYTE A = src[x * 4 + 3];
-
-                if (A >= 16)
-                {
-                    int idx = ((R >> 4) << 8) | ((G >> 4) << 4) | (B >> 4);
-
-                    dst[x] = dc->colorMap[idx & 0xFFF];
-                    msk[x >> 3] |= (UBYTE)(0x80 >> (x & 7));
-                }
-            }
-        }
-    }
-}
-
-/* Per-glyph draw paths */
-static void te_draw_mono(struct TEGlyph *g, struct RastPort *rp, int penX, int baseY)
-{
-    int dx = penX + g->bearingX;
-    int dy = baseY - g->bearingY;
-
-    if (g->width <= 0 || g->height <= 0 || !g->data)
-        return;
-
-    /* BltTemplate paints with FgPen wherever the template
-     * has 1-bits srcX = 0, modulo = pitch */
-    BltTemplate((PLANEPTR)g->data, 0, g->pitch, rp, dx, dy, g->width, g->height);
-}
-
-/* Bullet-proof GRAY-to-MONO drawer: builds a temporary 1-bit mask from the
- * 8-bit alpha mask (threshold 128) and paints with BltTemplate. Same path
- * as plain MONO -- known to work on every Amiga -- but driven from a GRAY
- * (anti-aliased) source. Loses the smooth AA edges but guarantees the
- * glyph is visible. Used as the GRAY fallback when the "pretty" AA paths
- * (RTG WritePixelArray, CLUT grayPens) fail silently due to driver bugs
- * or missing palette data */
-static void te_draw_gray_as_mono(struct TEGlyph *g, struct RastPort *rp, int penX, int baseY)
-{
-    int dx = penX + g->bearingX;
-    int dy = baseY - g->bearingY;
-    int w = g->width, h = g->height;
-    int x, y;
-    int mono_pitch;
-    UBYTE *mono;
-
-    if (w <= 0 || h <= 0 || !g->data)
-        return;
-
-    /* Word-aligned per-row pitch in bytes -- BltTemplate requirement */
-    mono_pitch = ((w + 15) >> 4) << 1;
-
-    mono = (UBYTE *)AllocVec((ULONG)mono_pitch * (ULONG)h, MEMF_CHIP | MEMF_CLEAR);
-
-    if (!mono)
-        return;
-
-    for (y = 0; y < h; y++)
-    {
-        const UBYTE *src = g->data + y * g->pitch;
-        UBYTE *dst = mono + y * mono_pitch;
-
-        for (x = 0; x < w; x++)
-        {
-            if (src[x] >= 128)
-                dst[x >> 3] |= (UBYTE)(0x80 >> (x & 7));
-        }
-    }
-
-    BltTemplate((PLANEPTR)mono, 0, mono_pitch, rp, dx, dy, w, h);
-    FreeVec(mono);
-}
-
-static int te_have_wpa8(void)
-{
-    return GfxBase && ((struct Library *)GfxBase)->lib_Version >= 39;
-}
-
-/* Ensure scratch RP/BM exist and are at least (w, h) pixels. Returns the
- * scratch RastPort on success, NULL if allocation fails or wpa8 unsupported
- * The amiga BitMap is taken from the destination rp so depth/format match */
-static struct RastPort *te_ensure_scratch(struct TERenderContext *dc, int w, int h, struct BitMap *friend_bm)
-{
-    UBYTE depth;
-
-    if (!te_have_wpa8())
         return NULL;
 
-    if (!friend_bm)
-        return NULL;
+    h = te_hash_cp_style(cp, dc->style);
 
-    if (dc->scratch_tried == 2)
-        return NULL;
-
-    depth = (UBYTE)GetBitMapAttr(friend_bm, BMA_DEPTH);
-
-    if (depth < 1 || depth > 8)
+    /* Cache lookup first. Most glyphs are seen many times */
+    for (g = dc->buckets[h]; g; g = g->next)
     {
-        /* WPA8 only sensible on planar 1..8-bit screens. For deeper screens
-         * we have other paths (cgx). Mark unsupported */
-        dc->scratch_tried = 2;
-
-        return NULL;
+        if (g->codepoint == cp && g->style == dc->style)
+            return g;
     }
 
-    /* Existing scratch big enough and right depth? Reuse it */
-    if (dc->scratch_rp && dc->scratch_bm && dc->scratch_depth == depth && dc->scratch_w >= w && dc->scratch_h >= h)
-        return dc->scratch_rp;
+    /* Cache miss. Iterate font chain to find one that has this cp */
+    fnt = NULL;
 
-    /* Need to (re)allocate. Free any previous */
-    if (dc->scratch_rp)
+    for (i = 0; i < dc->numFonts; i++)
     {
-        FreeVec(dc->scratch_rp);
-        dc->scratch_rp = NULL;
-    }
+        if (!dc->fonts[i].face)
+            continue;
 
-    if (dc->scratch_bm)
-    {
-        FreeBitMap(dc->scratch_bm);
-        dc->scratch_bm = NULL;
-    }
+        gi = FT_Get_Char_Index(dc->fonts[i].face, (FT_ULong)cp);
 
-    /* Round up to multiples of 16 for blitter friendliness; min 64x64 */
-    if (w < 64)
-        w = 64;
-
-    if (h < 64)
-        h = 64;
-
-    w = (w + 15) & ~15;
-    h = (h + 15) & ~15;
-
-    dc->scratch_bm = AllocBitMap((ULONG)w, (ULONG)h, (ULONG)depth, BMF_CLEAR, friend_bm);
-
-    if (!dc->scratch_bm)
-    {
-        dc->scratch_tried = 2;
-        return NULL;
-    }
-
-    dc->scratch_rp = (struct RastPort *)AllocVec(sizeof(struct RastPort), MEMF_CLEAR | MEMF_PUBLIC);
-
-    if (!dc->scratch_rp)
-    {
-        FreeBitMap(dc->scratch_bm);
-
-        dc->scratch_bm = NULL;
-        dc->scratch_tried = 2;
-        return NULL;
-    }
-
-    InitRastPort(dc->scratch_rp);
-
-    dc->scratch_rp->BitMap = dc->scratch_bm;
-    dc->scratch_w = w;
-    dc->scratch_h = h;
-    dc->scratch_depth = depth;
-    dc->scratch_tried = 1;
-
-    return dc->scratch_rp;
-}
-
-/* Build a chunky-8bpp buffer for the whole glyph, with bg pen filling the
- * transparent positions. Used by the WPA8 fast path so we can blit the
- * full rectangle in one call (no mask needed -- transparent areas paint
- * the same bg pen the caller already painted, no visual change) */
-static void te_build_solid_chunky(struct TERenderContext *dc, struct TEGlyph *g, UBYTE *out, int stride, UBYTE bg)
-{
-    int x, y, w = g->width, h = g->height;
-
-    if (!g->clut_mirror || !g->clut_mask)
-    {
-        /* No CLUT mirror yet -- fill with bg */
-        for (y = 0; y < h; y++)
-            memset(out + y * stride, bg, w);
-
-        return;
-    }
-
-    for (y = 0; y < h; y++)
-    {
-        const UBYTE *mrow = g->clut_mirror + y * w;
-        const UBYTE *krow = g->clut_mask + y * g->clut_pitch_mask;
-        UBYTE *drow = out + y * stride;
-
-        for (x = 0; x < w; x++)
+        if (gi != 0)
         {
-            int opaque = (krow[x >> 3] & (UBYTE)(0x80 >> (x & 7)));
-
-            drow[x] = opaque ? mrow[x] : bg;
-        }
-    }
-}
-
-/* row left-to-right grouping consecutive pixels with the same pen into a
- * single horizontal RectFill (a one-pixel-tall rectangle). This is one
- * blitter op per span instead of one per pixel, roughly an order of
- * magnitude faster than per-pixel WritePixel for typical text glyphs
- * which average 3-5 spans per row
- *
- * Note: this path only paints opaque pixels (mask-controlled). The
- * caller is responsible for clearing the cell background beforehand
- * the editor does that with a RectFill before calling TE */
-static void te_draw_clut(struct TERenderContext *dc, struct TEGlyph *g, struct RastPort *rp, int penX, int baseY)
-{
-    int dx, dy, w, h;
-    int x, y;
-    UBYTE savedPen;
-    struct RastPort *scratch;
-
-    if (g->width <= 0 || g->height <= 0)
-        return;
-
-    if (!g->clut_mirror || !g->clut_mask)
-        return;
-
-    dx = penX + g->bearingX;
-    dy = baseY - g->bearingY;
-    w = g->width;
-    h = g->height;
-
-    /* Fast path: WritePixelArray8 (graphics.library v39+) */
-    scratch = te_ensure_scratch(dc, w, h, rp->BitMap);
-
-    if (scratch)
-    {
-        UBYTE *chunky = (UBYTE *)AllocVec((ULONG)w * (ULONG)h, MEMF_PUBLIC);
-
-        if (chunky)
-        {
-            te_build_solid_chunky(dc, g, chunky, w, rp->BgPen);
-            WritePixelArray8(rp, (UWORD)dx, (UWORD)dy, (UWORD)(dx + w - 1), (UWORD)(dy + h - 1), chunky, scratch);
-
-            FreeVec(chunky);
-            return;
+            fnt = &dc->fonts[i];
+            break;
         }
     }
 
-    /* Slow fallback: per-span RectFill (works on every Amiga) */
-    savedPen = rp->FgPen;
+    if (!fnt)
+        return NULL;
 
-    for (y = 0; y < h; y++)
+    g = te_make_glyph(dc, fnt, gi, cp);
+
+    if (!g)
+        return NULL;
+
+    /* Insert at bucket head */
+    g->next = dc->buckets[h];
+    dc->buckets[h] = g;
+
+    return g;
+}
+
+static struct TEGlyph *te_get_notfound(struct TERenderContext *dc)
+{
+    struct TEGlyph *g;
+    unsigned int h;
+
+    h = te_hash_cp_style(TE_NOTFOUND_CP, 0);
+
+    for (g = dc->buckets[h]; g; g = g->next)
     {
-        const UBYTE *mrow = g->clut_mirror + y * w;
-        const UBYTE *krow = g->clut_mask + y * g->clut_pitch_mask;
-        int row_y = dy + y;
-        int span_start = -1;
-        UBYTE span_pen = 0;
-
-        for (x = 0; x <= w; x++)
-        {
-            int opaque = (x < w) && (krow[x >> 3] & (UBYTE)(0x80 >> (x & 7)));
-            UBYTE p = opaque ? mrow[x] : 0;
-
-            if (span_start < 0)
-            {
-                if (opaque)
-                {
-                    span_start = x;
-                    span_pen = p;
-                }
-            }
-            else if (!opaque || p != span_pen)
-            {
-                /* Flush span [span_start, x) */
-                SetAPen(rp, span_pen);
-
-                if (x - span_start == 1)
-                    WritePixel(rp, dx + span_start, row_y);
-                else
-                    RectFill(rp, dx + span_start, row_y, dx + x - 1, row_y);
-
-                if (opaque)
-                {
-                    span_start = x;
-                    span_pen = p;
-                }
-                else
-                {
-                    span_start = -1;
-                }
-            }
-        }
+        if (g->codepoint == TE_NOTFOUND_CP && g->style == 0)
+            return g;
     }
 
-    SetAPen(rp, savedPen);
+    g = te_make_notfound(dc);
+
+    if (!g)
+        return NULL;
+
+    g->next = dc->buckets[h];
+    dc->buckets[h] = g;
+
+    return g;
 }
 
-/* Direct RGBA blit for RTG screens using WritePixelArray (CGX)
- * Falls back to CLUT path if CyberGfx is not available */
-static void te_draw_rgba_rtg(struct TERenderContext *dc, struct TEGlyph *g, struct RastPort *rp, int penX, int baseY)
+/* Blend src over dst with alpha (0..255) */
+static UBYTE te_blend8(UBYTE s, UBYTE d, UBYTE a)
 {
-    int dx = penX + g->bearingX;
-    int dy = baseY - g->bearingY;
-    int w = g->width, h = g->height;
-    ULONG *line = NULL;
-    int x;
-    int y;
-
-    if (w <= 0 || h <= 0)
-        return;
-
-    cgx_probe();
-
-    if (!CyberGfxBase)
-    {
-        te_build_clut_mirror(dc, g);
-        te_draw_clut(dc, g, rp, penX, baseY);
-
-        return;
-    }
-
-    /* Glyph stored as RGBA; WritePixelArray with PIXFMT_ARGB32 wants
-     * 0xAARRGGBB in machine word order.  Repack in place is destructive
-     * instead allocate a transient line buffer */
-    line = (ULONG *)AllocVec((ULONG)w * 4UL, MEMF_PUBLIC);
-
-    if (!line)
-        return;
-
-    for (y = 0; y < h; y++)
-    {
-        UBYTE *s = g->data + y * g->pitch;
-
-        for (x = 0; x < w; x++)
-        {
-            UBYTE R = s[x * 4 + 0], G = s[x * 4 + 1], B = s[x * 4 + 2], A = s[x * 4 + 3];
-
-            /* If the pixel is fully transparent, write the current BG
-             * color so the glyph rectangle is solid. This matches
-             * Move()+Text() semantics where the cell is filled */
-            if (A == 0)
-            {
-                line[x] = (((ULONG)0xFF) << 24) | (((ULONG)((dc->bgRGB >> 16) & 0xFF)) << 16) | (((ULONG)((dc->bgRGB >> 8) & 0xFF)) << 8) | ((ULONG)((dc->bgRGB) & 0xFF));
-            }
-            else if (A == 0xFF)
-            {
-                line[x] = (((ULONG)0xFF) << 24) | (((ULONG)R) << 16) | (((ULONG)G) << 8) | (ULONG)B;
-            }
-            else
-            {
-                /* alpha blend over bgRGB */
-                UBYTE bR = (UBYTE)((dc->bgRGB >> 16) & 0xFF);
-                UBYTE bG = (UBYTE)((dc->bgRGB >> 8) & 0xFF);
-                UBYTE bB = (UBYTE)(dc->bgRGB & 0xFF);
-                UBYTE oR = (UBYTE)((R * A + bR * (255 - A)) / 255);
-                UBYTE oG = (UBYTE)((G * A + bG * (255 - A)) / 255);
-                UBYTE oB = (UBYTE)((B * A + bB * (255 - A)) / 255);
-
-                line[x] = (((ULONG)0xFF) << 24) | (((ULONG)oR) << 16) | (((ULONG)oG) << 8) | (ULONG)oB;
-            }
-        }
-
-        WritePixelArray((APTR)line, 0, 0, (UWORD)(w * 4), rp, (UWORD)dx, (UWORD)(dy + y), (UWORD)w, 1, PIXFMT_ARGB32);
-    }
-
-    FreeVec(line);
+    /* out = (src * (a+1) + dst * (255-a)) >> 8. Max error 1 LSB */
+    return (UBYTE)(((ULONG)s * ((ULONG)a + 1UL) + (ULONG)d * (ULONG)(255 - a)) >> 8);
 }
 
-static int te_aa_ensure_buf(struct TERenderContext *dc, int w, int h)
+/* Draw one MONO glyph through BltTemplate. Caller must ensure FgPen is text colour and DrMd is JAM1 (or JAM2 + matching BgPen) */
+static void te_draw_mono(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int dx, int dy)
 {
-    ULONG need = (ULONG)w * (ULONG)h;
-    ULONG *t;
-
-    if (need <= dc->aa_buf_size && dc->aa_buf)
-        return 1;
-
-    /* Grow (never shrink) so subsequent glyphs reuse the allocation. */
-    if (dc->aa_buf)
-    {
-        FreeVec(dc->aa_buf);
-
-        dc->aa_buf = NULL;
-        dc->aa_buf_size = 0;
-    }
-
-    t = (ULONG *)AllocVec(need * 4UL, MEMF_PUBLIC);
-
-    if (!t)
-        return 0;
-
-    dc->aa_buf = t;
-    dc->aa_buf_size = need;
-    return 1;
-}
-
-/* TODO */
-static int te_aa_lock_begin(struct TERenderContext *dc, struct RastPort *rp)
-{
-    if (!dc)
-        return 0;
-
-    return 0;
-}
-
-static void te_aa_lock_end(struct TERenderContext *dc)
-{
-}
-
-/* Alpha-blend a GRAY glyph into the RastPort using Read+Blend+Write
- * dx/dy are RastPort-local coordinates as the caller already computes
- * them (penX + bearingX, baseY - bearingY). Layer translation and
- * clipping are handled by the CGX driver */
-static int te_aa_blend_gray(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int dx, int dy)
-{
-    int x, y;
+    int srcx = 0, srcy = 0;
     int w, h;
-    LONG read_ok;
-    UBYTE fR, fG, fB;
-    ULONG *buf;
 
-    if (!dc || !rp || !g || !g->data)
-        return 0;
+    (void)dc;
 
-    if (dc->aa_disabled)
-        return 0;
-
-    if (!CyberGfxBase)
-    {
-        cgx_probe();
-        if (!CyberGfxBase)
-            return 0;
-    }
+    if (!g || !g->data || g->width <= 0 || g->height <= 0)
+        return;
 
     w = g->width;
     h = g->height;
 
-    if (w <= 0 || h <= 0)
-        return 1; /* SPACE etc., nothing to draw but not a failure */
-
-    if (!te_aa_ensure_buf(dc, w, h))
-        return 0;
-
-    buf = dc->aa_buf;
-
-    /* Read current screen pixels under the glyph rectangle into
-     * the ARGB32 buffer.  The driver clips automatically to the Layer's
-     * visible region, so pixels outside the window are left untouched
-     * (the read may return them zeroed -- that's fine since we'll only
-     * write pixels we actually modify) */
-    read_ok = ReadPixelArray((APTR)buf, 0, 0, (UWORD)(w * 4), rp, (UWORD)dx, (UWORD)dy, (UWORD)w, (UWORD)h, PIXFMT_ARGB32);
-
-    if (!read_ok)
+    /* Trivial bounds clip vs rastport extents. Layers handle the rest */
+    if (rp->Layer)
     {
-        /* Driver doesn't support ReadPixelArray with ARGB32 on this
-         * screen. Disable AA so we don't try again */
-        dc->aa_disabled = 1;
-        return 0;
+        int lw = rp->Layer->bounds.MaxX - rp->Layer->bounds.MinX + 1;
+        int lh = rp->Layer->bounds.MaxY - rp->Layer->bounds.MinY + 1;
+
+        if (dx < 0)
+        {
+            srcx = -dx;
+            w += dx;
+            dx = 0;
+        }
+        if (dy < 0)
+        {
+            srcy = -dy;
+            h += dy;
+            dy = 0;
+        }
+        if (dx + w > lw)
+            w = lw - dx;
+        if (dy + h > lh)
+            h = lh - dy;
     }
 
-    fR = (UBYTE)((dc->fgRGB >> 16) & 0xFF);
-    fG = (UBYTE)((dc->fgRGB >> 8) & 0xFF);
-    fB = (UBYTE)(dc->fgRGB & 0xFF);
+    if (w <= 0 || h <= 0)
+        return;
 
-    /* Blend foreground colour into buffer using the glyph alpha
-     * Pixels with alpha==0 are skipped entirely (preserves whatever was
-     * read for the background). Pixels with alpha==255 take fg
-     * directly. Everything else is interpolated */
-    for (y = 0; y < h; y++)
+    BltTemplate((PLANEPTR)(g->data + srcy * g->pitch), srcx, g->pitch, rp, dx, dy, w, h);
+}
+
+/* CLUT (AGA) path: write each glyph pixel through SetAPen+WritePixel. Slow but correct on any indexed-colour screen */
+static void te_draw_indexed_pixels(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int dx, int dy)
+{
+    int x, y;
+    int gw = g->width;
+    int gh = g->height;
+
+    if (!dc->aaRampValid)
+        te_rebuild_aa_ramp(dc);
+
+    for (y = 0; y < gh; y++)
     {
         const UBYTE *srow = g->data + (ULONG)y * (ULONG)g->pitch;
-        ULONG *drow = buf + (ULONG)y * (ULONG)w;
 
-        for (x = 0; x < w; x++)
+        for (x = 0; x < gw; x++)
         {
-            UBYTE a = srow[x];
-            ULONG pix;
-
-            if (a == 0)
-                continue;
-
-            if (a == 255)
+            if (g->format == FMT_GRAY)
             {
-                drow[x] = 0xFF000000UL | ((ULONG)fR << 16) | ((ULONG)fG << 8) | (ULONG)fB;
-                continue;
+                UBYTE a = srow[x];
+                int level;
+
+                if (!a)
+                    continue;
+
+                level = (int)a >> 4; /* 0..15 */
+
+                if (level > 15)
+                    level = 15;
+
+                SetAPen(rp, dc->aaRamp[level]);
+                WritePixel(rp, dx + x, dy + y);
             }
-
-            /* Existing pixel: ARGB32 -> extract bytes */
-            pix = drow[x];
+            else if (g->format == FMT_RGBA)
             {
-                UBYTE dr = (UBYTE)((pix >> 16) & 0xFF);
-                UBYTE dg = (UBYTE)((pix >> 8) & 0xFF);
-                UBYTE db = (UBYTE)(pix & 0xFF);
-                ULONG ap1 = (ULONG)a + 1UL;
-                ULONG inv = (ULONG)(255 - a);
+                const UBYTE *sp = srow + (ULONG)x * 4UL;
+                UBYTE a = sp[3];
+                int pen;
 
-                dr = (UBYTE)(((ULONG)fR * ap1 + (ULONG)dr * inv) >> 8);
-                dg = (UBYTE)(((ULONG)fG * ap1 + (ULONG)dg * inv) >> 8);
-                db = (UBYTE)(((ULONG)fB * ap1 + (ULONG)db * inv) >> 8);
+                if (!a)
+                    continue;
 
-                drow[x] = 0xFF000000UL | ((ULONG)dr << 16) | ((ULONG)dg << 8) | (ULONG)db;
+                /* For semi-transparent pixels approximate by mixing with bg colour */
+                if (a < 0xFF)
+                {
+                    UBYTE br = (UBYTE)((dc->bgARGB >> 16) & 0xFF);
+                    UBYTE bg = (UBYTE)((dc->bgARGB >> 8) & 0xFF);
+                    UBYTE bb = (UBYTE)(dc->bgARGB & 0xFF);
+
+                    UBYTE rr = te_blend8(sp[0], br, a);
+                    UBYTE gg = te_blend8(sp[1], bg, a);
+                    UBYTE bbb = te_blend8(sp[2], bb, a);
+
+                    pen = te_pen_for_rgb(dc, rr, gg, bbb);
+                }
+                else
+                {
+                    pen = te_pen_for_rgb(dc, sp[0], sp[1], sp[2]);
+                }
+
+                SetAPen(rp, pen);
+                WritePixel(rp, dx + x, dy + y);
+            }
+        }
+    }
+}
+
+/* RTG path for GRAY / RGBA glyphs. Uses WritePixelArray for truecolor screens. We compose glyph into RGB24 scratch buffer, then single WritePixelArray call to CGX */
+static void te_draw_rtg(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int dx, int dy)
+{
+    int gw, gh;
+    int sx0, sy0, sx1, sy1;
+    int dxc, dyc, dwc, dhc;
+    UBYTE fr, fgc, fb;
+    UBYTE br, bgc, bb;
+    UBYTE *buf;
+    ULONG need;
+    int x, y;
+
+    if (!g || !g->data || g->width <= 0 || g->height <= 0)
+        return;
+
+    gw = g->width;
+    gh = g->height;
+
+    /* Source rect inside the glyph; defaults to whole glyph */
+    sx0 = 0;
+    sy0 = 0;
+    sx1 = gw;
+    sy1 = gh;
+    dxc = dx;
+    dyc = dy;
+
+    /* WritePixelArray handles clipping internally via its layer handshake */
+    dwc = sx1 - sx0;
+    dhc = sy1 - sy0;
+
+    if (dwc <= 0 || dhc <= 0)
+        return;
+
+    /* Ensure the scratch buffer is big enough for dwc * dhc RGB24
+     * pixels.  Grow only -- subsequent glyphs reuse the allocation */
+    need = (ULONG)dwc * (ULONG)dhc * 3UL;
+
+    if (need > dc->scratchBytes)
+    {
+        if (dc->scratch)
+            FreeVec(dc->scratch);
+
+        dc->scratch = (UBYTE *)AllocVec(need, MEMF_PUBLIC);
+
+        if (!dc->scratch)
+        {
+            dc->scratchBytes = 0;
+            return;
+        }
+
+        dc->scratchBytes = need;
+    }
+
+    buf = dc->scratch;
+
+    /* Pre-resolve fg / bg as 0-255 channels */
+    fr = (UBYTE)((dc->textARGB >> 16) & 0xFF);
+    fgc = (UBYTE)((dc->textARGB >> 8) & 0xFF);
+    fb = (UBYTE)(dc->textARGB & 0xFF);
+    br = (UBYTE)((dc->bgARGB >> 16) & 0xFF);
+    bgc = (UBYTE)((dc->bgARGB >> 8) & 0xFF);
+    bb = (UBYTE)(dc->bgARGB & 0xFF);
+
+    if (g->format == FMT_MONO)
+    {
+        /* MONO: 1-bit MSB-first input. Expand to RGB24 with fg/bg colours. Paint whole rectangle because BltTemplate-style "leave background alone" doesn't survive WritePixelArray */
+        for (y = 0; y < dhc; y++)
+        {
+            const UBYTE *srow = g->data + (ULONG)(sy0 + y) * (ULONG)g->pitch;
+            UBYTE *drow = buf + (ULONG)y * (ULONG)dwc * 3UL;
+
+            for (x = 0; x < dwc; x++)
+            {
+                int sx = sx0 + x;
+                int byte = sx >> 3;
+                int bit = 7 - (sx & 7);
+                UBYTE on = (UBYTE)((srow[byte] >> bit) & 1);
+
+                drow[x * 3 + 0] = on ? fr : br;
+                drow[x * 3 + 1] = on ? fgc : bgc;
+                drow[x * 3 + 2] = on ? fb : bb;
+            }
+        }
+    }
+    else if (g->format == FMT_GRAY)
+    {
+        /* GRAY = single-channel coverage; interpolate fg<->bg by alpha */
+        for (y = 0; y < dhc; y++)
+        {
+            const UBYTE *srow = g->data + (ULONG)(sy0 + y) * (ULONG)g->pitch;
+            UBYTE *drow = buf + (ULONG)y * (ULONG)dwc * 3UL;
+
+            for (x = 0; x < dwc; x++)
+            {
+                UBYTE a = srow[sx0 + x];
+
+                drow[x * 3 + 0] = te_blend8(fr, br, a);
+                drow[x * 3 + 1] = te_blend8(fgc, bgc, a);
+                drow[x * 3 + 2] = te_blend8(fb, bb, a);
+            }
+        }
+    }
+    else /* FMT_RGBA */
+    {
+        for (y = 0; y < dhc; y++)
+        {
+            const UBYTE *srow = g->data + (ULONG)(sy0 + y) * (ULONG)g->pitch;
+            UBYTE *drow = buf + (ULONG)y * (ULONG)dwc * 3UL;
+
+            for (x = 0; x < dwc; x++)
+            {
+                const UBYTE *sp = srow + (ULONG)(sx0 + x) * 4UL;
+                UBYTE a = sp[3];
+
+                drow[x * 3 + 0] = te_blend8(sp[0], br, a);
+                drow[x * 3 + 1] = te_blend8(sp[1], bgc, a);
+                drow[x * 3 + 2] = te_blend8(sp[2], bb, a);
             }
         }
     }
 
-    /* Write the modified rectangle back.  CGX handles
-     * format conversion and Layer clipping. */
-    WritePixelArray((APTR)buf, 0, 0, (UWORD)(w * 4), rp, (UWORD)dx, (UWORD)dy, (UWORD)w, (UWORD)h, PIXFMT_ARGB32);
-
-    return 1;
+    /* One WritePixelArray for whole glyph. No lock, no per-pixel SetAPen */
+    WritePixelArray(buf,
+                    0, 0,
+                    dwc * 3,
+                    rp,
+                    dxc, dyc,
+                    dwc, dhc,
+                    RECTFMT_RGB);
 }
 
 static void te_draw_glyph(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int penX, int baseY)
 {
-    if (!g)
+    int dx, dy;
+
+    if (!g || g->width <= 0 || g->height <= 0)
         return;
 
-    /* SPACE etc. no ink */
-    if (g->width == 0 || g->height == 0)
-        return;
+    dx = penX + g->bearingX;
+    dy = baseY - g->bearingY;
 
+    /* On RTG truecolor screens, BltTemplate is unreliable -- it depends on planar-style hardware that CyberGraphX/P96 may emulate poorly. So route MONO through te_draw_rtg too */
     if (g->format == FMT_MONO)
     {
-        te_draw_mono(g, rp, penX, baseY);
-        return;
-    }
-
-    /* RGBA (color emoji) on RTG: keep the dedicated CGX path */
-    if (g->format == FMT_RGBA && dc->screenIsRTG)
-    {
-        te_draw_rgba_rtg(dc, g, rp, penX, baseY);
-        return;
-    }
-
-    /* GRAY (anti-aliased) format. Three-tier fallback:
-     *   1. Read-Modify-Write blend (RTG, ARGB32) -- real AA over the
-     *      current screen contents. Driver-agnostic, uses public CGX
-     *      APIs only.
-     *   2. CLUT path with grayPens for indexed (AGA) screens
-     *   3. MONO-threshold via BltTemplate as last-resort so something
-     *      always shows even if both fast paths refuse */
-    if (g->format == FMT_GRAY)
-    {
-        if (dc->screenIsRTG && !dc->aa_disabled)
+        if (dc->screenIsRTG && CyberGfxBase)
         {
-            int dx = penX + g->bearingX;
-            int dy = baseY - g->bearingY;
-
-            if (te_aa_blend_gray(dc, rp, g, dx, dy))
-                return;
-        }
-
-        if (dc->colorMapValid && !dc->screenIsRTG)
-        {
-            te_build_clut_mirror(dc, g);
-            te_draw_clut(dc, g, rp, penX, baseY);
+            te_draw_rtg(dc, rp, g, dx, dy);
             return;
         }
 
-        /* Safety net */
-        te_draw_gray_as_mono(g, rp, penX, baseY);
+        te_draw_mono(dc, rp, g, dx, dy);
         return;
     }
 
-    /* Indexed colour path -- CLUT-remapped mirror for non-MONO, non-GRAY
-     * formats that didn't take the RTG fast path above */
-    if (!dc->colorMapValid)
+    /* GRAY / RGBA: WritePixelArray works on every CGX-managed screen, and crucially locks the Layer internally so Intuition can't race with us mid-glyph */
+    if (dc->screenIsRTG && CyberGfxBase)
+    {
+        te_draw_rtg(dc, rp, g, dx, dy);
         return;
+    }
 
-    te_build_clut_mirror(dc, g);
-    te_draw_clut(dc, g, rp, penX, baseY);
+    /* Last-resort fallback: pure AGA without any CGX driver. Per-pixel SetAPen + WritePixel; hold Layer lock around whole glyph */
+    if (rp->Layer)
+        LockLayer(0, rp->Layer);
+
+    te_draw_indexed_pixels(dc, rp, g, dx, dy);
+
+    if (rp->Layer)
+        UnlockLayer(rp->Layer);
 }
 
-/* Fallback chain glyph fetch */
-static struct TEGlyph *te_glyph_from_chain(struct TERenderContext *dc, ULONG cp, struct TEFont **font_used)
+/* UTF-8 decode (single codepoint) */
+static int te_decode_utf8(const UBYTE *p, const UBYTE *end, ULONG *cp_out, int *consumed_out)
 {
-    struct TEFont *f;
-    struct TEGlyph *g;
+    ULONG cp = 0;
+    int n = 0;
+    UBYTE b;
 
-    *font_used = NULL;
+    if (!p || p >= end)
+        return 0;
 
-    for (f = dc->fonts; f; f = f->next)
+    b = *p;
+
+    if (b < 0x80)
     {
-        if (!f->face)
-            continue;
+        cp = b;
+        n = 1;
+    }
+    else if ((b & 0xE0) == 0xC0)
+    {
+        if (p + 2 > end)
+            return 0;
 
-        if (FT_Get_Char_Index(f->face, (FT_ULong)cp) == 0)
-            continue;
+        cp = ((ULONG)b & 0x1F) << 6;
+        cp |= (ULONG)p[1] & 0x3F;
 
-        g = te_glyph_get(dc, f, cp);
+        n = 2;
+    }
+    else if ((b & 0xF0) == 0xE0)
+    {
+        if (p + 3 > end)
+            return 0;
 
-        if (g)
-        {
-            *font_used = f;
-            return g;
-        }
+        cp = ((ULONG)b & 0x0F) << 12;
+        cp |= ((ULONG)p[1] & 0x3F) << 6;
+        cp |= (ULONG)p[2] & 0x3F;
+
+        n = 3;
+    }
+    else if ((b & 0xF8) == 0xF0)
+    {
+        if (p + 4 > end)
+            return 0;
+
+        cp = ((ULONG)b & 0x07) << 18;
+        cp |= ((ULONG)p[1] & 0x3F) << 12;
+        cp |= ((ULONG)p[2] & 0x3F) << 6;
+        cp |= (ULONG)p[3] & 0x3F;
+
+        n = 4;
+    }
+    else
+    {
+        /* Invalid lead byte; consume one and return replacement.*/
+        cp = 0xFFFDUL;
+        n = 1;
     }
 
-    /* try U+FFFD as a last resort */
-    for (f = dc->fonts; f; f = f->next)
-    {
-        if (!f->face)
-            continue;
+    *cp_out = cp;
+    *consumed_out = n;
 
-        if (FT_Get_Char_Index(f->face, TE_REPLACEMENT_CP) == 0)
-            continue;
-
-        g = te_glyph_get(dc, f, TE_REPLACEMENT_CP);
-
-        if (g)
-        {
-            *font_used = f;
-            return g;
-        }
-    }
-
-    return NULL;
+    return 1;
 }
 
-/* Measurement */
+void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDrawPosition *pos, CONST_STRPTR utf8, ULONG maxChars)
+{
+    const UBYTE *p, *end;
+    ULONG count = 0;
+    int penX, penY;
+
+    if (!rp || !dc || !pos || !utf8 || dc->numFonts <= 0)
+        return;
+
+    p = (const UBYTE *)utf8;
+    end = p + strlen((const char *)utf8);
+
+    penX = pos->x;
+    penY = pos->y;
+
+    while (p < end)
+    {
+        ULONG cp;
+        int consumed = 0;
+        struct TEGlyph *g;
+
+        if (maxChars != (ULONG)-1 && count >= maxChars)
+            break;
+
+        if (!te_decode_utf8(p, end, &cp, &consumed))
+            break;
+
+        p += consumed;
+        count++;
+
+        if (cp == 0)
+            break;
+
+        if (cp == 0x0A || cp == 0x0D)
+            continue;
+
+        if (cp == 0x09)
+        {
+            penX += (int)(dc->fonts[0].height / 2) * (int)dc->tabSpaces;
+            continue;
+        }
+
+        g = te_get_glyph(dc, cp);
+
+        if (!g)
+        {
+            /* Try replacement char in the chain */
+            g = te_get_glyph(dc, TE_REPLACEMENT_CP);
+
+            if (!g)
+                g = te_get_notfound(dc);
+        }
+
+        if (!g)
+            continue;
+
+        te_draw_glyph(dc, rp, g, penX, penY);
+
+        penX += g->advance > 0 ? g->advance : g->width;
+    }
+
+    pos->x = (WORD)penX;
+    pos->y = (WORD)penY;
+}
+
 void TE_GetMetrics(struct TERenderContext *dc, struct TEGlyphMetrics *out)
 {
     struct TEFont *primary;
+    int advance = 0;
+    FT_UInt gi;
 
-    if (!out)
+    if (!dc || !out)
         return;
 
-    out->width = 0;
-    out->height = 0;
-    out->baseX = 0;
-    out->baseY = 0;
-
-    if (!dc)
-        return;
-
-    primary = dc->fonts;
-
-    if (primary)
+    if (dc->numFonts <= 0)
     {
-        out->height = (WORD)(primary->ascender + primary->descender);
-        out->baseY = primary->ascender;
+        out->width = 8;
+        out->height = 16;
+        out->baseX = 0;
+        out->baseY = 12;
+        return;
     }
+
+    primary = &dc->fonts[0];
+
+    /* Cell advance derived from primary's M glyph (or X as fallback). This is what callers use as monospace cell width */
+    if (primary->face)
+    {
+        gi = FT_Get_Char_Index(primary->face, 'M');
+
+        if (gi && FT_Load_Glyph(primary->face, gi, FT_LOAD_DEFAULT) == 0)
+            advance = (int)(primary->face->glyph->metrics.horiAdvance >> 6);
+
+        if (advance <= 0)
+            advance = (int)(primary->face->size->metrics.max_advance >> 6);
+
+        if (advance > 0)
+            advance = (advance * primary->scaleNum + primary->scaleDen / 2) / primary->scaleDen;
+    }
+
+    if (advance <= 0)
+        advance = (int)primary->pointSize / 2;
+
+    out->width = (WORD)advance;
+    out->height = (WORD)primary->height;
+    out->baseX = 0;
+    out->baseY = (WORD)primary->ascender;
 }
 
 void TE_MeasureText(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars, struct TEGlyphMetrics *out)
 {
     const UBYTE *p, *end;
     LONG count = 0;
-    LONG w = 0, lineW = 0, lines = 1;
-    struct TEGlyphMetrics lm;
+    int width = 0;
 
-    if (!out)
+    if (!dc || !utf8 || !out)
         return;
-
-    out->width = 0;
-    out->height = 0;
-    out->baseX = 0;
-    out->baseY = 0;
-
-    if (!dc || !utf8)
-        return;
-
-    TE_GetMetrics(dc, &lm);
 
     p = (const UBYTE *)utf8;
     end = p + strlen((const char *)utf8);
@@ -2085,86 +1846,44 @@ void TE_MeasureText(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars
     while (p < end)
     {
         ULONG cp;
-        int n;
+        int consumed = 0;
         struct TEGlyph *g;
-        struct TEFont *uf;
 
         if (maxChars >= 0 && count >= maxChars)
             break;
 
-        if (!te_decode_utf8(p, end, &cp, &n))
+        if (!te_decode_utf8(p, end, &cp, &consumed))
             break;
 
-        p += n;
+        p += consumed;
         count++;
 
-        if (cp == '\n')
-        {
-            if (lineW > w)
-                w = lineW;
-
-            lineW = 0;
-            lines++;
-
+        if (cp == 0 || cp == 0x0A || cp == 0x0D)
             continue;
-        }
 
-        if (cp == '\t')
-        {
-            int adv = (int)dc->tabSpaces * (dc->fonts ? dc->fonts->monospace_advance : 8);
+        g = te_get_glyph(dc, cp);
 
-            lineW += adv;
-            continue;
-        }
-
-        g = te_glyph_from_chain(dc, cp, &uf);
+        if (!g)
+            g = te_get_notfound(dc);
 
         if (g)
-            lineW += g->advance;
-        else
-        {
-            /* No glyph available -- use a default width consistent with the
-             * fallback advance in TE_RenderText (1 or 2 cells based on
-             * codepoint range) */
-            int adv = dc->fonts ? dc->fonts->monospace_advance : 8;
-            /*int wide = ((cp >= 0x1100 && cp <= 0x115F) ||
-                        (cp >= 0x2190 && cp <= 0x21FF) ||
-                        (cp >= 0x2600 && cp <= 0x26FF) ||
-                        (cp >= 0x2700 && cp <= 0x27BF) ||
-                        (cp >= 0x2B00 && cp <= 0x2BFF) ||
-                        (cp >= 0x2E80 && cp <= 0xA4CF) ||
-                        (cp >= 0xAC00 && cp <= 0xD7A3) ||
-                        (cp >= 0xF900 && cp <= 0xFAFF) ||
-                        (cp >= 0xFE30 && cp <= 0xFE6F) ||
-                        (cp >= 0xFF00 && cp <= 0xFF60) ||
-                        (cp >= 0x1F300UL && cp <= 0x1F9FFUL) ||
-                        (cp >= 0x20000UL && cp <= 0x3FFFDUL));*/
-
-            wchar_t wc = (wchar_t)cp;
-            int wide = (wcswidth(&wc, 1) == 2);
-
-            lineW += wide ? (2 * adv) : adv;
-        }
+            width += g->advance > 0 ? g->advance : g->width;
     }
 
-    if (lineW > w)
-        w = lineW;
-
-    out->width = (WORD)w;
-    out->height = (WORD)(lm.height * lines);
-    out->baseY = lm.baseY;
+    out->width = (WORD)width;
+    out->height = (WORD)(dc->numFonts > 0 ? dc->fonts[0].height : 16);
+    out->baseX = 0;
+    out->baseY = (WORD)(dc->numFonts > 0 ? dc->fonts[0].ascender : 12);
 }
 
 void TE_GetCharOffsets(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars, LONG *arrayout)
 {
     const UBYTE *p, *end;
     LONG count = 0;
-    LONG acc = 0;
+    int width = 0;
 
-    if (!arrayout || !dc || !utf8)
+    if (!dc || !utf8 || !arrayout)
         return;
-
-    arrayout[0] = 0;
 
     p = (const UBYTE *)utf8;
     end = p + strlen((const char *)utf8);
@@ -2172,166 +1891,36 @@ void TE_GetCharOffsets(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxCh
     while (p < end)
     {
         ULONG cp;
-        int n;
+        int consumed = 0;
         struct TEGlyph *g;
-        struct TEFont *uf;
 
-        if (maxChars >= 0 && count + 1 >= maxChars)
+        if (maxChars >= 0 && count >= maxChars)
             break;
 
-        if (!te_decode_utf8(p, end, &cp, &n))
+        if (!te_decode_utf8(p, end, &cp, &consumed))
             break;
 
-        p += n;
+        p += consumed;
 
-        if (cp == '\t')
+        if (cp == 0)
+            break;
+
+        arrayout[count] = width;
+
+        if (cp != 0x0A && cp != 0x0D)
         {
-            acc += (LONG)dc->tabSpaces * (dc->fonts ? dc->fonts->monospace_advance : 8);
-        }
-        else if (cp == '\n')
-        {
-            /* Offsets across newlines are not really meaningful; reset */
-            acc = 0;
-        }
-        else
-        {
-            g = te_glyph_from_chain(dc, cp, &uf);
+            g = te_get_glyph(dc, cp);
+
+            if (!g)
+                g = te_get_notfound(dc);
 
             if (g)
-                acc += g->advance;
+                width += g->advance > 0 ? g->advance : g->width;
         }
 
         count++;
-        arrayout[count] = acc;
-    }
-}
-
-/* Public draw entry point */
-void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDrawPosition *pos, CONST_STRPTR utf8, ULONG maxChars)
-{
-    const UBYTE *p, *end;
-    ULONG count = 0;
-    int penX, baseY;
-
-    if (!rp || !dc || !pos || !utf8)
-        return;
-
-    if (!dc->fonts)
-        return;
-
-    /* Update CLUT once per draw call in case the screen/palette has
-     * changed since SetDrawScreen() was last called */
-    if (rp->BitMap)
-    {
-        struct Screen *sc = NULL;
-
-        if (rp->Layer && rp->Layer->LayerInfo)
-            /* layer has no direct screen pointer; rely on dc->screen */
-            sc = dc->screen;
-        else
-            sc = dc->screen;
-
-        if (sc && !dc->colorMapValid)
-            TE_SetScreen(dc, sc);
     }
 
-    /* AA path: try to lock the destination bitmap once for the whole
-     * string. If it works, te_draw_glyph() will blend each GRAY glyph
-     * directly into bitmap memory in the screen's native pixel format
-     * If the lock fails (unsupported format, planar bitmap, etc.) the
-     * per-glyph fallback chain (CLUT or MONO threshold) is used */
-    te_aa_lock_begin(dc, rp);
-
-    penX = pos->x;
-    baseY = pos->y;
-
-    p = (const UBYTE *)utf8;
-    end = p + strlen((const char *)utf8);
-
-    while (p < end)
-    {
-        ULONG cp;
-        int n;
-        struct TEGlyph *g;
-        struct TEFont *uf;
-
-        if (maxChars != (ULONG)-1 && count >= maxChars)
-            break;
-
-        if (!te_decode_utf8(p, end, &cp, &n))
-            break;
-
-        p += n;
-        count++;
-
-        if (cp == '\t')
-        {
-            int adv = (int)dc->tabSpaces * (dc->fonts ? dc->fonts->monospace_advance : 8);
-
-            penX += adv;
-            continue;
-        }
-
-        /* Drawing newlines is a no-op -- caller positions the next line */
-        if (cp == '\n' || cp == '\r')
-            continue;
-
-        g = te_glyph_from_chain(dc, cp, &uf);
-
-        if (!g)
-        {
-            /* Font has no glyph for this codepoint -- not even U+FFFD
-             * Advance the pen by the expected visual width so subsequent
-             * glyphs stay aligned with the editor's cell grid.  Use 2*fw
-             * for codepoints that the editor would have placed as a wide
-             * (lead+trailing) cell.  This duplicates the wcswidth wide
-             * ranges from ui_editor_helper.c -- keep them in sync */
-            int adv = dc->fonts ? dc->fonts->monospace_advance : 8;
-            /*int wide = ((cp >= 0x1100 && cp <= 0x115F) ||
-                        (cp >= 0x2190 && cp <= 0x21FF) ||
-                        (cp >= 0x2600 && cp <= 0x26FF) ||
-                        (cp >= 0x2700 && cp <= 0x27BF) ||
-                        (cp >= 0x2B00 && cp <= 0x2BFF) ||
-                        (cp >= 0x2E80 && cp <= 0xA4CF) ||
-                        (cp >= 0xAC00 && cp <= 0xD7A3) ||
-                        (cp >= 0xF900 && cp <= 0xFAFF) ||
-                        (cp >= 0xFE30 && cp <= 0xFE6F) ||
-                        (cp >= 0xFF00 && cp <= 0xFF60) ||
-                        (cp >= 0x1F300UL && cp <= 0x1F9FFUL) ||
-                        (cp >= 0x20000UL && cp <= 0x3FFFDUL));*/
-
-            wchar_t wc = (wchar_t)cp;
-            int wide = (wcswidth(&wc, 1) == 2);
-
-            penX += wide ? (2 * adv) : adv;
-
-            continue;
-        }
-
-        te_draw_glyph(dc, rp, g, penX, baseY);
-
-        /* Advance. FIXEDWIDTH preferred; defensively fall back to
-         * monospace_advance if g->advance is zero or absurdly small
-         * (some fonts -- notably GNU Unifont in GRAY mode -- have been
-         * observed to return 0 for valid glyphs, which would stack every
-         * letter on the same X and produce an invisible run) */
-        if (dc->prefs & TE_FLAG_FIXEDWIDTH)
-            penX += dc->fonts->monospace_advance;
-
-        else if (g->advance > 0)
-            penX += g->advance;
-        else
-            penX += dc->fonts->monospace_advance;
-    }
-
-    /* Release the bitmap lock taken at the start of the function */
-    te_aa_lock_end(dc);
-
-    pos->x = (WORD)penX;
-}
-
-/* Cleanup helper exposed for the app's atexit hook (closes CGX if open) */
-void TE_GlobalCleanup(void)
-{
-    cgx_close();
+    if (maxChars < 0 || count < maxChars)
+        arrayout[count] = width;
 }

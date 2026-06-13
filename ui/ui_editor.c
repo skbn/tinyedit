@@ -84,23 +84,7 @@ static const char *HELP_LINES[] =
 };
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
 
-/* Soft-wrap viewport state
- * Forget about absolute visual row counts. We never compute "how many
- * visual rows are there from line 0 to line N" because that requires
- * scanning the whole document -- catastrophic in big files
- *
- * Instead the viewport is anchored by:
- *   - s_soft_top_line : the logical line at the top of the screen
- *   - s_soft_top_sub  : which sub-row of that line is the first one shown
- *                       (0 = first sub-row, 1 = second, etc)
- *
- * Cursor positioning, page up/down, arrow up/down, ensure-visible -- all
- * computed by walking O(distance) lines from the current cursor or the
- * viewport top. Distances are bounded by body_rows (or the requested
- * page size), so movements stay snappy on a 2-million-line file
- *
- * No prefix-sum cache. No scanning from line 0. Editing is also fast:
- * a typed character only re-wraps the current line */
+/* Soft-wrap viewport: anchored by top line/sub-row, O(distance) walking for performance */
 static int s_soft_top_line = 0;
 static int s_soft_top_sub = 0;
 static int s_soft_desired_vcol = -1;
@@ -111,10 +95,7 @@ void soft_reset_desired(void)
     s_soft_desired_vcol = -1;
 }
 
-/* Soft-wrap: returns the end of the current visual segment (exclusive)
- * Breaks at the last space boundary that fits within width columns
- * If no space fits (word longer than width), hard-cuts at visual boundary
- * The next segment starts exactly at the returned position - no chars skipped */
+/* Soft-wrap: break at last space or hard-cut at visual boundary */
 static int wrap_next(const wchar_t *line, int len, int width, int start)
 {
     int vcol = 0;
@@ -181,13 +162,7 @@ static int wrap_count(const wchar_t *line, int len, int width)
     return rows;
 }
 
-/* Sub-row geometry within a single logical line
- * Return the [seg_start, seg_end) wchar range for the target_sub
- * sub-row of line. Returns the actual number of sub-rows scanned
- * (i.e. min(target_sub + 1, total_subrows)). If target_sub is beyond
- * the line's sub-rows, returns the last sub-row
- *
- * O(target_sub * line_walk_cost) but bounded by the line length */
+/* Return wchar range for target sub-row, O(target_sub) bounded by line length */
 static int line_subrow_range(const wchar_t *l, int len, int width, int target_sub, int *seg_start, int *seg_end)
 {
     int pos = 0;
@@ -220,7 +195,7 @@ static int line_subrow_range(const wchar_t *l, int len, int width, int target_su
 }
 
 /* Returns the sub-row index inside line where the column col lives
- * Walks segments until col falls within one.  O(sub-rows in line) */
+ * Walks segments until col falls within one. O(sub-rows in line) */
 static int line_subrow_of_col(const wchar_t *l, int len, int width, int col)
 {
     int pos = 0;
@@ -242,6 +217,23 @@ static int line_subrow_of_col(const wchar_t *l, int len, int width, int col)
         pos = end;
         sub++;
     }
+}
+
+/* Reset soft-wrap viewport to cursor position
+ * Used by goto start/end to avoid slow walking from old viewport position */
+void soft_reset_viewport_to_cursor(TeApp *app, int width)
+{
+    EdInfo info;
+    const wchar_t *l;
+    int len;
+
+    ed_get_info(app->editor, &info);
+
+    l = ed_line_wcs(app->editor, info.row);
+    len = ed_line_len(app->editor, info.row);
+    s_soft_top_line = info.row;
+    s_soft_top_sub = line_subrow_of_col(l ? l : L"", l ? len : 0, width, info.col);
+    s_soft_desired_vcol = -1;
 }
 
 /* Walk N visual rows down/up from (from_line, from_sub). Clamps to doc
@@ -1874,7 +1866,6 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
 
         if (i2.block.active)
         {
-            ed_save_undo(app->editor);
             ed_block_delete(app->editor);
             te_status(app, "Block deleted");
         }
@@ -1893,7 +1884,6 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
 
         if (i2.block.active)
         {
-            ed_save_undo(app->editor);
             ed_block_delete(app->editor);
             te_status(app, "Block deleted");
         }
@@ -2026,7 +2016,6 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         return 1;
 
     case CTRL('Y'):
-        ed_save_undo(app->editor);
         ed_delete_line(app->editor);
         clear_search_highlights(app);
         return 1;
@@ -2038,19 +2027,16 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         return 1;
 
     case CTRL('T'):
-        ed_save_undo(app->editor);
         ed_delete_word_right(app->editor);
         clear_search_highlights(app);
         return 1;
 
     case CTRL('_'):
-        ed_save_undo(app->editor);
         ed_delete_word_left(app->editor);
         clear_search_highlights(app);
         return 1;
 
     case '\t':
-        ed_save_undo(app->editor);
         ed_insert_tab(app->editor, 4);
         clear_search_highlights(app);
         return 1;

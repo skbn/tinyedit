@@ -78,9 +78,7 @@ static int s_ttf_size = 14;
 static int s_ttf_antialias = 0;    /* 0=auto, 1=off, 2=on */
 static int s_ttf_use_utf8 = 1;     /* 0=UTF-16 BE (BMP only), 1=UTF-8 (full Unicode) */
 static int s_ttf_proportional = 0; /* 1 = render per-cell (proportional font detected) */
-static int s_ansi_mode = 0;        /* 1 = app is in ANSI-art viewing mode; draw block glyphs
-                                    * (U+2580..U+259F) via RectFill instead of TT_Text for
-                                    * pixel-perfect tiling */
+static int s_ansi_mode = 0;        /* 1 = ANSI-art mode: draw block glyphs (U+2580..U+259F) via RectFill */
 
 static int s_cursor_vis = 1;
 static int s_colors_on = 0;
@@ -89,13 +87,10 @@ static int s_echo_mode = 0;
 static int s_keypad_mode = 1;
 static int s_nodelay_mode = 0;
 
-/* Cursor outline pen (defaults to pen 1 = text). Configurable via
- * amiga_set_cursor_pen() so the app can pick a contrasting color */
+/* Cursor outline pen (default: pen 1). Configurable via amiga_set_cursor_pen() */
 static UBYTE s_cursor_pen = 1;
 
-/* Default fg/bg used when a cell has no color pair (pair == 0 or
- * unitialized). Configurable via amiga_set_default_colors(). Stored as
- * ncurses color indices (0..15), mapped to pens via s_pen[] in apply_colors */
+/* Default fg/bg for cells with no color pair. Stored as ncurses indices (0..15), mapped to pens via s_pen[] */
 static short s_default_fg = COLOR_WHITE;
 static short s_default_bg = 0; /* Updated dynamically from config */
 
@@ -134,8 +129,7 @@ static int px(int col) { return bx + col * fw; }
 
 static int py(int row) { return by + row * fh; }
 
-/* Convert UTF-32 codepoint to UTF-8 string. Returns number of bytes written (1-4)
- * Buffer must have at least 5 bytes */
+/* Convert UTF-32 codepoint to UTF-8 string. Returns bytes written (1-4). Buffer must have 5 bytes */
 static int utf32_to_utf8(uint32_t codepoint, char *buf)
 {
     if (codepoint <= 0x7F)
@@ -173,8 +167,7 @@ static int utf32_to_utf8(uint32_t codepoint, char *buf)
     return 3;
 }
 
-/* Compute dirty bitmap for row r into s_dirty_row[0..COLS-1]
- * Returns 1 if any cell in the row is dirty, 0 otherwise */
+/* Compute dirty bitmap for row r into s_dirty_row[0..COLS-1]. Returns 1 if dirty, 0 otherwise */
 static int compute_dirty_row(int r)
 {
     int c;
@@ -215,8 +208,7 @@ static int compute_dirty_row(int r)
         return 0;
     }
 
-    /* Pass 2: propagate dirty by ±SHADOW_BLEED_CELLS using a sweep with a
-     * running countdown — O(cols), no inner loop */
+    /* Pass 2: propagate dirty by ±SHADOW_BLEED_CELLS using sweep with countdown — O(cols) */
     for (c = 0; c < cols; c++)
     {
         if (s_dirty_tmp[c])
@@ -278,18 +270,7 @@ static void apply_colors(int pair, int attrs)
     SetDrMd(ami_rp, JAM2);
 }
 
-/* Direct block-glyph rendering (Unicode U+2580..U+259F).
- *
- * These 32 codepoints are precisely-defined geometric blocks/shades that
- * are MEANT to tile seamlessly to form solid shapes (ANSI art). TTF fonts
- * render them as actual glyphs, but the glyph height = ascender+descender
- * may be smaller than our cell height (which includes accent room for
- * Á, É, Ñ, etc.), leaving 1-2 px gaps between rows
- *
- * In ANSI viewing mode we bypass the font and draw these blocks ourselves
- * with RectFill / SetAfPt so they tile pixel-perfect, matching what topaz
- * does on the bitmap path. Bonus: faster than rasterizing through TTengine
- */
+/* Direct block-glyph rendering (U+2580..U+259F). Bypass font in ANSI mode for pixel-perfect tiling */
 static int is_block_glyph(uint32_t cp)
 {
     return (cp >= 0x2580 && cp <= 0x259F);
@@ -297,8 +278,7 @@ static int is_block_glyph(uint32_t cp)
 
 static void draw_block_glyph(uint32_t cp, int x, int y, int cw, int ch_, UBYTE fg)
 {
-    /* Standard Amiga area-fill patterns (16-pixel wide, 2-row repeating)
-     * We feed these to SetAfPt() so RectFill paints them */
+    /* Standard Amiga area-fill patterns (16-pixel wide, 2-row repeating). Fed to SetAfPt() for RectFill */
     static UWORD pat_25[2] = {0x8888, 0x2222}; /* ░ light shade  */
     static UWORD pat_50[2] = {0x5555, 0xAAAA}; /* ▒ medium shade (checker) */
     static UWORD pat_75[2] = {0x7777, 0xDDDD}; /* ▓ dark shade   */
@@ -475,9 +455,7 @@ static void render_cell(int row, int col, chtype ch, int attrs)
 
         if (wc >= 0x20)
         {
-            /* ANSI mode + block glyph → draw directly with RectFill so the
-             * block tiles seamlessly to its neighbors. Outside ANSI mode (or
-             * for any non-block char), fall through to normal TT_Text path */
+            /* ANSI mode + block glyph: draw directly with RectFill for seamless tiling. Otherwise use TT_Text */
             if (s_ansi_mode && is_block_glyph(wc))
             {
                 draw_block_glyph(wc, x, y, fw, fh, saved);
@@ -515,10 +493,7 @@ static void render_cell(int row, int col, chtype ch, int attrs)
 
 static void shadow_invalidate() { s_shadow_dirty = 1; }
 
-/* Full screen redraw from cell buffer (diff against
- * shadow buffer to minimise expensive AmigaOS RectFill+Text per cell)
- * Run-length: groups contiguous changed cells with same color/attrs into one
- * RectFill+Text instead of per-cell -- ~10x fewer graphics calls on 68k */
+/* Full screen redraw from cell buffer (diff vs shadow). Run-length groups contiguous changed cells with same color/attrs into one call -- ~10x fewer graphics calls on 68k */
 static void render_all();
 
 /* Force complete redraw (call after font change) */
@@ -556,8 +531,7 @@ static void render_all()
 
     for (r = 0; r < LINES; r++)
     {
-        /* Compute dirty bitmap with bleed propagation for this row. If nothing
-         * is dirty, skip the row entirely */
+        /* Compute dirty bitmap with bleed propagation. Skip row if nothing dirty */
         if (!compute_dirty_row(r))
             continue;
 
@@ -599,9 +573,7 @@ static void render_all()
                 if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
                     break;
 
-                /* run_buf is used in bitmap mode (8-bit only). For TTF mode
-                 * we ALSO build urun[] below from cc->ch directly, preserving
-                 * the full BMP codepoint */
+                /* run_buf is for bitmap mode (8-bit only). For TTF mode we build urun[] from cc->ch to preserve full BMP codepoint */
                 run_buf[run_len++] = (char)(cc->ch & 0xFF);
 
                 if (s_shadow)
@@ -644,8 +616,7 @@ static void render_all()
 
             if (s_use_ttf)
             {
-                /* Per-cell render is needed if the font is proportional or if
-                 * we are in ANSI mode */
+                /* Per-cell render needed for proportional fonts or ANSI mode */
                 if (s_ttf_proportional || s_ansi_mode)
                 {
                     int u;
@@ -660,9 +631,7 @@ static void render_all()
                         /*if (wc < 0x20)
                             wc = (uint32_t)' ';*/
 
-                        /* Re-clear this cell's exact rectangle so any spillover
-                         * from a wider neighbor glyph in the previous frame is
-                         * erased before we render the current glyph */
+                        /* Re-clear cell rectangle to erase spillover from wider neighbor glyph in previous frame */
                         saved2 = ami_rp->FgPen;
                         fg_pen = saved2; /* current FgPen is the cell's foreground */
 
@@ -696,10 +665,7 @@ static void render_all()
                 }
                 else if (s_ttf_use_utf8)
                 {
-                    /* MONOSPACE + UTF-8: batched render of all cells in one
-                     * TT_Text call. Build UTF-8 buffer from the original cell
-                     * ch values (not from run_buf which is truncated to 8 bits)
-                     * to preserve full Unicode codepoints */
+                    /* MONOSPACE + UTF-8: batched render in one TT_Text call. Build UTF-8 buffer from original cell ch values (not run_buf) to preserve full Unicode */
                     static char urun[2048]; /* 512 chars * 4 bytes max UTF-8 */
                     int u;
                     int urun_len = 0;
@@ -753,10 +719,7 @@ static void render_all()
 
     s_shadow_dirty = 0;
 
-    /* Cursor handling -- track previous cursor cell so we can redraw it
-     * cleanly when the cursor moves. Forces redraw of (a) previous cell
-     * to wipe the old outline, and (b) current cell so the outline
-     * reappears on top */
+    /* Cursor handling: track previous cursor cell to redraw cleanly on move. Redraws previous cell to wipe outline, current cell to show outline */
     s_last_cur_y = -1;
     s_last_cur_x = -1;
     cy_cell = stdscr ? stdscr->_cury : -1;
@@ -764,8 +727,7 @@ static void render_all()
     prev_y = s_last_cur_y;
     prev_x = s_last_cur_x;
 
-    /* If the cursor was at a different cell, redraw that cell from
-     * the live buffer so the outline disappears */
+    /* If cursor was at different cell, redraw from live buffer to remove outline */
     if (s_shadow && prev_y >= 0 && prev_x >= 0 && prev_y < LINES && prev_x < COLS && (prev_y != cy_cell || prev_x != cx_cell))
     {
         Cell *cell = CELL(stdscr, prev_y, prev_x);
@@ -856,8 +818,7 @@ static int ami_ttf_try_open()
     return 1;
 }
 
-/* Apply TTF to a RastPort and re-measure cell dimensions accurately
- * Called once we have ami_rp (after window open) */
+/* Apply TTF to RastPort and re-measure cell dimensions. Called after window open */
 static void ami_ttf_apply_to_rastport(struct RastPort *rp)
 {
     ULONG asc = 0;
@@ -910,8 +871,7 @@ static void ami_ttf_apply_to_rastport(struct RastPort *rp)
     else
         s_ttf_proportional = 0;
 
-    /* Prefer FontWidth (the canonical monospace advance) over our 'M'
-     * measurement when available, otherwise use mwidth*/
+    /* Prefer FontWidth (canonical monospace advance) over 'M' measurement when available, otherwise use mwidth */
     if (!s_ttf_proportional && fwidth >= 4 && fwidth <= 64)
         fw = (int)fwidth;
     else if (mwidth >= 4 && mwidth <= 64)
@@ -1048,8 +1008,7 @@ WINDOW *initscr()
     }
     else
     {
-        /* fw/fh/fb are provisional; refined after window opens (see below)
-         * Skip diskfont loading entirely — the RastPort will use TT_Text */
+        /* fw/fh/fb are provisional; refined after window opens. Skip diskfont loading — RastPort uses TT_Text */
         ami_font_normal = NULL;
         ami_font_ansi = NULL;
         ami_font = NULL;
@@ -1179,9 +1138,7 @@ int endwin()
 
     curscr = NULL;
 
-    /* Close TTF (calls TT_DoneRastPort on ami_rp) BEFORE the window goes
-     * away, then close the library. ami_ttf_close() is a no-op if TTF
-     * was never opened, so it's safe to call unconditionally */
+    /* Close TTF (calls TT_DoneRastPort on ami_rp) before window closes, then close library. No-op if TTF not active */
     ami_ttf_close();
 
     if (ami_win)
@@ -1707,8 +1664,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
 
         cell = CELL(w, w->_cury, w->_curx);
 
-        /* Mask with 21-bit Unicode range so the value never collides with
-         * the attribute bits when later code does (cell->ch | cell->attrs) */
+        /* Mask with 21-bit Unicode range to avoid collision with attribute bits in (cell->ch | cell->attrs) */
         cell->ch = ch & 0x001FFFFFUL;
         cell->attrs = w->attrs;
 
@@ -1984,8 +1940,7 @@ int assume_default_colors(int fg, int bg)
 
 /* Amiga-specific extensions */
 
-/* Set the pen used to draw the cursor outline. Accepts a raw Amiga pen
- * index (0..255). Returns previous pen so the caller can restore it */
+/* Set cursor outline pen. Accepts raw Amiga pen index (0..255). Returns previous pen for restore */
 int amiga_set_cursor_pen(int pen)
 {
     int old = s_cursor_pen;
@@ -2001,10 +1956,7 @@ int amiga_set_cursor_pen(int pen)
     return old;
 }
 
-/* Set the default fg/bg used by apply_colors when a cell has no color
- * pair (pair == 0 or uninitialized). fg/bg are ncurses color indices
- * (COLOR_BLACK..COLOR_WHITE, 0..15). Forces a full redraw so existing
- * unattributed cells get repainted with the new background */
+/* Set default fg/bg for cells with no color pair. fg/bg are ncurses indices (0..15). Forces full redraw */
 int amiga_set_default_colors(short fg, short bg)
 {
     if (fg < 0 || fg > 15 || bg < 0 || bg > 15)
@@ -2017,9 +1969,7 @@ int amiga_set_default_colors(short fg, short bg)
     return OK;
 }
 
-/* Set the default background color for COLOR_PAIR(0). Must be called
- * before initscr(). color is an ncurses color index (COLOR_BLACK..COLOR_WHITE)
- * Returns previous color so the caller can restore it */
+/* Set default background color for COLOR_PAIR(0). Must be called before initscr(). Returns previous color */
 int amiga_set_default_bg_color(int color)
 {
     int old = s_default_bg_color;
@@ -2037,8 +1987,7 @@ int amiga_set_default_bg_color(int color)
     return old;
 }
 
-/* Set the font name for Amiga. Must be called before initscr()
- * If font_name is NULL or empty, uses "topaz.font" as default */
+/* Set font name for Amiga. Must be called before initscr(). NULL/empty uses "topaz.font" */
 int amiga_set_font_name(const char *font_name)
 {
     if (font_name && font_name[0])
@@ -2055,8 +2004,7 @@ int amiga_set_font_name(const char *font_name)
     return 0;
 }
 
-/* Set the ANSI font name for Amiga. Used when ANSI mode is active
- * If font_name is NULL or empty, uses "topaz.font" as default */
+/* Set ANSI font name for Amiga. Used in ANSI mode. NULL/empty uses "topaz.font" */
 int amiga_set_ansi_font_name(const char *font_name)
 {
     if (font_name && font_name[0])
@@ -2073,11 +2021,7 @@ int amiga_set_ansi_font_name(const char *font_name)
     return 0;
 }
 
-/* Configure TrueType font. Must be called BEFORE initscr(). With ttf_file =
- * NULL or empty, TTF is disabled and the bitmap font (amiga_set_font_name)
- * is used. With a valid path, tinyedit will try to open ttengine.library
- * v6+ and the TTF at initscr() time; on any failure it falls back to the
- * bitmap font automatically */
+/* Configure TrueType font. Must be called BEFORE initscr(). NULL/empty ttf_file disables TTF and uses bitmap font */
 int amiga_set_ttf(const char *ttf_file, int size, int antialias)
 {
     if (ttf_file && ttf_file[0])
@@ -2103,10 +2047,7 @@ int amiga_set_ttf(const char *ttf_file, int size, int antialias)
     return 0;
 }
 
-/* Set TTF encoding mode. Must be called BEFORE initscr()
- * use_utf8: 0 = UTF-16 BE (BMP only, 0x0000-0xFFFF)
- *           1 = UTF-8 (full Unicode, 0x000000-0x10FFFF, supports emojis)
- * Default is UTF-8 for full Unicode support */
+/* Set TTF encoding mode. Must be called BEFORE initscr(). use_utf8: 0=UTF-16 BE (BMP only), 1=UTF-8 (full Unicode) */
 int amiga_set_ttf_encoding(int use_utf8)
 {
     if (s_ttf_use_utf8 != (use_utf8 ? 1 : 0))
@@ -2118,8 +2059,7 @@ int amiga_set_ttf_encoding(int use_utf8)
     return 0;
 }
 
-/* Switch font (call after toggling ANSI mode).
- * use_ansi: 1 = use ANSI font, 0 = use regular font */
+/* Switch font (call after toggling ANSI mode). use_ansi: 1=ANSI font, 0=regular font */
 int amiga_change_font(int use_ansi)
 {
     struct TextFont *target_font;
@@ -2156,10 +2096,7 @@ int amiga_change_font(int use_ansi)
     return 0;
 }
 
-/* Reload TTF with new font path and/or size (called after setup changes)
- * Closes the current TTengine font, reopens at the new size, reapplies to
- * the RastPort and resizes stdscr to fit the new cell dimensions.
- * Returns 1 on success, 0 on failure (old font remains active) */
+/* Reload TTF with new font path/size. Returns 1 on success, 0 on failure */
 int amiga_reload_ttf(const char *font_path, int new_size)
 {
     APTR new_font;
@@ -2230,8 +2167,7 @@ int amiga_reload_ttf(const char *font_path, int new_size)
         int want_w = COLS * fw + bw;
         int want_h = LINES * fh + bh;
 
-        /* BorderTop already includes the title bar pixel height on a
-         * backdrop window, so no extra offset needed here */
+        /* BorderTop already includes title bar height on backdrop window, no extra offset needed */
         int win_x = ami_win->LeftEdge;
         int win_y = ami_win->TopEdge;
 
@@ -2259,11 +2195,7 @@ int amiga_reload_ttf(const char *font_path, int new_size)
                 win_y = 0;
         }
 
-        /* ChangeWindowBox is asynchronous: Intuition will send IDCMP_NEWSIZE
-         * once the resize is done and the window frame is repainted
-         * The IDCMP_NEWSIZE handler in wgetch() recalculates COLS/LINES and
-         * redraws everything. We just mark the shadow dirty so that redraw
-         * is full, then let the event loop do the rest */
+        /* ChangeWindowBox is asynchronous: Intuition sends IDCMP_NEWSIZE when resize done and frame repainted. Handler recalculates COLS/LINES and redraws */
         s_shadow_dirty = 1;
 
         if (s_shadow)
@@ -2283,9 +2215,7 @@ int amiga_reload_ttf(const char *font_path, int new_size)
 
 /* Keyboard input */
 
-/* Pending bytes from a single MapRawKey() call (dead-key + vowel can
- * generate up to a handful of Latin-1 bytes that we must deliver one
- * at a time to the caller) */
+/* Pending bytes from single MapRawKey() call (dead-key + vowel can generate multiple Latin-1 bytes) */
 static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 {
     struct InputEvent ie;
@@ -2296,8 +2226,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
     if (code & IECODE_UP_PREFIX)
         return ERR;
 
-    /* Modified arrows MUST be checked before the bare-arrow switch below,
-     * otherwise modified keys would fall through and return bare KEY_LEFT/RIGHT */
+    /* Modified arrows MUST be checked before bare-arrow switch, otherwise modified keys fall through and return bare KEY_LEFT/RIGHT */
     if (qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT))
     {
         if (code == 0x4F)
@@ -2372,47 +2301,17 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
         return KEY_F(10);
     }
 
-    /* TODO Check */
-    /* Right-Amiga + V = paste from clipboard. Amiga keyboards lack an
-     * Insert key, so the editor's "Shift+Insert" shortcut is unreachable
-     * Right-Amiga is the user-app modifier (left-Amiga is reserved for
-     * Workbench menu shortcuts), so RAmiga+V is the idiomatic paste
-     * chord. We synthesise a Ctrl-V byte (0x16) so the existing global
-     * paste handler in ui_editor.c picks it up unchanged */
+    /* Right-Amiga + V = paste from clipboard. Amiga keyboards lack Insert key, so Shift+Insert shortcut needs this mapping. RAmiga+V synthesises Ctrl-V (0x16) for paste handler */
     if ((qual & IEQUALIFIER_RCOMMAND) && code == 0x34) /* 0x34 = V */
         return 0x16;
 
-    /* Map printable via MapRawKey
-     *
-     * Alt handling is keymap-dependent and tricky:
-     *   - On English/US layouts Alt is typically a "meta" modifier
-     *     (Alt+letter sends ESC+letter to apps), and the keymap does
-     *     NOT map Alt+key to any character
-     *   - On Spanish (and many other non-English) layouts, Alt is the
-     *     ONLY way to type characters like @ # | \ [ ] { } EUR - the
-     *     keymap maps Alt+2 -> @, Alt+1 -> |, Alt+E -> €, etc
-     *
-     * So we MUST try MapRawKey with the original qualifiers first
-     * If that yields a different printable result from the bare-key
-     * mapping, Alt was needed to TYPE the character: emit those bytes
-     * directly. If both yield the same byte, Alt was a meta modifier:
-     * fall through to the "ESC + bare" convention
-     *
-     * MapRawKey can return MORE THAN ONE byte (dead-key composition,
-     * multibyte locale output). Extra bytes are queued and drained on
-     * subsequent wgetch() calls
-     *
-     * Per AmigaOS keymap.library autodoc, for IDCMP_RAWKEY events
-     * im->IAddress is a POINTER TO POINTER to the dead-key prefix
-     * data. Without dereferencing it MapRawKey loses dead-key state
-     * and accent composition (´+a -> á, ¨+u -> ü) silently fails */
+    /* Map printable via MapRawKey. Alt handling is keymap-dependent: English layouts use Alt as meta (ESC+letter), Spanish layouts use Alt to type @ # | € etc. Try MapRawKey with original qualifiers first; if different from bare-key, Alt was needed to type character. MapRawKey can return multiple bytes (dead-key composition), queued for subsequent calls. For IDCMP_RAWKEY, IAddress is POINTER TO POINTER to dead-key prefix data; must dereference to preserve dead-key state */
     memset(&ie, 0, sizeof(ie));
 
     ie.ie_Class = IECLASS_RAWKEY;
     ie.ie_Code = code;
 
-    /* COMMAND qualifiers are always stripped (they're for the app's
-     * own use, never produce text). ALT is kept on the first pass */
+    /* COMMAND qualifiers always stripped (for app's own use, never produce text). ALT kept on first pass */
     ie.ie_Qualifier = qual & ~(IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND);
 
     if (iaddr)
@@ -2422,18 +2321,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
     actual = MapRawKey(&ie, (STRPTR)buf, (LONG)sizeof(buf), NULL);
 
-    /* When Alt is pressed, decide between:
-     *   - chord  (returns KEY_ALT(letter))  for letters; the keymap
-     *            may produce a character, nothing, or something
-     *            different -- we ignore it because the user expects
-     *            Alt+letter to be a hotkey
-     *   - text   (passes the keymap's result through)  for everything
-     *            else, so Alt+2='@', Alt+1='|', Alt+e='€', dead-key
-     *            composition, etc. all keep working
-     *
-     * The base key (without Alt) is queried with a second MapRawKey:
-     * if it's a single A-Z letter we return the chord. Otherwise we
-     * fall through to the original Alt-modified result */
+    /* When Alt pressed: chord (KEY_ALT(letter)) for letters, text (keymap result) for everything else (Alt+2='@', Alt+1='|', Alt+e='€', dead-key composition). Query base key without Alt via second MapRawKey; if single A-Z letter return chord, otherwise fall through to Alt-modified result */
     if (qual & (IEQUALIFIER_LALT | IEQUALIFIER_RALT))
     {
         struct InputEvent ie2;
@@ -2454,9 +2342,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
         if (actual2 == 1 && ((buf2[0] >= 'a' && buf2[0] <= 'z') || (buf2[0] >= 'A' && buf2[0] <= 'Z')))
         {
-            /* Pure Alt+letter chord. Normalise case so callers write
-             * KEY_ALT('L') uniformly (matches the editor's case
-             * labels) */
+            /* Pure Alt+letter chord. Normalise case so callers write KEY_ALT('L') uniformly (matches editor's case handling) */
             int letter = (int)buf2[0];
 
             if (letter >= 'a' && letter <= 'z')
@@ -2465,9 +2351,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
             return KEY_ALT(letter);
         }
 
-        /* Not a letter -- the keymap is the authority. Fall through
-         * to the Alt-modified result (which gives '@', '|', '€', dead
-         * keys etc) */
+        /* Not a letter -- keymap is authority. Fall through to Alt-modified result (gives '@', '|', '€', dead keys etc) */
     }
 
     if (actual <= 0)
@@ -2503,9 +2387,7 @@ int wgetch(WINDOW *w)
     if (!ami_win)
         return ERR;
 
-    /* Drain any extra bytes from a previous MapRawKey() call. This is
-     * what makes dead-key sequences (´+a = á, ¨+u = ü, ...) work when
-     * the keymap returns multiple bytes at once */
+    /* Drain extra bytes from previous MapRawKey() call. Makes dead-key sequences (´+a=á, ¨+u=ü) work when keymap returns multiple bytes */
     if (s_key_queue_pos < s_key_queue_len)
     {
         key = (int)s_key_queue[s_key_queue_pos++];
@@ -2551,11 +2433,7 @@ int wgetch(WINDOW *w)
         qual = imsg->Qualifier;
         iaddr = imsg->IAddress;
 
-        /* DEAD KEYS: for IDCMP_RAWKEY, IAddress points to dead-key prefix
-         * data that becomes invalid after ReplyMsg. We MUST call
-         * MapRawKey (inside xlat_rawkey) BEFORE replying the message,
-         * otherwise dead-key sequences (accented chars: á é í ó ú ñ ...)
-         * cannot be composed */
+        /* DEAD KEYS: for IDCMP_RAWKEY, IAddress points to dead-key prefix data that becomes invalid after ReplyMsg. MUST call MapRawKey before replying to compose accented chars */
         if (cls == IDCMP_RAWKEY)
             key = xlat_rawkey(code, qual, iaddr);
 
@@ -3207,8 +3085,6 @@ int ungetmouse(unsigned long m)
 {
     return ERR;
 }
-
-/* string.h helpers (Amiga libc has bugs with control chars) */
 
 /* Undefine libc versions first, then provide our implementation */
 #ifdef snprintf

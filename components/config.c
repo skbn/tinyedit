@@ -289,8 +289,7 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->ttf_antialias = 0; /* auto */
     cfg->ttf_use_utf8 = 1;  /* UTF-8 for full Unicode/emoji support */
 
-    /* Fallback slots empty by default -- user opts in by setting any of
-     * TTF_FALLBACK1..TTF_FALLBACK8 in the config file */
+    /* Fallback slots empty by default */
     for (i = 0; i < TE_CFG_TTF_FALLBACKS; i++)
     {
         cfg->ttf_fallback[i][0] = '\0';
@@ -501,8 +500,7 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         }
         else if (strncasecmp(word, "TTF_FALLBACK", 12) == 0)
         {
-            /* TODO */
-            /*const char *suffix = word + 12;
+            const char *suffix = word + 12;
             int is_size = 0;
             int slot;
 
@@ -541,7 +539,7 @@ int te_cfg_load(TeConfig *cfg, const char *path)
 
                     cfg->ttf_fallback[idx][sizeof(cfg->ttf_fallback[idx]) - 1] = '\0';
                 }
-            }*/
+            }
         }
         else if (strcasecmp(word, "DEFAULT_BG_COLOR") == 0)
         {
