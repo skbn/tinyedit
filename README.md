@@ -49,7 +49,21 @@ make -f Makefile.amiga.te unprep
 make -f Makefile.amiga.te prep
 make -f Makefile.amiga.te clean all
 
-For freetype, the antialiasing is still buggy; I need to fix it.
+Freetype fonts tested:
+
+Symbola.ttf
+unifont_sample-17.0.04.otf
+NotoColorEmoji-emojicompat.ttf
+Symbola_hint.ttf
+NotoSansCJK-Regular.ttf
+NotoColorEmoji.ttf
+DejaVuSansMono.ttf
+LiberationMono-Regular.ttf
+
+With ttengine:
+
+DejaVuSansMono.ttf
+LiberationMono-Regular.ttf
 
 The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA.
 ```
