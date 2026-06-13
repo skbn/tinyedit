@@ -1422,12 +1422,14 @@ static void te_draw_mono(struct TERenderContext *dc, struct RastPort *rp, struct
     BltTemplate((PLANEPTR)(g->data + srcy * g->pitch), srcx, g->pitch, rp, dx, dy, w, h);
 }
 
-/* CLUT (AGA) path: write each glyph pixel through SetAPen+WritePixel. Slow but correct on any indexed-colour screen */
+/* CLUT (AGA) path: draw pixels via SetAPen+WritePixel. Saves/restores rp->FgPen to prevent side effects */
 static void te_draw_indexed_pixels(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int dx, int dy)
 {
     int x, y;
     int gw = g->width;
     int gh = g->height;
+    UBYTE saved_pen = rp->FgPen;
+    int pen_dirty = 0;
 
     if (!dc->aaRampValid)
         te_rebuild_aa_ramp(dc);
@@ -1453,6 +1455,8 @@ static void te_draw_indexed_pixels(struct TERenderContext *dc, struct RastPort *
 
                 SetAPen(rp, dc->aaRamp[level]);
                 WritePixel(rp, dx + x, dy + y);
+
+                pen_dirty = 1;
             }
             else if (g->format == FMT_RGBA)
             {
@@ -1483,9 +1487,14 @@ static void te_draw_indexed_pixels(struct TERenderContext *dc, struct RastPort *
 
                 SetAPen(rp, pen);
                 WritePixel(rp, dx + x, dy + y);
+                pen_dirty = 1;
             }
         }
     }
+
+    /* Restore caller's FgPen so the RastPort state is unchanged on return */
+    if (pen_dirty)
+        SetAPen(rp, saved_pen);
 }
 
 /* RTG path for GRAY / RGBA glyphs. Uses WritePixelArray for truecolor screens. We compose glyph into RGB24 scratch buffer, then single WritePixelArray call to CGX */

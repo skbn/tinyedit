@@ -106,10 +106,6 @@ Screenshots
 
 ![Glyph picker](img/emojis.png)
 
-## Changelog
-
-See [CHANGES.md](CHANGES.md) for detailed information about recent bug fixes and improvements.
-
 ## License
 
 GPL-2.0 - see LICENSE file for details

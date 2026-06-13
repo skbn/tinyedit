@@ -714,15 +714,17 @@ static void render_all()
                 if (s_ttf_proportional || s_ansi_mode || run_has_wide)
                 {
                     int u;
+                    UBYTE fg_pen;
 
                     TE_SetColorPen(ami_te_dc, ami_te_screen, (LONG)ami_rp->FgPen, (LONG)ami_rp->BgPen);
+                    fg_pen = ami_rp->FgPen;
 
                     for (u = 0; u < run_len; u++)
                     {
                         Cell *cc = CELL(stdscr, r, run_start + u);
                         uint32_t wc = (uint32_t)(cc->ch & 0xFFFFFFFF);
                         int cx = px(run_start + u);
-                        UBYTE fg_pen;
+
                         struct TEDrawPosition pos;
                         char ubuf[5];
                         int ulen;
@@ -730,8 +732,6 @@ static void render_all()
                         /* TRAILING cells already painted by lead glyph's wide bitmap */
                         if (wc == TE_CELL_WIDE_TRAILING)
                             continue;
-
-                        fg_pen = ami_rp->FgPen;
 
                         /* Outer run RectFill already cleared background (no per-cell RectFill needed) */
 
