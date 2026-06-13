@@ -106,6 +106,8 @@ Screenshots
 
 ![Glyph picker](img/emojis.png)
 
+![Glyph picker](img/amiga_glyphs.png)
+
 ## License
 
 GPL-2.0 - see LICENSE file for details
