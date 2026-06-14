@@ -425,8 +425,8 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
                         int *new_cols;
 
                         capacity *= 2;
-                        *new_rows = realloc(*out_rows, capacity * sizeof(int));
-                        *new_cols = realloc(*out_cols, capacity * sizeof(int));
+                        new_rows = realloc(*out_rows, capacity * sizeof(int));
+                        new_cols = realloc(*out_cols, capacity * sizeof(int));
 
                         if (!new_rows || !new_cols)
                         {
