@@ -433,17 +433,9 @@ int insert_file(TeApp *app)
 /* Control key implementations */
 int paste(TeApp *app)
 {
-    /* Try internal block buffer first */
-    if (ed_block_paste(app->editor) == 0)
+    /* On Amiga/Windows, always use external clipboard. On Unix, use external only if not in SSH session */
+    if (clipboard_use_external())
     {
-        clear_search_highlights(app);
-        soft_reset_desired();
-        s_soft_vtop = 0;
-        te_status(app, "Pasted");
-    }
-    else
-    {
-        /* Fall back to system clipboard */
         char *clip = clipboard_paste();
 
         if (clip && clip[0])
@@ -468,18 +460,31 @@ int paste(TeApp *app)
             ed_paste_text_with_undo(app->editor, to_insert);
             clear_search_highlights(app);
             soft_reset_desired();
-
             s_soft_vtop = 0;
             te_status(app, "Pasted from clipboard");
 
+            free(wrapped);
             free(clip);
-
-            if (wrapped)
-                free(wrapped);
         }
         else
         {
-            te_status(app, "Clipboard empty (install xclip or wl-clipboard)");
+            te_status(app, "Clipboard: empty or no backend (install xclip/wl-clipboard, or check clipboard.device)");
+            free(clip);
+        }
+    }
+    else
+    {
+        /* SSH/headless: use internal block only */
+        if (ed_block_paste(app->editor) == 0)
+        {
+            clear_search_highlights(app);
+            soft_reset_desired();
+            s_soft_vtop = 0;
+            te_status(app, "Pasted (internal block)");
+        }
+        else
+        {
+            te_status(app, "No internal block to paste (external clipboard unavailable in SSH)");
         }
     }
 
@@ -531,10 +536,15 @@ int copy(TeApp *app)
 
         if (ed_block_copy(app->editor) == 0)
         {
-            if (utf8)
+            /* Copy to external clipboard if available */
+            if (clipboard_use_external() && utf8)
             {
                 clipboard_copy(utf8);
-                te_status(app, "Block copied");
+                te_status(app, "Block copied to clipboard");
+            }
+            else
+            {
+                te_status(app, "Block copied (internal only)");
             }
         }
 
@@ -558,10 +568,15 @@ int cut(TeApp *app)
         {
             clear_search_highlights(app);
 
-            if (utf8)
+            /* Copy to external clipboard if available */
+            if (clipboard_use_external() && utf8)
             {
                 clipboard_copy(utf8);
-                te_status(app, "Block cut");
+                te_status(app, "Block cut to clipboard");
+            }
+            else
+            {
+                te_status(app, "Block cut (internal only)");
             }
         }
 

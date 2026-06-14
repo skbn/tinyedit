@@ -421,17 +421,23 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
                     /* Add match to results */
                     if (count >= capacity)
                     {
-                        capacity *= 2;
-                        *out_rows = realloc(*out_rows, capacity * sizeof(int));
-                        *out_cols = realloc(*out_cols, capacity * sizeof(int));
+                        int *new_rows;
+                        int *new_cols;
 
-                        if (!*out_rows || !*out_cols)
+                        capacity *= 2;
+                        *new_rows = realloc(*out_rows, capacity * sizeof(int));
+                        *new_cols = realloc(*out_cols, capacity * sizeof(int));
+
+                        if (!new_rows || !new_cols)
                         {
-                            free(*out_rows);
-                            free(*out_cols);
+                            free(new_rows);
+                            free(new_cols);
                             *out_rows = *out_cols = NULL;
                             return 0;
                         }
+
+                        *out_rows = new_rows;
+                        *out_cols = new_cols;
                     }
 
                     (*out_rows)[count] = i;
@@ -819,177 +825,6 @@ int ed_rewrap_paragraph(Ed *ed, int width)
     return 0;
 }
 
-/* Rewrap entire document to hard-wrap at specified width */
-int ed_rewrap_document(Ed *ed, int width)
-{
-    int para_start = 0;
-    int cursor_row_before, cursor_col_before;
-    int cursor_row_after, cursor_col_after;
-    int doc_count_before;
-    char *snapshot_before = NULL;
-    char *snapshot_after = NULL;
-    UndoGroup *g;
-
-    if (!ed || width < 20 || ed->count <= 0)
-        return -1;
-
-    cursor_row_before = ed->row;
-    cursor_col_before = ed->col;
-    doc_count_before = ed->count;
-
-    snapshot_before = ed_range_to_string(ed, 0, ed->count);
-
-    if (!snapshot_before)
-        return -1;
-
-    /* Enable snapshot mode to block individual undo operations */
-    ed->undo_snapshot_mode = 1;
-
-    /* Process document paragraph by paragraph */
-    while (para_start < ed->count)
-    {
-        const wchar_t *l;
-        int prefix_len;
-        int para_end;
-        int needs_rewrap = 0;
-        int i;
-
-        if (para_start >= ed->count)
-            break;
-
-        /* Skip empty lines - preserve them as-is */
-        l = ed->lines[para_start]->wcs;
-
-        if (!l || !l[0])
-        {
-            para_start++;
-            continue;
-        }
-
-        /* Find paragraph end (consecutive non-empty lines with same quote prefix) */
-        prefix_len = ed_detect_quote_prefix(l);
-        para_end = para_start + 1;
-
-        while (para_end < ed->count)
-        {
-            const wchar_t *next_l = ed->lines[para_end]->wcs;
-            int next_prefix;
-
-            if (!next_l || !next_l[0])
-                break; /* Empty line ends paragraph */
-
-            next_prefix = ed_detect_quote_prefix(next_l);
-
-            /* Different prefix ends paragraph */
-            if (prefix_len != next_prefix)
-                break;
-
-            para_end++;
-        }
-
-        /* Check if any line in paragraph exceeds width (excluding prefix) */
-        for (i = para_start; i < para_end && i < ed->count; i++)
-        {
-            const wchar_t *check_l = ed->lines[i]->wcs;
-            int check_len = ed->lines[i]->len;
-            int content_len = check_len - prefix_len;
-
-            if (content_len > width - prefix_len)
-            {
-                needs_rewrap = 1;
-                break;
-            }
-        }
-
-        /* Only rewrap if needed */
-        if (needs_rewrap)
-        {
-            ed_set_pos(ed, para_start, 0);
-            ed_rewrap_paragraph(ed, width);
-        }
-
-        /* Move to next paragraph */
-        para_start = para_end;
-    }
-
-    /* Disable snapshot mode */
-    ed->undo_snapshot_mode = 0;
-
-    cursor_row_after = ed->row;
-    cursor_col_after = ed->col;
-
-    /* Invalidate soft-wrap cache since line shapes changed */
-    ed_prefix_invalidate(ed);
-
-    /* Save snapshot after rewrap for redo */
-    snapshot_after = ed_range_to_string(ed, 0, ed->count);
-
-    if (!snapshot_after)
-    {
-        free(snapshot_before);
-        return -1;
-    }
-
-    /* Push snapshot to undo stack */
-    ed_redo_clear(ed);
-
-    if (ed_undo_open_group(ed) != 0)
-    {
-        free(snapshot_before);
-        free(snapshot_after);
-
-        return -1;
-    }
-
-    if (ed->undo_top <= 0)
-    {
-        free(snapshot_before);
-        free(snapshot_after);
-
-        return -1;
-    }
-
-    g = &ed->undo_stack[ed->undo_top - 1];
-    g->cur_row = cursor_row_before;
-    g->cur_col = cursor_col_before;
-    g->end_row = cursor_row_after;
-    g->end_col = cursor_col_after;
-
-    if (g->count >= g->cap)
-    {
-        int nc = (g->cap > 0) ? (g->cap * 2) : 4;
-        UndoOp *t = (UndoOp *)realloc(g->ops, (size_t)nc * sizeof(UndoOp));
-
-        if (!t)
-        {
-            free(snapshot_before);
-            free(snapshot_after);
-
-            return -1;
-        }
-
-        g->ops = t;
-        g->cap = nc;
-    }
-
-    /* Use OP_SNAPSHOT_RANGE with before/after snapshots for undo/redo */
-    g->ops[g->count].type = OP_SNAPSHOT_RANGE;
-    g->ops[g->count].row = 0;
-    g->ops[g->count].col = 0;
-    g->ops[g->count].len = 0;
-    g->ops[g->count].join_col = 0;
-    g->ops[g->count].text = NULL;
-    g->ops[g->count].utf8_snapshot = snapshot_before;
-    g->ops[g->count].utf8_snapshot_new = snapshot_after;
-    g->ops[g->count].hard_wrap_mode = ed->hard_wrap;
-    g->ops[g->count].end_row = doc_count_before;
-    g->ops[g->count].end_col = ed->count;
-    g->count++;
-    ed->undo_open = 0;
-
-    return 0;
-}
-
 int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
 {
     FILE *f;
@@ -1143,6 +978,7 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
     g->ops[g->count].len = 0;
     g->ops[g->count].join_col = 0;
     g->ops[g->count].text = NULL;
+    g->ops[g->count].utf8_snapshot_new = NULL;
     g->ops[g->count].utf8_snapshot = strdup(content_to_paste);
 
     if (!g->ops[g->count].utf8_snapshot)

@@ -3146,6 +3146,9 @@ int ed_undo(Ed *ed)
     /* Copy group header to redo (move ownership of ops array) */
     tmp = *src;
     ed->redo_stack[ed->redo_top++] = tmp;
+    src->ops = NULL;
+    src->count = 0;
+    src->cap = 0;
 
     /* Suspend invalidation during undo */
     ed->undo_snapshot_mode = 1;
@@ -3184,6 +3187,9 @@ int ed_redo(Ed *ed)
 
     tmp = *src;
     ed->undo_stack[ed->undo_top++] = tmp;
+    src->ops = NULL;
+    src->count = 0;
+    src->cap = 0;
 
     /* Suspend invalidation during redo */
     ed->undo_snapshot_mode = 1;
@@ -3473,6 +3479,7 @@ int ed_paste_text_with_undo(Ed *ed, const char *utf8_text)
     g->ops[g->count].len = 0;
     g->ops[g->count].join_col = 0;
     g->ops[g->count].text = NULL;
+    g->ops[g->count].utf8_snapshot_new = NULL;
     g->ops[g->count].utf8_snapshot = strdup(utf8_text);
 
     if (!g->ops[g->count].utf8_snapshot)

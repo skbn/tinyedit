@@ -52,7 +52,6 @@ static const char *HELP_LINES[] =
         "    Ins / Alt+I      Toggle insert / overwrite",
         "    Ctrl+W           Rewrap paragraph",
         "    Tab              Insert tab (4 spaces)",
-        "    Alt+W            Toggle hard-wrap",
         "    Alt+Q            Toggle wrap mode",
         "    Alt+D            Toggle line numbers",
         "    F3 / Alt+C       Choose output charset",
@@ -1609,21 +1608,6 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
                 if (app->cfg.undo_levels > 0)
                     ed_set_undo_levels(app->editor, app->cfg.undo_levels);
 
-                /* Check if hard_wrap changed from 0 to 1 (soft to hard) */
-                if (old_hard_wrap == 0 && app->cfg.hard_wrap == 1)
-                {
-                    /* Ask user if they want to rewrap the document */
-                    char msg[128];
-
-                    snprintf(msg, sizeof(msg), "Convert document to hard-wrap at column %d?", app->cfg.autowrap_col);
-
-                    if (ui_popup_confirm("Hard Wrap", msg) == 1)
-                    {
-                        ed_rewrap_document(app->editor, app->cfg.autowrap_col);
-                        te_status(app, "Document rewrapped to hard-wrap");
-                    }
-                }
-
                 app->hard_wrap = app->cfg.hard_wrap;
                 ed_set_hard_wrap(app->editor, app->cfg.hard_wrap);
                 app->wrap_col = app->cfg.autowrap_col;
@@ -1920,40 +1904,12 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         te_status(app, "Line numbers: %s", app->show_line_numbers ? "ON" : "OFF");
         return 1;
 
-    case KEY_ALT('W'):
-    {
-        if (app->hard_wrap == 0)
-        {
-            /* Changing from soft to hard: ask if user wants to rewrap */
-            char msg[128];
-
-            snprintf(msg, sizeof(msg), "Convert document to hard-wrap at column %d?", app->wrap_col);
-
-            if (ui_popup_confirm("Hard Wrap", msg) == 1)
-            {
-                ed_rewrap_document(app->editor, app->wrap_col);
-
-                app->hard_wrap = 1;
-
-                ed_set_hard_wrap(app->editor, 1);
-                te_status(app, "Hard wrap: ON (rewrapped)");
-            }
-        }
-        else
-        {
-            /* Changing from hard to soft: just toggle without asking */
-            app->hard_wrap = 0;
-            ed_set_hard_wrap(app->editor, 0);
-            te_status(app, "Hard wrap: OFF");
-        }
-
-        return 1;
-    }
     case KEY_ALT('Q'):
     {
         app->hard_wrap = !app->hard_wrap;
         return 1;
     }
+
     default:
         return 0;
     }

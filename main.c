@@ -301,12 +301,6 @@ int main(int argc, char **argv)
     if (define_key("\033O", KEY_ALT('O')) != OK)
         fprintf(stderr, "Warning: define_key(Alt+Shift+O) failed\n");
 
-    if (define_key("\033w", KEY_ALT('W')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+W) failed\n");
-
-    if (define_key("\033W", KEY_ALT('W')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+W) failed\n");
-
     if (define_key("\033q", KEY_ALT('Q')) != OK)
         fprintf(stderr, "Warning: define_key(Alt+Q) failed\n");
 

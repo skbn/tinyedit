@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <ncurses.h>
+#include <stdlib.h>
 #endif
 
 static char *normalise_newlines(char *s)
@@ -58,6 +59,24 @@ static char *normalise_newlines(char *s)
 
     return s;
 }
+
+#ifdef PLATFORM_UNIX
+
+/* Detect if running in SSH session (no X11/Wayland clipboard available) */
+static int is_ssh_session(void)
+{
+    /* If SSH_TTY or SSH_CONNECTION are set, we're likely in SSH */
+    if (getenv("SSH_TTY") || getenv("SSH_CONNECTION"))
+        return 1;
+
+    /* If DISPLAY and WAYLAND_DISPLAY are both not set, likely SSH or headless */
+    if (!getenv("DISPLAY") && !getenv("WAYLAND_DISPLAY"))
+        return 1;
+
+    return 0;
+}
+
+#endif /* PLATFORM_UNIX */
 
 #ifdef PLATFORM_AMIGA
 
@@ -493,6 +512,28 @@ static int try_copy_cmd(const char *cmd, const char *data)
 
     return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
 }
+
+#endif /* PLATFORM_UNIX */
+
+/* Returns 1 if external clipboard should be used, 0 for internal only */
+int clipboard_use_external(void)
+{
+#ifdef PLATFORM_AMIGA
+    /* Amiga: always use external clipboard */
+    return 1;
+#elif defined(PLATFORM_WIN32)
+    /* Windows: always use external clipboard */
+    return 1;
+#elif defined(PLATFORM_UNIX)
+    /* Unix: use external only if not in SSH session */
+    return !is_ssh_session();
+#else
+    /* Unknown platform: use external */
+    return 1;
+#endif
+}
+
+#ifdef PLATFORM_UNIX
 
 int clipboard_copy(const char *utf8)
 {
