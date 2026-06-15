@@ -45,7 +45,7 @@ Buscar texto
 3. Presiona Enter
 4. Los resultados se muestran resaltados
 5. Usa F3 o Alt+C para ir al resultado anterior
-6. Usa F4 o Alt+S para ir al siguiente resultado
+6. Usa F4 o Alt+T para ir al siguiente resultado
 7. Presiona ESC para salir del modo de búsqueda
 8. Presiona Alt+G para quitar los resaltados y salir del modo buscar
 
@@ -55,7 +55,7 @@ Buscar y reemplazar
 3. Escribe el texto de reemplazo
 4. Elige si es case-sensitive y whole-word
 5. F3 o Alt+C va al resultado anterior
-6. F4 o Alt+S va al siguiente resultado
+6. F4 o Alt+T va al siguiente resultado
 7. F5 o Alt+F reemplaza la ocurrencia actual
 8. F6 o Alt+B reemplaza todas las ocurrencias
 
@@ -75,7 +75,7 @@ Abrir archivo nuevo
 Ctrl+N crea un archivo nuevo (borra el contenido actual). Ctrl+L abre un archivo (también borra el contenido actual).
 
 Configurar
-Presiona F4 o Alt+S para cambiar colores, ajustar el ancho de línea, y otras opciones.
+Presiona F4 o Alt+T para cambiar colores, ajustar el ancho de línea, y otras opciones.
 - Usa las flechas para moverte entre campos
 - Presiona Enter o Espacio para editar
 - F10 o S guarda la configuración
@@ -85,14 +85,14 @@ Conversiones de charset
 tinyedit trabaja siempre con UTF-8 internamente. Hay dos formas de configurar charsets:
 
 1. Charset por defecto (Setup):
-   - Presiona F4 o Alt+S para abrir el setup
+   - Presiona F4 o Alt+T para abrir el setup
    - En la pestaña Editor, ve al campo "Charset"
    - Presiona Enter para ciclar entre los charsets disponibles
    - Este será el charset usado por defecto al guardar archivos
    - Presiona F10 o S para guardar la configuración
 
-2. Charset temporal para el archivo actual (F3):
-   - Presiona F3 o Alt+C para cambiar el charset de lectura/escritura del archivo actual
+2. Charset temporal para el archivo actual (Alt+C):
+   - Presiona Alt+C (o F3 en modo normal) para cambiar el charset de lectura/escritura del archivo actual
    - Selecciona el charset de lectura (View) y de salida (Save)
    - Esto no afecta la configuración global, solo el archivo actual
    - Si cambias el charset de lectura (View), el archivo se recarga desde disco con la nueva codificación

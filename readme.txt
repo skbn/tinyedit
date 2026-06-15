@@ -45,7 +45,7 @@ Search text
 3. Press Enter
 4. Results are shown highlighted
 5. Use F3 or Alt+C to go to the previous result
-6. Use F4 or Alt+S to go to the next result
+6. Use F4 or Alt+T to go to the next result
 7. Press ESC to exit search mode
 8. Press Alt+G to clear highlights and exit search mode
 
@@ -55,7 +55,7 @@ Search and replace
 3. Type the replacement text
 4. Choose if it's case-sensitive and whole-word
 5. F3 or Alt+C goes to the previous result
-6. F4 or Alt+S goes to the next result
+6. F4 or Alt+T goes to the next result
 7. F5 or Alt+F replaces the current occurrence
 8. F6 or Alt+B replaces all occurrences
 
@@ -75,7 +75,7 @@ Open new file
 Ctrl+N creates a new file (clears current content). Ctrl+L opens a file (also clears current content).
 
 Configure
-Press F4 or Alt+S to change colors, adjust line width, and other options.
+Press F4 or Alt+T to change colors, adjust line width, and other options.
 - Use arrow keys to move between fields
 - Press Enter or Space to edit
 - F10 or S saves the configuration
@@ -85,14 +85,14 @@ Charset conversions
 tinyedit always works internally with UTF-8. There are two ways to configure charsets:
 
 1. Default charset (Setup):
-   - Press F4 or Alt+S to open setup
+   - Press F4 or Alt+T to open setup
    - In the Editor tab, go to the "Charset" field
    - Press Enter to cycle through available charsets
    - This will be the charset used by default when saving files
    - Press F10 or S to save the configuration
 
-2. Temporary charset for the current file (F3):
-   - Press F3 or Alt+C to change the read/write charset for the current file
+2. Temporary charset for the current file (Alt+C):
+   - Press Alt+C (or F3 in normal mode) to change the read/write charset for the current file
    - Select the read charset (View) and save charset (Save)
    - This does not affect the global configuration, only the current file
    - If you change the read charset (View), the file is reloaded from disk with the new encoding
