@@ -735,7 +735,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     FILE *in, *out;
     char tmp_path[512];
     char line[1024];
-    int i, fi, wrote = 0;
+    int i, fi;
 
     /* Create temporary file */
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
@@ -775,8 +775,23 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
             }
             word[wi] = '\0';
 
-            /* Skip TTF_FALLBACK and TTF_FALLBACK_SIZE lines - they will be rewritten */
-            if (strncasecmp(word, "TTF_FALLBACK", 12) == 0)
+            /* Skip all managed keywords - they will be rewritten at end */
+            if (strncasecmp(word, "TTF_FALLBACK", 12) == 0 ||
+                strcasecmp(word, "FONT") == 0 ||
+                strcasecmp(word, "CHARSET") == 0 ||
+                strcasecmp(word, "UNDOLEVELS") == 0 ||
+                strcasecmp(word, "AUTOWRAP") == 0 ||
+                strcasecmp(word, "HARDWRAP") == 0 ||
+                strcasecmp(word, "LINENUMBERS") == 0 ||
+                strcasecmp(word, "TTF_ENABLED") == 0 ||
+                strcasecmp(word, "TTF_FONT") == 0 ||
+                strcasecmp(word, "TTF_SIZE") == 0 ||
+                strcasecmp(word, "TTF_ANTIALIAS") == 0 ||
+                strcasecmp(word, "TTF_USE_UTF8") == 0 ||
+                strcasecmp(word, "DEFAULT_BG_COLOR") == 0 ||
+                strcasecmp(word, "CURSORCOLOR") == 0 ||
+                strcasecmp(word, "COLOR") == 0 ||
+                strcasecmp(word, "COLORMAP") == 0)
             {
                 skip_line = 1;
             }
@@ -793,14 +808,22 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
         fprintf(out, "# Lines starting with # or ; are comments.\n\n");
     }
 
-    /* Write TTF fallback section */
-    fprintf(out, "# Fallback TTF fonts.  Up to %d slots.  Codepoints missing\n", TE_CFG_TTF_FALLBACKS);
-    fprintf(out, "# from TTF_FONT are looked up here in order.  Typical use:\n");
-    fprintf(out, "#   TTF_FALLBACK1   FONTS:_ttf/NotoSansCJK-Regular.ttf\n");
-    fprintf(out, "#   TTF_FALLBACK2   FONTS:_ttf/NotoColorEmoji.ttf\n");
-    fprintf(out, "# Per-slot size override (default = TTF_SIZE):\n");
-    fprintf(out, "#   TTF_FALLBACK_SIZE1   16\n");
+    /* Write/update other config fields */
+    fprintf(out, "FONT %s\n", cfg->font);
+    fprintf(out, "CHARSET %s\n", cfg->charset);
+    fprintf(out, "UNDOLEVELS %d\n", cfg->undo_levels);
+    fprintf(out, "AUTOWRAP %d\n", cfg->autowrap_col);
+    fprintf(out, "HARDWRAP %s\n", cfg->hard_wrap ? "YES" : "NO");
+    fprintf(out, "LINENUMBERS %s\n", cfg->show_line_numbers ? "YES" : "NO");
 
+    /* TTF settings */
+    fprintf(out, "TTF_ENABLED %s\n", cfg->ttf_enabled ? "YES" : "NO");
+    fprintf(out, "TTF_FONT %s\n", cfg->ttf_font);
+    fprintf(out, "TTF_SIZE %d\n", cfg->ttf_size);
+    fprintf(out, "TTF_ANTIALIAS %s\n", cfg->ttf_antialias == 2 ? "ON" : (cfg->ttf_antialias == 1 ? "OFF" : "AUTO"));
+    fprintf(out, "TTF_USE_UTF8 %s\n", cfg->ttf_use_utf8 ? "YES" : "NO");
+
+    /* Write TTF fallback section */
     for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
     {
         if (cfg->ttf_fallback[fi][0])
@@ -809,15 +832,36 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
             if (cfg->ttf_fallback_size[fi] > 0)
                 fprintf(out, "TTF_FALLBACK_SIZE%d  %d\n", fi + 1, cfg->ttf_fallback_size[fi]);
-
-            wrote = 1;
         }
     }
 
-    if (!wrote)
-        fprintf(out, "# (no fallback fonts configured)\n");
+    /* Background color */
+    fprintf(out, "DEFAULT_BG_COLOR %d\n", cfg->default_bg_color);
 
-    fprintf(out, "\n");
+    /* Cursor color */
+    if (cfg->cursor_color_rgb[0])
+        fprintf(out, "CURSORCOLOR \"%s\"\n", cfg->cursor_color_rgb);
+    else
+        fprintf(out, "CURSORCOLOR %d\n", cfg->cursor_color);
+
+    /* Color pairs */
+    fprintf(out, "COLOR NORMAL %s %s\n", color_name(cfg->color_fg[COL_NORMAL]), color_name(cfg->color_bg[COL_NORMAL]));
+    fprintf(out, "COLOR STATUS %s %s\n", color_name(cfg->color_fg[COL_STATUS]), color_name(cfg->color_bg[COL_STATUS]));
+    fprintf(out, "COLOR TITLEBAR %s %s\n", color_name(cfg->color_fg[COL_TITLEBAR]), color_name(cfg->color_bg[COL_TITLEBAR]));
+    fprintf(out, "COLOR POPUP %s %s\n", color_name(cfg->color_fg[COL_POPUP]), color_name(cfg->color_bg[COL_POPUP]));
+    fprintf(out, "COLOR POPUPSEL %s %s\n", color_name(cfg->color_fg[COL_POPUP_SEL]), color_name(cfg->color_bg[COL_POPUP_SEL]));
+    fprintf(out, "COLOR BORDER %s %s\n", color_name(cfg->color_fg[COL_BORDER]), color_name(cfg->color_bg[COL_BORDER]));
+    fprintf(out, "COLOR SEARCH %s %s\n", color_name(cfg->color_fg[COL_SEARCH_MATCH]), color_name(cfg->color_bg[COL_SEARCH_MATCH]));
+
+    /* COLORMAP for Amiga */
+    if (cfg->color_map_initialized)
+    {
+        const char *color_names[16] = {"black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "brightblack", "brightred", "brightgreen", "brightyellow", "brightblue", "brightmagenta", "brightcyan", "brightwhite"};
+        int ci;
+
+        for (ci = 0; ci < 16; ci++)
+            fprintf(out, "COLORMAP %s %d\n", color_names[ci], cfg->color_map[ci]);
+    }
 
     fclose(out);
 
