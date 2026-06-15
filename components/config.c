@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 #include "config.h"
 #include "../core/charset.h"
 
@@ -735,7 +736,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     FILE *in, *out;
     char tmp_path[512];
     char line[1024];
-    int i, fi;
+    int fi;
 
     /* Create temporary file */
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
