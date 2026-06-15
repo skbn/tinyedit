@@ -732,129 +732,107 @@ static const char *pair_name(int idx)
 
 int te_cfg_save(const TeConfig *cfg, const char *path)
 {
-    FILE *f;
-    int i;
-    int fi;
-    int wrote = 0;
+    FILE *in, *out;
+    char tmp_path[512];
+    char line[1024];
+    int i, fi, wrote = 0;
 
-    f = fopen(path, "w");
+    /* Create temporary file */
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
 
-    if (!f)
+    out = fopen(tmp_path, "w");
+    if (!out)
         return -1;
 
-    fprintf(f, "# tinyedit configuration\n");
-    fprintf(f, "# Lines starting with # or ; are comments.\n\n");
+    /* Stream original file, filtering TTF_FALLBACK lines */
+    in = fopen(path, "r");
+    if (in)
+    {
+        while (fgets(line, sizeof(line), in))
+        {
+            char word[64];
+            char *p = line;
+            int wi = 0;
+            int skip_line = 0;
 
-    fprintf(f, "# Default charset for reading/writing files\n");
-    fprintf(f, "CHARSET    %s\n\n", cfg->charset[0] ? cfg->charset : "UTF-8");
+            /* Skip leading whitespace */
+            while (*p == ' ' || *p == '\t')
+                p++;
 
-    fprintf(f, "# Undo stack depth (1-1000)\n");
-    fprintf(f, "UNDOLEVELS %d\n\n", cfg->undo_levels);
+            /* Copy comments and blank lines verbatim */
+            if (*p == '#' || *p == ';' || *p == '\0' || *p == '\r' || *p == '\n')
+            {
+                fputs(line, out);
+                continue;
+            }
 
-    fprintf(f, "# Auto-wrap column (0 = disabled)\n");
-    fprintf(f, "AUTOWRAP   %d\n\n", cfg->autowrap_col);
+            /* Extract first word */
+            while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && wi < (int)sizeof(word) - 1)
+            {
+                word[wi] = *p;
+                wi++;
+                p++;
+            }
+            word[wi] = '\0';
 
-    fprintf(f, "# Hard wrap: YES = insert CR at wrap column; NO = soft-wrap (visual only)\n");
-    fprintf(f, "HARDWRAP   %s\n\n", cfg->hard_wrap ? "YES" : "NO");
+            /* Skip TTF_FALLBACK and TTF_FALLBACK_SIZE lines - they will be rewritten */
+            if (strncasecmp(word, "TTF_FALLBACK", 12) == 0)
+            {
+                skip_line = 1;
+            }
 
-    fprintf(f, "# Show line numbers: YES = enabled, NO = disabled\n");
-    fprintf(f, "LINENUMBERS %s\n\n", cfg->show_line_numbers ? "YES" : "NO");
-
-    fprintf(f, "# UI font (Amiga/Windows only, e.g. topaz.font)\n");
-    fprintf(f, "FONT       %s\n\n", cfg->font[0] ? cfg->font : "topaz.font");
-
-    fprintf(f, "# TrueType font (Amiga only, via ttengine.library v6+)\n");
-    fprintf(f, "# TTF_ENABLED = YES to use TTF, NO to use bitmap font\n");
-    fprintf(f, "TTF_ENABLED  %s\n", cfg->ttf_enabled ? "YES" : "NO");
-
-    fprintf(f, "# TTF_FONT path (only used if TTF_ENABLED = YES)\n");
-    fprintf(f, "# Recommended: a monospace TTF (DejaVu Sans Mono, Inconsolata, JetBrains Mono)\n");
-
-    if (cfg->ttf_font[0])
-        fprintf(f, "TTF_FONT      %s\n", cfg->ttf_font);
+            if (!skip_line)
+                fputs(line, out);
+        }
+        fclose(in);
+    }
     else
-        fprintf(f, "# TTF_FONT      FONTS:_ttf/DejaVuSansMono.ttf\n");
+    {
+        /* No existing file - write header */
+        fprintf(out, "# tinyedit configuration\n");
+        fprintf(out, "# Lines starting with # or ; are comments.\n\n");
+    }
 
-    fprintf(f, "TTF_SIZE      %d\n", cfg->ttf_size);
-    fprintf(f, "TTF_ANTIALIAS %s\n", cfg->ttf_antialias == 2 ? "ON" : cfg->ttf_antialias == 1 ? "OFF"
-                                                                                              : "AUTO");
-    fprintf(f, "TTF_USE_UTF8 %s\n\n", cfg->ttf_use_utf8 ? "ON" : "OFF");
-
-    fprintf(f, "# Fallback TTF fonts.  Up to %d slots.  Codepoints missing\n",
-            TE_CFG_TTF_FALLBACKS);
-    fprintf(f, "# from TTF_FONT are looked up here in order.  Typical use:\n");
-    fprintf(f, "#   TTF_FALLBACK1   FONTS:_ttf/NotoSansCJK-Regular.ttf\n");
-    fprintf(f, "#   TTF_FALLBACK2   FONTS:_ttf/NotoColorEmoji.ttf\n");
-    fprintf(f, "# Per-slot size override (default = TTF_SIZE):\n");
-    fprintf(f, "#   TTF_FALLBACK_SIZE1   16\n");
+    /* Write TTF fallback section */
+    fprintf(out, "# Fallback TTF fonts.  Up to %d slots.  Codepoints missing\n", TE_CFG_TTF_FALLBACKS);
+    fprintf(out, "# from TTF_FONT are looked up here in order.  Typical use:\n");
+    fprintf(out, "#   TTF_FALLBACK1   FONTS:_ttf/NotoSansCJK-Regular.ttf\n");
+    fprintf(out, "#   TTF_FALLBACK2   FONTS:_ttf/NotoColorEmoji.ttf\n");
+    fprintf(out, "# Per-slot size override (default = TTF_SIZE):\n");
+    fprintf(out, "#   TTF_FALLBACK_SIZE1   16\n");
 
     for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
     {
         if (cfg->ttf_fallback[fi][0])
         {
-            fprintf(f, "TTF_FALLBACK%d   %s\n", fi + 1, cfg->ttf_fallback[fi]);
+            fprintf(out, "TTF_FALLBACK%d   %s\n", fi + 1, cfg->ttf_fallback[fi]);
 
             if (cfg->ttf_fallback_size[fi] > 0)
-                fprintf(f, "TTF_FALLBACK_SIZE%d  %d\n", fi + 1, cfg->ttf_fallback_size[fi]);
+                fprintf(out, "TTF_FALLBACK_SIZE%d  %d\n", fi + 1, cfg->ttf_fallback_size[fi]);
 
             wrote = 1;
         }
     }
 
     if (!wrote)
-        fprintf(f, "# (no fallback fonts configured)\n");
+        fprintf(out, "# (no fallback fonts configured)\n");
 
-    fprintf(f, "\n");
+    fprintf(out, "\n");
 
-    fprintf(f, "# Default background color for COLOR_PAIR(0) (Amiga, 0-7)\n");
-    fprintf(f, "DEFAULT_BG_COLOR %d\n\n", cfg->default_bg_color);
+    fclose(out);
 
-    fprintf(f, "# Cursor color: pen index (Amiga) or color name; -1 = default\n");
-
-    if (cfg->cursor_color_rgb[0])
-        fprintf(f, "CURSORCOLOR %s\n\n", cfg->cursor_color_rgb);
-    else
-        fprintf(f, "CURSORCOLOR %d\n\n", cfg->cursor_color);
-
-    fprintf(f, "# COLOR -- Customize color pairs. Syntax: COLOR <pair> <fg> <bg>\n");
-    fprintf(f, "#          <pair> is one of: NORMAL, STATUS, TITLEBAR, POPUP, POPUPSEL,\n");
-    fprintf(f, "#          BORDER, SEARCHMATCH\n");
-    fprintf(f, "#          <fg> and <bg> are color names: black, red, green, yellow,\n");
-    fprintf(f, "#          blue, magenta, cyan, white (these will use your COLORMAP if defined)\n");
-    fprintf(f, "# Default: built-in palette (see below for defaults)\n");
-    fprintf(f, "#COLOR TAGLINE cyan black\n");
-    fprintf(f, "#COLOR QUOTE1 green black\n");
-    fprintf(f, "#COLOR STATUS black white\n\n");
-
-    fprintf(f, "# Built-in default color palette (these are used if you do not override):\n");
-    fprintf(f, "#   NORMAL       white on black\n");
-    fprintf(f, "#   STATUS       black on white\n");
-    fprintf(f, "#   TITLEBAR     black on cyan\n");
-    fprintf(f, "#   POPUP        white on blue\n");
-    fprintf(f, "#   POPUPSEL     black on cyan\n");
-    fprintf(f, "#   BORDER       cyan on black\n");
-    fprintf(f, "#   SEARCH_MATCH black on yellow\n\n");
-
-    for (i = 1; i < TE_CFG_COLOR_MAX; i++)
+    /* Replace original file with temporary file */
+    if (remove(path) != 0 && errno != ENOENT)
     {
-        const char *pn = pair_name(i);
-
-        if (pn)
-            fprintf(f, "COLOR      %-10s %-14s %s\n", pn, color_name(cfg->color_fg[i]), color_name(cfg->color_bg[i]));
+        remove(tmp_path);
+        return -1;
     }
 
-    /* Save COLORMAP if user configured it explicitly (Amiga palette mapping) */
-    if (cfg->color_map_initialized)
+    if (rename(tmp_path, path) != 0)
     {
-        int ci;
-
-        fprintf(f, "\n# COLORMAP: physical pen numbers for each logical color (Amiga)\n");
-
-        for (ci = 0; ci < 16; ci++)
-            fprintf(f, "COLORMAP   %s %d\n", color_name(ci), cfg->color_map[ci]);
+        remove(tmp_path);
+        return -1;
     }
-
-    fclose(f);
 
     return 0;
 }
