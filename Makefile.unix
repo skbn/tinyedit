@@ -26,9 +26,9 @@ ifneq ($(BSD_OS),)
     endif
 endif
 
-CC = gcc
-#CFLAGS = -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
-CFLAGS = -Wall -Wextra -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
+CC ?= cc
+#CFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
+CFLAGS += -Wall -Wextra -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
 AR = ar
 
 # Platform define

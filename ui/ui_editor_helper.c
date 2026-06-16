@@ -18,6 +18,7 @@
 #include "../core/utf8.h"
 #include "../core/charset.h"
 #include "../core/clipboard.h"
+#include "ui_editor_helper.h"
 #include "../components/editor.h"
 #include "te.h"
 #include "ui_files.h"
