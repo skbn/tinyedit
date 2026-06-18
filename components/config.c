@@ -292,8 +292,11 @@ void te_cfg_defaults(TeConfig *cfg)
 #ifdef HAVE_HUNSPELL
     /* Spell checker defaults: disabled, empty paths */
     cfg->spell_enabled = 0;
+
     /* Default Hunspell dictionary path (platform-specific) */
-#if defined(PLATFORM_UNIX)
+#if defined(PLATFORM_BSD)
+    strncpy(cfg->spell_dict_path, "/usr/local/share/hunspell", sizeof(cfg->spell_dict_path) - 1);
+#elif defined(PLATFORM_UNIX)
     strncpy(cfg->spell_dict_path, "/usr/share/hunspell", sizeof(cfg->spell_dict_path) - 1);
 #elif defined(PLATFORM_WIN32)
     strncpy(cfg->spell_dict_path, "C:\\Program Files\\LibreOffice\\share\\extensions\\dict-en", sizeof(cfg->spell_dict_path) - 1);

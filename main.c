@@ -272,6 +272,8 @@ int main(int argc, char **argv)
     define_key("\033Q", KEY_ALT('Q'));
     define_key("\033z", KEY_ALT('Z'));
     define_key("\033Z", KEY_ALT('Z'));
+    define_key("\033h", KEY_ALT('H'));
+    define_key("\033H", KEY_ALT('H'));
 #endif
 
     curs_set(1);
