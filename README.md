@@ -74,7 +74,7 @@ To ttengine.library: make -f Makefile.amiga
 
 To static freetype with libpng and zlib:
 Extract the files freetype-2.14.3.tar.xz, libpng-1.6.58.tar.xz and, zlib.tar.gz
-into CrashEdit and rename them to freetype, zlib, and libpng.
+into TinyEdit and rename them to freetype, zlib, and libpng.
 
 To prepair headers:
 make -f Makefile.amiga.te unprep
@@ -83,6 +83,8 @@ make -f Makefile.amiga.te clean all
 
 To compile with Hunspell spell checker:
 Hunspell source: https://github.com/hunspell/hunspell
+
+Experimental:
 Hypehn source: https://github.com/hunspell/hyphen.git
 Mythes source: https://github.com/hunspell/mythes.git
 
@@ -96,9 +98,10 @@ For Makefile.amiga.te (with FreeType):
 make -f Makefile.amiga.te prep-hunspell
 make -f Makefile.amiga.te USE_HUNSPELL=1 all
 
-Note: The prep-hunspell target applies patches to Hunspell source code to fix endianness issues on m68k (big-endian architecture). These patches are necessary because:
+Note: The prep-hunspell target applies patches to Hunspell source code to fix endianness issues on m68k (big-endian architecture)
+These patches are necessary because:
 
-Vesrion 1.7.3:
+Version 1.7.3:
 
 **w_char.hxx (line 58):**
 - Original: #if defined(_WIN32) || (defined(__BYTE_ORDER__) && (__BYTE_ORDER__==__ORDER_LITTLE_ENDIAN__)) || defined(__LITTLE_ENDIAN__)
@@ -128,7 +131,8 @@ Vesrion 1.7.3:
   ```
 - Reason: Inverts byte order for m68k big-endian compatibility (h/l swapped)
 
-These patches are applied automatically by the Makefile and only need to be run once. If Hunspell is updated to a new version, these patches may need to be reapplied or adjusted.
+These patches are applied automatically by the Makefile and only need to be run once
+If Hunspell is updated to a new version, these patches may need to be reapplied or adjusted
 
 Freetype fonts tested:
 
@@ -158,7 +162,7 @@ For Spanish and English, download from LibreOffice Dictionaries Collection:
 
 On AmigaOS, place the .aff and .dic files in the "ENVARC:dictionaries" directory.
 
-The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA.
+The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA
 ```
 
 ### Windows
