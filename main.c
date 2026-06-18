@@ -364,6 +364,8 @@ int main(int argc, char **argv)
         }
     }
 
+    app->show_tabs = 0;
+
     te_status(app, argc >= 2 ? argv[1] : "[No Name]");
 
     ui_editor_run(app);
