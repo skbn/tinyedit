@@ -33,6 +33,7 @@ int do_search(TeApp *app);
 int replace_current(TeApp *app);
 int replace_all(TeApp *app);
 int insert_file(TeApp *app);
+int toggle_spell_panel(TeApp *app);
 
 /* Control key implementations */
 int paste(TeApp *app);

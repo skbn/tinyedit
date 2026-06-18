@@ -235,7 +235,7 @@ void wm_focus_by_index(TeWindowManager *wm, int index)
 }
 
 /* Recalculate layout for LEFT layout (tabs left, editor right) */
-void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int show_tabs, int show_translate, int show_spell)
+void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int show_tabs, int spell_panel_mode)
 {
     int tab_w;
     int panel_h;
@@ -245,7 +245,7 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
         return;
 
     tab_w = show_tabs ? 20 : 0;
-    panel_h = (show_translate || show_spell) ? 10 : 0;
+    panel_h = (spell_panel_mode >= 0) ? 10 : 0;
 
     for (i = 0; i < wm->win_count; i++)
     {
@@ -274,7 +274,7 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
             win->y = screen_h - panel_h;
             win->w = screen_w - tab_w;
             win->h = panel_h;
-            win->visible = show_translate;
+            win->visible = (spell_panel_mode == 1);
         }
         else if (win->type == WIN_SPELL)
         {
@@ -282,7 +282,7 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
             win->y = screen_h - panel_h;
             win->w = screen_w - tab_w;
             win->h = panel_h;
-            win->visible = show_spell;
+            win->visible = (spell_panel_mode == 0);
         }
     }
 }

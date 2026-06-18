@@ -17,10 +17,31 @@
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 CC = m68k-amigaos-gcc -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA
+CXX = m68k-amigaos-g++ -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA
 CFLAGS = -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -std=gnu89 -O2 -lm
+CXXFLAGS = -std=c++14 -O2 -Wall -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer -DHUNSPELL_STATIC
 AR = m68k-amigaos-ar
 RANLIB = m68k-amigaos-ranlib
 TARGET = $(HERE)libtinyedit-amiga.a
+
+# Hunspell support
+USE_HUNSPELL ?= 0
+HUNSPELL_DIR = $(HERE)hunspell
+HUNSPELL_SRC = $(HUNSPELL_DIR)/src/hunspell
+HUNSPELL_OBJDIR = $(HUNSPELL_DIR)/objs.amiga
+HUNSPELL_LIB = $(HUNSPELL_DIR)/libhunspell.a
+HUNSPELL_VERSION_H = $(HUNSPELL_SRC)/hunversion.h
+HUNSPELL_VERSION_IN = $(HUNSPELL_SRC)/hunversion.h.in
+
+ifeq ($(USE_HUNSPELL),1)
+  CFLAGS += -DHAVE_HUNSPELL -I$(HUNSPELL_SRC) -I$(HERE)spell
+  SPELL_OBJS = $(OBJDIR)/spell.o
+  HUNSPELL_OBJS = $(HUNSPELL_OBJDIR)/affentry.o $(HUNSPELL_OBJDIR)/affixmgr.o \
+                  $(HUNSPELL_OBJDIR)/csutil.o $(HUNSPELL_OBJDIR)/filemgr.o \
+                  $(HUNSPELL_OBJDIR)/hashmgr.o $(HUNSPELL_OBJDIR)/hunspell.o \
+                  $(HUNSPELL_OBJDIR)/hunzip.o $(HUNSPELL_OBJDIR)/phonet.o \
+                  $(HUNSPELL_OBJDIR)/replist.o $(HUNSPELL_OBJDIR)/suggestmgr.o
+endif
 
 # Directories -- separate obj dir from Linux build so .o files don't collide
 OBJDIR = $(HERE)objs.amiga
@@ -34,10 +55,14 @@ CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
 COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS)
+            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_spell.o
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS)
 
 all: $(TARGET) tinyedit
+
+ifeq ($(USE_HUNSPELL),1)
+all: $(HUNSPELL_LIB)
+endif
 
 $(TARGET): $(ALL_OBJS)
 	$(AR) rcs $@ $(ALL_OBJS)
@@ -107,15 +132,68 @@ $(OBJDIR)/wm.o: $(UIDIR)/wm.c $(UIDIR)/wm.h | $(OBJDIR)
 $(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Spell checker object (only if USE_HUNSPELL=1)
+$(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 # Application
 TINYEDIT = $(HERE)tinyedit
 
 tinyedit: $(TINYEDIT)
 
+ifeq ($(USE_HUNSPELL),1)
+$(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS) $(HUNSPELL_LIB)
+	$(CXX) $(CFLAGS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) $(HUNSPELL_LIB) -o $@
+else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(HERE)main.c $(ALL_OBJS) $(TARGET) -o $@
+endif
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)
+ifeq ($(USE_HUNSPELL),1)
+	rm -rf $(HUNSPELL_OBJDIR) $(HUNSPELL_LIB) $(HUNSPELL_VERSION_H)
+endif
 
-.PHONY: all clean
+# prep target - generate version header (always available)
+prep:
+	@echo ">>> Generating $(HUNSPELL_VERSION_H) from $(HUNSPELL_VERSION_IN)"
+	@sed \
+		-e 's/@HUNSPELL_VERSION_MAJOR@/1/g' \
+		-e 's/@HUNSPELL_VERSION_MINOR@/7/g' \
+		-e 's/@HUNSPELL_VERSION_PATCH@/0/g' \
+		-e 's/@VERSION@/1.7.0/g' \
+		$(HUNSPELL_VERSION_IN) > $(HUNSPELL_VERSION_H)
+	@echo ">>> Prep complete. Run 'make -f Makefile.amiga USE_HUNSPELL=1 all' to build."
+
+# Hunspell build rules (only if USE_HUNSPELL=1)
+ifeq ($(USE_HUNSPELL),1)
+
+# Create Hunspell object directory
+$(HUNSPELL_OBJDIR):
+	mkdir -p $(HUNSPELL_OBJDIR)
+
+# Compile Hunspell C++ source files
+$(HUNSPELL_OBJDIR)/%.o: $(HUNSPELL_SRC)/%.cxx | $(HUNSPELL_OBJDIR)
+	$(CXX) $(CXXFLAGS) -I$(HUNSPELL_SRC) -c $< -o $@
+
+# Create Hunspell static library
+$(HUNSPELL_LIB): $(HUNSPELL_OBJS)
+	$(AR) rcs $@ $(HUNSPELL_OBJS)
+	$(RANLIB) $@
+	@echo ">>> $(HUNSPELL_LIB) built successfully"
+
+endif
+
+# unprep target - remove generated files (always available)
+unprep:
+	@rm -f $(HUNSPELL_VERSION_H)
+	@echo ">>> $(HUNSPELL_VERSION_H) removed"
+
+.PHONY: all clean prep unprep

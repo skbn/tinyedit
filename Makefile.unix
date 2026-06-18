@@ -27,11 +27,21 @@ ifneq ($(BSD_OS),)
 endif
 
 CC ?= cc
+CXX ?= c++
 CFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
+CXXFLAGS += -std=c++14 -O2 -Wall -Wextra
 AR = ar
 
 # Platform define
 CDEFS = -DPLATFORM_UNIX
+
+# Hunspell support (uses system library on Unix)
+USE_HUNSPELL ?= 0
+ifeq ($(USE_HUNSPELL),1)
+  CFLAGS += -DHAVE_HUNSPELL -I$(HERE)spell
+  SPELL_OBJS = $(OBJDIR)/spell.o
+  HUNSPELL_LIB = -lhunspell
+endif
 
 # ncurses library detection:
 #   Linux, FreeBSD, NetBSD, OpenBSD  -> -lncursesw   (wide-char variant)
@@ -59,8 +69,8 @@ CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
 COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS)
+            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_spell.o
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS)
 
 all: $(TARGET) tinyedit
 
@@ -128,14 +138,30 @@ $(OBJDIR)/wm.o: $(UIDIR)/wm.c $(UIDIR)/wm.h | $(OBJDIR)
 $(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# Spell checker object (only if USE_HUNSPELL=1)
+$(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 # Application
 TINYEDIT = $(HERE)tinyedit
 
 tinyedit: $(TINYEDIT)
 
+ifeq ($(USE_HUNSPELL),1)
+$(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
+	$(CXX) $(CFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
+	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB)
+else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
 	      -o $@ $(NCURSES_LIB)
+endif
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)

@@ -27,6 +27,7 @@
 #include "ui_files.h"
 #include "ui_editor_helper.h"
 #include "ui_setup.h"
+#include "ui_spell.h"
 
 /* Help text */
 static const char *HELP_LINES[] =
@@ -82,6 +83,9 @@ static const char *HELP_LINES[] =
         "    Alt+J            Next tab",
         "    Alt+K            Previous tab",
         "    Alt+W            Close current tab",
+        "",
+        "  Spell/Translate:",
+        "    Alt+S            Toggle spell/translate panel",
         "",
         "  Other:",
         "    F4 / Alt+T       Setup / configuration",
@@ -1726,6 +1730,10 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     if (ch == KEY_ALT('K'))
         return ui_tabs_switch_prev(app);
 
+    /* Alt+S : toggle spell/translate panel */
+    if (ch == KEY_ALT('S'))
+        return toggle_spell_panel(app);
+
     /* Alt+W : close current tab */
     if (ch == KEY_ALT('W'))
     {
@@ -2213,12 +2221,16 @@ void ui_editor_run(TeApp *app)
         erase();
 
         /* Recalculate layout */
-        wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->show_translate, app->show_spell);
+        wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode);
 
         te_draw_titlebar(app);
         ui_tabs_draw_panel(app);
+
         draw_body(app);
+
+        ui_spell_draw_panel(app);
         te_draw_statusbar(app);
+
         position_cursor(app);
         refresh();
 

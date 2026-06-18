@@ -7,6 +7,9 @@ A lightweight text editor for AmigaOS, Linux, and Windows using ncurses
 - Full UTF-8 support with charset conversion (internal UTF-8, configurable output)
 - Multiple charset support: UTF-8, LATIN-1/2, CP437, CP850, CP865, CP866, CP1252
 - TTF rendering with full Unicode support (including emojis) on AmigaOS
+- Tab system for editing multiple files simultaneously
+- Spell checker panel with Hunspell integration (optional)
+- Translator panel (placeholder for future implementation)
 - Configurable colors and fonts
 - Auto-wrap and hard-wrap modes
 - Undo/redo support
@@ -20,6 +23,22 @@ A lightweight text editor for AmigaOS, Linux, and Windows using ncurses
 ### Linux/BSD/macOS
 ```bash
 make -f Makefile.unix
+```
+
+To compile with Hunspell spell checker:
+- Debian/Ubuntu: `sudo apt install libhunspell-dev`
+- Arch Linux: `sudo pacman -S hunspell`
+- FreeBSD: `doas pkg install hunspell`
+- macOS: `brew install hunspell`
+
+Dictionaries are installed separately:
+- Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us` (example for Spanish and English)
+- Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us` (example for Spanish and English)
+- FreeBSD: `doas pkg install es-hunspell en-hunspell` (example for Spanish and English)
+- macOS: Dictionary files are included with hunspell
+
+```bash
+make -f Makefile.unix USE_HUNSPELL=1
 ```
 
 ### AmigaOS
@@ -49,6 +68,19 @@ make -f Makefile.amiga.te unprep
 make -f Makefile.amiga.te prep
 make -f Makefile.amiga.te clean all
 
+To compile with Hunspell spell checker:
+Hunspell source: https://github.com/hunspell/hunspell
+
+make -f Makefile.amiga prep
+make -f Makefile.amiga USE_HUNSPELL=1 all
+
+To compile without Hunspell (default):
+make -f Makefile.amiga all
+
+For Makefile.amiga.te (with FreeType):
+make -f Makefile.amiga.te prep-hunspell
+make -f Makefile.amiga.te USE_HUNSPELL=1 all
+
 Freetype fonts tested:
 
 Symbola.ttf
@@ -73,6 +105,11 @@ The executable is large, but you don't need any libraries. It's optimized for RT
 From msys2 with mingw x32 or x64
 
 make -f Makefile.win32
+```
+
+To compile with Hunspell spell checker (requires libhunspell):
+```bash
+make -f Makefile.win32 USE_HUNSPELL=1
 ```
 
 ## Usage

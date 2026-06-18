@@ -129,6 +129,7 @@ typedef struct
     int show_tabs;
     int show_translate;
     int show_spell;
+    int spell_panel_mode;    /* 0 = spell checker, 1 = translator */
     int tabs_panel_active;   /* Navigation mode in tabs panel */
     int tabs_panel_selected; /* Currently selected tab in panel */
 

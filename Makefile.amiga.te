@@ -25,10 +25,31 @@ HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 CROSS      ?= m68k-amigaos-
 CC         := $(CROSS)gcc -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA -DUSE_FREETYPE -DAMIGA_TTF_TE
+CXX        := $(CROSS)g++ -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA -DUSE_FREETYPE -DAMIGA_TTF_TE
 AR         := $(CROSS)ar
 RANLIB     := $(CROSS)ranlib
 
 CFLAGS     := -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -std=gnu89 -O2 -Wno-pointer-sign -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer
+CXXFLAGS   := -std=c++14 -O2 -Wall -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer -DHUNSPELL_STATIC
+
+# Hunspell support
+USE_HUNSPELL ?= 0
+HUNSPELL_DIR = $(HERE)hunspell
+HUNSPELL_SRC = $(HUNSPELL_DIR)/src/hunspell
+HUNSPELL_OBJDIR = $(HUNSPELL_DIR)/objs.amiga
+HUNSPELL_LIB = $(HUNSPELL_DIR)/libhunspell.a
+HUNSPELL_VERSION_H = $(HUNSPELL_SRC)/hunversion.h
+HUNSPELL_VERSION_IN = $(HUNSPELL_SRC)/hunversion.h.in
+
+ifeq ($(USE_HUNSPELL),1)
+  CFLAGS += -DHAVE_HUNSPELL -I$(HUNSPELL_SRC) -I$(HERE)spell
+  SPELL_OBJS = $(OBJDIR)/spell.o
+  HUNSPELL_OBJS = $(HUNSPELL_OBJDIR)/affentry.o $(HUNSPELL_OBJDIR)/affixmgr.o \
+                  $(HUNSPELL_OBJDIR)/csutil.o $(HUNSPELL_OBJDIR)/filemgr.o \
+                  $(HUNSPELL_OBJDIR)/hashmgr.o $(HUNSPELL_OBJDIR)/hunspell.o \
+                  $(HUNSPELL_OBJDIR)/hunzip.o $(HUNSPELL_OBJDIR)/phonet.o \
+                  $(HUNSPELL_OBJDIR)/replist.o $(HUNSPELL_OBJDIR)/suggestmgr.o
+endif
 
 # External tree locations -- relative to HERE
 FTDIR      := $(HERE)freetype
@@ -58,8 +79,8 @@ CORE_OBJS  = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
 COMP_OBJS  = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS    = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o \
              $(OBJDIR)/ui_popup.o $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
-ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS)
+             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_spell.o
+ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS)
 
 # FreeType objects (with gzip + lzw modules) - all in OBJDIR
 FT_OBJS    := \
@@ -120,6 +141,10 @@ endif
 # ====================================================================
 all: $(TARGET) tinyedit
 
+ifeq ($(USE_HUNSPELL),1)
+all: $(HUNSPELL_LIB)
+endif
+
 # Build libtinyedit-amiga.a containing everything: app + FT + zlib + png
 $(TARGET): $(ALL_OBJS) $(FT_OBJS) $(EXTRA_OBJS)
 	$(AR) rcs $@ $(ALL_OBJS) $(FT_OBJS) $(EXTRA_OBJS)
@@ -127,8 +152,16 @@ $(TARGET): $(ALL_OBJS) $(FT_OBJS) $(EXTRA_OBJS)
 
 tinyedit: $(TINYEDIT)
 
+ifeq ($(USE_HUNSPELL),1)
+$(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(HUNSPELL_LIB)
+	$(CXX) $(CFLAGS) $(OBJDIR)/main.o $(TARGET) $(HUNSPELL_LIB) -lm -o $@
+else
 $(TINYEDIT): $(HERE)main.c $(TARGET)
 	$(CC) $(CFLAGS) $(HERE)main.c $(TARGET) -lm -o $@
+endif
 
 # ====================================================================
 # prep target -- full mode (PNG + system zlib for color emoji fonts)
@@ -406,12 +439,57 @@ $(OBJDIR)/wm.o: $(UIDIR)/wm.c | $(OBJDIR)
 $(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
+$(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+# Spell checker object (only if USE_HUNSPELL=1)
+$(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)
+ifeq ($(USE_HUNSPELL),1)
+	rm -rf $(HUNSPELL_OBJDIR) $(HUNSPELL_LIB) $(HUNSPELL_VERSION_H)
+endif
 
 clean-ft:
 	rm -f $(FT_OBJS) $(ZLIB_OBJS) $(PNG_OBJS)
 
 clean-all: clean clean-ft
 
-.PHONY: all clean clean-ft clean-all prep prep-min unprep tinyedit
+# prep-hunspell target - generate version header (always available)
+prep-hunspell:
+	@echo ">>> Generating $(HUNSPELL_VERSION_H) from $(HUNSPELL_VERSION_IN)"
+	@sed \
+		-e 's/@HUNSPELL_VERSION_MAJOR@/1/g' \
+		-e 's/@HUNSPELL_VERSION_MINOR@/7/g' \
+		-e 's/@HUNSPELL_VERSION_PATCH@/0/g' \
+		-e 's/@VERSION@/1.7.0/g' \
+		$(HUNSPELL_VERSION_IN) > $(HUNSPELL_VERSION_H)
+	@echo ">>> Hunspell prep complete."
+
+# Hunspell build rules (only if USE_HUNSPELL=1)
+ifeq ($(USE_HUNSPELL),1)
+
+# Create Hunspell object directory
+$(HUNSPELL_OBJDIR):
+	mkdir -p $(HUNSPELL_OBJDIR)
+
+# Compile Hunspell C++ source files
+$(HUNSPELL_OBJDIR)/%.o: $(HUNSPELL_SRC)/%.cxx | $(HUNSPELL_OBJDIR)
+	$(CXX) $(CXXFLAGS) -I$(HUNSPELL_SRC) -c $< -o $@
+
+# Create Hunspell static library
+$(HUNSPELL_LIB): $(HUNSPELL_OBJS)
+	$(AR) rcs $@ $(HUNSPELL_OBJS)
+	$(RANLIB) $@
+	@echo ">>> $(HUNSPELL_LIB) built successfully"
+
+endif
+
+# unprep-hunspell target - remove generated files (always available)
+unprep-hunspell:
+	@rm -f $(HUNSPELL_VERSION_H)
+	@echo ">>> $(HUNSPELL_VERSION_H) removed"
+
+.PHONY: all clean clean-ft clean-all prep prep-min unprep prep-hunspell unprep-hunspell tinyedit

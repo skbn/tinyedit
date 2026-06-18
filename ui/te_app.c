@@ -64,6 +64,7 @@ TeApp *te_app_new(void)
     app->show_tabs = 1;
     app->show_translate = 0;
     app->show_spell = 0;
+    app->spell_panel_mode = -1; /* -1 = hidden, 0 = spell checker, 1 = translator */
     app->tabs_panel_active = 0;
     app->tabs_panel_selected = 0;
     app->hard_wrap = 0;
