@@ -20,6 +20,7 @@ HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 # Detect OS and warn if BSD make is used instead of gmake
 OS := $(shell uname -s)
 BSD_OS := $(filter FreeBSD NetBSD OpenBSD,$(OS))
+
 ifneq ($(BSD_OS),)
     ifeq ($(MAKE),make)
         $(warning On BSD systems, use 'gmake' instead of 'make' for this Makefile)
@@ -34,13 +35,39 @@ AR = ar
 
 # Platform define
 CDEFS = -DPLATFORM_UNIX
+ifneq ($(BSD_OS),)
+  CDEFS += -DPLATFORM_BSD
+endif
 
 # Hunspell support (uses system library on Unix)
 USE_HUNSPELL ?= 0
+
 ifeq ($(USE_HUNSPELL),1)
   CFLAGS += -DHAVE_HUNSPELL -I$(HERE)spell
+
+  # Use pkg-config if available (most reliable, especially for NetBSD)
+  HUNSPELL_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags hunspell 2>/dev/null)
+  HUNSPELL_PKG_CONFIG_LIBS := $(shell pkg-config --libs hunspell 2>/dev/null)
+
+  ifneq ($(HUNSPELL_PKG_CONFIG_LIBS),)
+    CFLAGS += $(HUNSPELL_PKG_CONFIG_CFLAGS)
+    HUNSPELL_LIB = $(HUNSPELL_PKG_CONFIG_LIBS)
+  else
+    # Fallback to platform-specific paths
+    ifeq ($(OS),NetBSD)
+      CFLAGS += -I/usr/pkg/include
+      HUNSPELL_LIB = -L/usr/pkg/lib -Wl,-rpath,/usr/pkg/lib -lhunspell-1.7
+    else ifeq ($(OS),FreeBSD)
+      CFLAGS += -I/usr/local/include
+      HUNSPELL_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lhunspell-1.7
+    else ifeq ($(OS),OpenBSD)
+      CFLAGS += -I/usr/local/include
+      HUNSPELL_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lhunspell-1.7
+    else
+      HUNSPELL_LIB = -lhunspell
+    endif
+  endif
   SPELL_OBJS = $(OBJDIR)/spell.o
-  HUNSPELL_LIB = -lhunspell
 endif
 
 # ncurses library detection:

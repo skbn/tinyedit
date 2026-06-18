@@ -16,6 +16,8 @@
 #ifdef HAVE_HUNSPELL
 #ifdef PLATFORM_AMIGA
 #include "hunspell.h"
+#elif defined(PLATFORM_BSD)
+#include <hunspell.h>
 #else
 #include <hunspell/hunspell.h>
 #endif

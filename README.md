@@ -25,7 +25,7 @@ A lightweight text editor for AmigaOS, Linux, and Windows using ncurses
 make -f Makefile.unix
 ```
 
-To compile with Hunspell spell checker:
+To compile with Hunspell spell checker (optional):
 - Debian/Ubuntu: `sudo apt install libhunspell-dev`
 - Arch Linux: `sudo pacman -S hunspell`
 - FreeBSD: `doas pkg install hunspell`
@@ -39,6 +39,19 @@ Dictionaries are installed separately:
 
 ```bash
 make -f Makefile.unix USE_HUNSPELL=1
+```
+
+### Windows (MinGW)
+```bash
+make -f Makefile.win32
+```
+
+To compile with Hunspell spell checker (optional):
+- Install Hunspell development package for MinGW
+- Dictionary files must be placed in the program directory
+
+```bash
+make -f Makefile.win32 USE_HUNSPELL=1
 ```
 
 ### AmigaOS
