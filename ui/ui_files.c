@@ -1091,19 +1091,19 @@ int ui_files_open(TeApp *app)
         return -1;
 
     /* Start from current file's directory, or CWD */
-    if (app->filename[0])
+    if (te_app_get_filename(app)[0])
     {
         /* Extract directory from current filename */
-        const char *last_slash = strrchr(app->filename, '/');
+        const char *last_slash = strrchr(te_app_get_filename(app), '/');
 
         if (!last_slash)
-            last_slash = strrchr(app->filename, '\\');
+            last_slash = strrchr(te_app_get_filename(app), '\\');
 
         if (last_slash)
         {
-            int dir_len = (int)(last_slash - app->filename);
+            int dir_len = (int)(last_slash - te_app_get_filename(app));
 
-            strncpy(start_dir_buf, app->filename, dir_len);
+            strncpy(start_dir_buf, te_app_get_filename(app), dir_len);
             start_dir_buf[dir_len] = '\0';
             start_dir = start_dir_buf;
         }
@@ -1149,18 +1149,18 @@ int ui_files_open(TeApp *app)
     buf[r] = '\0';
 
     /* Keep raw bytes for live charset re-decode */
-    free(app->raw_bytes);
+    free(te_app_get_raw_bytes(app));
 
-    app->raw_bytes = (char *)malloc(r + 1);
+    char *new_bytes = (char *)malloc(r + 1);
 
-    if (app->raw_bytes)
+    if (new_bytes)
     {
-        memcpy(app->raw_bytes, buf, r + 1);
-        app->raw_len = (int)r;
+        memcpy(new_bytes, buf, r + 1);
+        te_app_set_raw_bytes(app, new_bytes, (int)r);
     }
     else
     {
-        app->raw_len = 0;
+        te_app_set_raw_bytes(app, NULL, 0);
     }
 
     /* Convert to UTF-8 if needed */
@@ -1198,12 +1198,11 @@ int ui_files_open(TeApp *app)
     }
 
     /* Load into editor (ed_load clears previous content) */
-    ed_load(app->editor, content);
+    ed_load(te_app_get_editor(app), content);
     free(content);
 
     /* Update filename */
-    strncpy(app->filename, path, sizeof(app->filename) - 1);
-    app->filename[sizeof(app->filename) - 1] = '\0';
+    te_app_set_filename(app, path);
 
     te_status(app, "Loaded: %s", path);
 

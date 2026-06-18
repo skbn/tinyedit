@@ -28,7 +28,7 @@ CC         := $(CROSS)gcc -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA -D
 AR         := $(CROSS)ar
 RANLIB     := $(CROSS)ranlib
 
-CFLAGS     := -Wall -std=gnu89 -O2 -Wno-pointer-sign -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer
+CFLAGS     := -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -std=gnu89 -O2 -Wno-pointer-sign -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer
 
 # External tree locations -- relative to HERE
 FTDIR      := $(HERE)freetype
@@ -57,7 +57,8 @@ CORE_OBJS  = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
              
 COMP_OBJS  = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS    = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o \
-             $(OBJDIR)/ui_popup.o $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o
+             $(OBJDIR)/ui_popup.o $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
+             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
 ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS)
 
 # FreeType objects (with gzip + lzw modules) - all in OBJDIR
@@ -396,6 +397,14 @@ $(OBJDIR)/ui_setup.o: $(UIDIR)/ui_setup.c | $(OBJDIR)
 $(OBJDIR)/ui_glyph_picker.o: $(UIDIR)/ui_glyph_picker.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
+$(OBJDIR)/tabs.o: $(UIDIR)/tabs.c | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/wm.o: $(UIDIR)/wm.c | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)

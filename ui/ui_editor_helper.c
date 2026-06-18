@@ -89,8 +89,8 @@ int search_prev(TeApp *app)
     match_row = app->search.rows[app->search.current_match];
     match_col = app->search.cols[app->search.current_match];
 
-    ed_set_pos(app->editor, match_row, match_col);
-    ed_ensure_visible(app->editor);
+    ed_set_pos(te_app_get_editor(app), match_row, match_col);
+    ed_ensure_visible(te_app_get_editor(app));
 
     return 1;
 }
@@ -110,8 +110,8 @@ int search_next(TeApp *app)
     match_row = app->search.rows[app->search.current_match];
     match_col = app->search.cols[app->search.current_match];
 
-    ed_set_pos(app->editor, match_row, match_col);
-    ed_ensure_visible(app->editor);
+    ed_set_pos(te_app_get_editor(app), match_row, match_col);
+    ed_ensure_visible(te_app_get_editor(app));
 
     return 1;
 }
@@ -125,7 +125,7 @@ static int do_replace(TeApp *app, const wchar_t *needle, const wchar_t *repl)
     int match_count, i;
 
     /* Find all matches with current case-sensitive and whole-word options */
-    match_count = ed_search_all_custom(app->editor, needle, app->search.case_sensitive, app->search.whole_word, &rows, &cols);
+    match_count = ed_search_all_custom(te_app_get_editor(app), needle, app->search.case_sensitive, app->search.whole_word, &rows, &cols);
 
     if (match_count == 0)
         return 0;
@@ -135,15 +135,15 @@ static int do_replace(TeApp *app, const wchar_t *needle, const wchar_t *repl)
     {
         int j;
 
-        ed_set_pos(app->editor, rows[i], cols[i]);
+        ed_set_pos(te_app_get_editor(app), rows[i], cols[i]);
 
         /* Delete needle */
         for (j = 0; j < nlen; j++)
-            ed_delete(app->editor);
+            ed_delete(te_app_get_editor(app));
 
         /* Insert replacement */
         for (j = 0; j < rlen; j++)
-            ed_insert_char(app->editor, repl[j]);
+            ed_insert_char(te_app_get_editor(app), repl[j]);
 
         count++;
     }
@@ -181,7 +181,7 @@ int replace(TeApp *app)
     app->search.whole_word = whole_word;
 
     /* Perform search and highlight matches */
-    match_count = ed_search_all_custom(app->editor, app->search.query, case_sensitive, whole_word, &rows, &cols);
+    match_count = ed_search_all_custom(te_app_get_editor(app), app->search.query, case_sensitive, whole_word, &rows, &cols);
 
     clear_search_highlights(app);
 
@@ -196,13 +196,14 @@ int replace(TeApp *app)
         app->search.match_total = match_count;
 
         /* Move cursor to first match and ensure it's visible */
-        ed_set_pos(app->editor, rows[0], cols[0]);
-        ed_ensure_visible(app->editor);
+        ed_set_pos(te_app_get_editor(app), rows[0], cols[0]);
+        ed_ensure_visible(te_app_get_editor(app));
     }
     else
     {
         free(rows);
         free(cols);
+
         app->search.is_mode = 0;
         te_status(app, "No matches found");
     }
@@ -235,10 +236,10 @@ int replace_current(TeApp *app)
         match_row = app->search.rows[app->search.current_match];
         match_col = app->search.cols[app->search.current_match];
 
-        ed_set_pos(app->editor, match_row, match_col);
+        ed_set_pos(te_app_get_editor(app), match_row, match_col);
 
         /* Save undo state */
-        ed_save_undo(app->editor);
+        ed_save_undo(te_app_get_editor(app));
 
         /* Replace the current occurrence */
         nlen = (int)wcslen(app->search.query);
@@ -246,11 +247,11 @@ int replace_current(TeApp *app)
 
         /* Delete the search text */
         for (i = 0; i < nlen; i++)
-            ed_delete(app->editor);
+            ed_delete(te_app_get_editor(app));
 
         /* Insert replacement */
         for (i = 0; i < rlen; i++)
-            ed_insert_char(app->editor, repl[i]);
+            ed_insert_char(te_app_get_editor(app), repl[i]);
 
         /* Update search results since text changed */
         free(app->search.rows);
@@ -263,7 +264,7 @@ int replace_current(TeApp *app)
         /* Re-run search to find remaining matches */
         new_rows = NULL;
         new_cols = NULL;
-        new_match_count = ed_search_all_custom(app->editor, app->search.query, app->search.case_sensitive, app->search.whole_word, &new_rows, &new_cols);
+        new_match_count = ed_search_all_custom(te_app_get_editor(app), app->search.query, app->search.case_sensitive, app->search.whole_word, &new_rows, &new_cols);
 
         if (new_match_count > 0)
         {
@@ -275,8 +276,8 @@ int replace_current(TeApp *app)
             app->search.match_total = new_match_count;
 
             /* Move cursor to first remaining match */
-            ed_set_pos(app->editor, new_rows[0], new_cols[0]);
-            ed_ensure_visible(app->editor);
+            ed_set_pos(te_app_get_editor(app), new_rows[0], new_cols[0]);
+            ed_ensure_visible(te_app_get_editor(app));
 
             te_status(app, "Replaced. %d match(es) remaining", new_match_count);
         }
@@ -284,6 +285,7 @@ int replace_current(TeApp *app)
         {
             free(new_rows);
             free(new_cols);
+
             app->search.is_mode = 0;
             app->search.match_total = 0;
 
@@ -309,7 +311,7 @@ int replace_all(TeApp *app)
 
         if (ui_popup_confirm("Replace All", msg) == 1)
         {
-            ed_save_undo(app->editor);
+            ed_save_undo(te_app_get_editor(app));
             n = do_replace(app, app->search.query, app->search.last_replace);
 
             clear_search_highlights(app);
@@ -346,7 +348,7 @@ int do_search(TeApp *app)
     app->search.query[63] = L'\0';
 
     /* Find all matches (no limit) */
-    match_count = ed_search_all(app->editor, app->search.query, &rows, &cols);
+    match_count = ed_search_all(te_app_get_editor(app), app->search.query, &rows, &cols);
 
     /* Free previous search matches */
     clear_search_highlights(app);
@@ -362,8 +364,8 @@ int do_search(TeApp *app)
     if (match_count == 1)
     {
         /* Single match: jump directly */
-        ed_set_pos(app->editor, rows[0], cols[0]);
-        ed_ensure_visible(app->editor);
+        ed_set_pos(te_app_get_editor(app), rows[0], cols[0]);
+        ed_ensure_visible(te_app_get_editor(app));
         te_status(app, "Found at line %d", rows[0] + 1);
 
         /* Save matches for highlighting and activate search mode */
@@ -383,8 +385,8 @@ int do_search(TeApp *app)
 
     if (choice >= 0)
     {
-        ed_set_pos(app->editor, rows[choice], cols[choice]);
-        ed_ensure_visible(app->editor);
+        ed_set_pos(te_app_get_editor(app), rows[choice], cols[choice]);
+        ed_ensure_visible(te_app_get_editor(app));
         te_status(app, "Jumped to line %d", rows[choice] + 1);
 
         app->search.current_match = choice;
@@ -420,7 +422,7 @@ int insert_file(TeApp *app)
 
     ui_popup_charset("Input charset (empty=UTF-8)", "", in_cs, sizeof(in_cs));
 
-    if (ed_load_file_at_cursor(app->editor, path, in_cs[0] ? in_cs : NULL) == 0)
+    if (ed_load_file_at_cursor(te_app_get_editor(app), path, in_cs[0] ? in_cs : NULL) == 0)
     {
         clear_search_highlights(app);
         te_status(app, "Inserted: %s", path);
@@ -458,9 +460,10 @@ int paste(TeApp *app)
                 }
             }
 
-            ed_paste_text_with_undo(app->editor, to_insert);
+            ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
             clear_search_highlights(app);
             soft_reset_desired();
+
             s_soft_vtop = 0;
             te_status(app, "Pasted from clipboard");
 
@@ -476,10 +479,11 @@ int paste(TeApp *app)
     else
     {
         /* SSH/headless: use internal block only */
-        if (ed_block_paste(app->editor) == 0)
+        if (ed_block_paste(te_app_get_editor(app)) == 0)
         {
             clear_search_highlights(app);
             soft_reset_desired();
+
             s_soft_vtop = 0;
             te_status(app, "Pasted (internal block)");
         }
@@ -514,8 +518,8 @@ int ui_editor_goto_line(TeApp *app)
 
         if (n >= 1)
         {
-            ed_goto_line(app->editor, n - 1);
-            ed_ensure_visible(app->editor);
+            ed_goto_line(te_app_get_editor(app), n - 1);
+            ed_ensure_visible(te_app_get_editor(app));
 
             /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
             if (!app->hard_wrap)
@@ -529,13 +533,13 @@ int ui_editor_goto_line(TeApp *app)
 int copy(TeApp *app)
 {
     EdInfo info;
-    ed_get_info(app->editor, &info);
+    ed_get_info(te_app_get_editor(app), &info);
 
     if (info.block.active)
     {
-        char *utf8 = ed_block_get_utf8(app->editor);
+        char *utf8 = ed_block_get_utf8(te_app_get_editor(app));
 
-        if (ed_block_copy(app->editor) == 0)
+        if (ed_block_copy(te_app_get_editor(app)) == 0)
         {
             /* Copy to external clipboard if available */
             if (clipboard_use_external() && utf8)
@@ -559,13 +563,13 @@ int copy(TeApp *app)
 int cut(TeApp *app)
 {
     EdInfo info;
-    ed_get_info(app->editor, &info);
+    ed_get_info(te_app_get_editor(app), &info);
 
     if (info.block.active)
     {
-        char *utf8 = ed_block_get_utf8(app->editor);
+        char *utf8 = ed_block_get_utf8(te_app_get_editor(app));
 
-        if (ed_block_cut(app->editor) == 0)
+        if (ed_block_cut(te_app_get_editor(app)) == 0)
         {
             clear_search_highlights(app);
 
@@ -590,8 +594,8 @@ int cut(TeApp *app)
 
 int ui_editor_goto_start(TeApp *app)
 {
-    ed_set_pos(app->editor, 0, 0);
-    ed_ensure_visible(app->editor);
+    ed_set_pos(te_app_get_editor(app), 0, 0);
+    ed_ensure_visible(te_app_get_editor(app));
 
     /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
     if (!app->hard_wrap)
@@ -603,14 +607,14 @@ int ui_editor_goto_start(TeApp *app)
 int ui_editor_goto_end(TeApp *app)
 {
     EdInfo info;
-    ed_get_info(app->editor, &info);
+    ed_get_info(te_app_get_editor(app), &info);
 
     if (info.line_count > 0)
     {
         int ll = info.line_count - 1;
 
-        ed_set_pos(app->editor, ll, ed_line_len(app->editor, ll));
-        ed_ensure_visible(app->editor);
+        ed_set_pos(te_app_get_editor(app), ll, ed_line_len(te_app_get_editor(app), ll));
+        ed_ensure_visible(te_app_get_editor(app));
 
         /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
         if (!app->hard_wrap)
@@ -623,7 +627,7 @@ int ui_editor_goto_end(TeApp *app)
 int ui_editor_export(TeApp *app)
 {
     EdInfo info;
-    ed_get_info(app->editor, &info);
+    ed_get_info(te_app_get_editor(app), &info);
 
     if (!info.block.active)
     {
@@ -640,7 +644,7 @@ int ui_editor_export(TeApp *app)
 
         ui_popup_charset("Output charset (empty=UTF-8)", "", out_cs, sizeof(out_cs));
 
-        if (ed_export_block_to_file(app->editor, path, out_cs[0] ? out_cs : NULL) == 0)
+        if (ed_export_block_to_file(te_app_get_editor(app), path, out_cs[0] ? out_cs : NULL) == 0)
             te_status(app, "Block written: %s", path);
         else
             te_status(app, "Cannot write: %s", path);
@@ -653,7 +657,7 @@ int rewrap(TeApp *app)
 {
     int col = (app->wrap_col > 0) ? app->wrap_col : 75;
 
-    if (ed_rewrap_paragraph(app->editor, col) == 0)
+    if (ed_rewrap_paragraph(te_app_get_editor(app), col) == 0)
     {
         clear_search_highlights(app);
         te_status(app, "Paragraph rewrapped");
@@ -684,9 +688,9 @@ int charset_select(TeApp *app)
         /* If view charset changed and editor has unsaved changes, warn user */
         if (view_changed)
         {
-            ed_get_info(app->editor, &info);
+            ed_get_info(te_app_get_editor(app), &info);
 
-            if (info.modified && app->filename[0])
+            if (info.modified && te_app_get_filename(app)[0])
             {
                 if (ui_popup_confirm("Charset", "Unsaved changes: changing charset will reload from disk and lose edits. Continue?") != 1)
                     return 1; /* User cancelled */
@@ -701,14 +705,14 @@ int charset_select(TeApp *app)
         app->charset_out[sizeof(app->charset_out) - 1] = '\0';
 
         /* If view charset changed and we have a file, reload from disk */
-        if (view_changed && app->filename[0])
+        if (view_changed && te_app_get_filename(app)[0])
         {
             FILE *fp;
             long size;
             char *buf;
             size_t r;
 
-            fp = fopen(app->filename, "rb");
+            fp = fopen(te_app_get_filename(app), "rb");
             if (fp)
             {
                 fseek(fp, 0, SEEK_END);
@@ -725,18 +729,18 @@ int charset_select(TeApp *app)
                         buf[r] = '\0';
 
                         /* Update raw_bytes */
-                        free(app->raw_bytes);
+                        free(te_app_get_raw_bytes(app));
 
-                        app->raw_bytes = (char *)malloc(r + 1);
+                        char *new_bytes = (char *)malloc(r + 1);
 
-                        if (app->raw_bytes)
+                        if (new_bytes)
                         {
-                            memcpy(app->raw_bytes, buf, r + 1);
-                            app->raw_len = (int)r;
+                            memcpy(new_bytes, buf, r + 1);
+                            te_app_set_raw_bytes(app, new_bytes, (int)r);
                         }
                         else
                         {
-                            app->raw_len = 0;
+                            te_app_set_raw_bytes(app, NULL, 0);
                         }
 
                         /* Convert to UTF-8 using new charset_in */
@@ -752,7 +756,7 @@ int charset_select(TeApp *app)
                                 if (wrote >= 0)
                                 {
                                     utf8[wrote] = '\0';
-                                    ed_load(app->editor, utf8);
+                                    ed_load(te_app_get_editor(app), utf8);
                                 }
 
                                 free(utf8);
@@ -760,7 +764,7 @@ int charset_select(TeApp *app)
                         }
                         else
                         {
-                            ed_load(app->editor, buf);
+                            ed_load(te_app_get_editor(app), buf);
                         }
 
                         free(buf);
@@ -770,7 +774,7 @@ int charset_select(TeApp *app)
                 fclose(fp);
             }
         }
-        else if (!view_changed && app->raw_bytes && app->raw_len > 0)
+        else if (!view_changed && te_app_get_raw_bytes(app) && te_app_get_raw_len(app) > 0)
         {
             /* TODO */
         }

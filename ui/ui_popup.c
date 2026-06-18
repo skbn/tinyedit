@@ -1204,8 +1204,8 @@ int ui_popup_search_results_popup(TeApp *app, const wchar_t *search, int *rows, 
     /* Build context strings */
     for (i = 0; i < match_count; i++)
     {
-        const wchar_t *l = ed_line_wcs(app->editor, rows[i]);
-        int ll = ed_line_len(app->editor, rows[i]);
+        const wchar_t *l = ed_line_wcs(te_app_get_editor(app), rows[i]);
+        int ll = ed_line_len(te_app_get_editor(app), rows[i]);
         int clen = ll - cols[i];
 
         if (clen > 60)

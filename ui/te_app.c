@@ -26,52 +26,311 @@
 
 TeApp *te_app_new(void)
 {
-    TeApp *app = (TeApp *)calloc(1, sizeof(TeApp));
+    TeApp *app;
+
+    app = (TeApp *)calloc(1, sizeof(TeApp));
 
     if (!app)
         return NULL;
 
-    app->editor = ed_new();
+    app->wm = wm_new();
 
-    if (!app->editor)
+    if (!app->wm)
     {
         free(app);
         return NULL;
     }
 
-    /* Initialize charset fields to UTF-8 by default */
+    /* Create windows for layout */
+    wm_add_window(app->wm, WIN_TABLIST, 0, 1, 20, LINES - 1);
+    wm_add_window(app->wm, WIN_EDITOR, 20, 1, COLS - 20, LINES - 1);
+    wm_add_window(app->wm, WIN_TRANSLATE, 20, LINES - 10, COLS - 20, 10);
+    wm_add_window(app->wm, WIN_SPELL, 20, LINES - 10, COLS - 20, 10);
+
+    app->tab_cap = 8;
+    app->tabs = (TeTab **)calloc(app->tab_cap, sizeof(TeTab *));
+
+    if (!app->tabs)
+    {
+        wm_free(app->wm);
+        free(app);
+
+        return NULL;
+    }
+
+    app->tab_count = 0;
+    app->active_tab = -1;
+    app->show_line_numbers = 0;
+    app->show_tabs = 1;
+    app->show_translate = 0;
+    app->show_spell = 0;
+    app->tabs_panel_active = 0;
+    app->tabs_panel_selected = 0;
+    app->hard_wrap = 0;
+    app->wrap_col = 75;
+
+    app->search.rows = NULL;
+    app->search.cols = NULL;
+    app->search.count = 0;
+    app->search.is_mode = 0;
+    app->search.only_mode = 0;
+    app->search.match_current = 0;
+    app->search.match_total = 0;
+    app->search.query[0] = L'\0';
+
     strncpy(app->charset_in, "UTF-8", sizeof(app->charset_in) - 1);
     app->charset_in[sizeof(app->charset_in) - 1] = '\0';
 
     strncpy(app->charset_out, "UTF-8", sizeof(app->charset_out) - 1);
     app->charset_out[sizeof(app->charset_out) - 1] = '\0';
 
-    app->show_line_numbers = 0; /* Line numbers disabled by default */
-
     return app;
 }
 
 void te_app_free(TeApp *app)
 {
+    int i;
+
     if (!app)
         return;
 
-    if (app->editor)
-        ed_free(app->editor);
+    for (i = 0; i < app->tab_count; i++)
+    {
+        if (app->tabs[i])
+        {
+            te_tab_free(app->tabs[i]);
+            app->tabs[i] = NULL;
+        }
+    }
+
+    free(app->tabs);
+
+    app->tabs = NULL;
 
     if (app->search.rows)
+    {
         free(app->search.rows);
+        app->search.rows = NULL;
+    }
 
     if (app->search.cols)
+    {
         free(app->search.cols);
+        app->search.cols = NULL;
+    }
 
-    if (app->raw_bytes)
-        free(app->raw_bytes);
+    if (app->wm)
+    {
+        wm_free(app->wm);
+        app->wm = NULL;
+    }
 
     free(app);
 }
 
-/* Colors */
+/* Get currently active tab */
+TeTab *te_app_get_active_tab(TeApp *app)
+{
+    if (!app)
+        return NULL;
+
+    if (app->active_tab < 0 || app->active_tab >= app->tab_count)
+        return NULL;
+
+    return app->tabs[app->active_tab];
+}
+
+/* Add tab to app */
+int te_app_add_tab(TeApp *app, TeTab *tab)
+{
+    TeTab **new_tabs;
+    int new_cap;
+
+    if (!app || !tab)
+        return -1;
+
+    if (app->tab_count >= app->tab_cap)
+    {
+        new_cap = app->tab_cap * 2;
+        new_tabs = (TeTab **)realloc(app->tabs, new_cap * sizeof(TeTab *));
+
+        if (!new_tabs)
+            return -1;
+
+        app->tabs = new_tabs;
+        app->tab_cap = new_cap;
+    }
+
+    /* Apply app configuration to new tab */
+    ed_set_undo_levels(tab->editor, app->cfg.undo_levels);
+    ed_set_hard_wrap(tab->editor, app->cfg.hard_wrap);
+
+    tab->show_line_numbers = app->show_line_numbers;
+
+    app->tabs[app->tab_count] = tab;
+    app->tab_count++;
+
+    if (app->active_tab < 0)
+        app->active_tab = 0;
+
+    return 0;
+}
+
+/* Close tab by index */
+int te_app_close_tab(TeApp *app, int index)
+{
+    int i;
+
+    if (!app)
+        return -1;
+
+    if (index < 0 || index >= app->tab_count)
+        return -1;
+
+    if (app->tabs[index])
+    {
+        te_tab_free(app->tabs[index]);
+        app->tabs[index] = NULL;
+    }
+
+    for (i = index; i < app->tab_count - 1; i++)
+        app->tabs[i] = app->tabs[i + 1];
+
+    app->tab_count--;
+
+    if (app->active_tab >= app->tab_count)
+        app->active_tab = app->tab_count - 1;
+
+    return 0;
+}
+
+/* Switch to tab by index */
+void te_app_switch_tab(TeApp *app, int index)
+{
+    if (!app)
+        return;
+
+    if (index < 0 || index >= app->tab_count)
+        return;
+
+    app->active_tab = index;
+}
+
+/* Set raw bytes in active tab */
+void te_app_set_raw_bytes(TeApp *app, char *ptr, int len)
+{
+    TeTab *tab;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return;
+
+    tab->raw_bytes = ptr;
+    tab->raw_len = len;
+}
+
+/* Helper functions to access active tab data */
+Ed *te_app_get_editor(TeApp *app)
+{
+    TeTab *tab;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return NULL;
+
+    return tab->editor;
+}
+
+const char *te_app_get_filename(TeApp *app)
+{
+    TeTab *tab;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return "";
+
+    return tab->filename;
+}
+
+char *te_app_get_raw_bytes(TeApp *app)
+{
+    TeTab *tab;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return NULL;
+
+    return tab->raw_bytes;
+}
+
+int te_app_get_raw_len(TeApp *app)
+{
+    TeTab *tab;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return 0;
+
+    return tab->raw_len;
+}
+
+int te_app_get_show_line_numbers(TeApp *app)
+{
+    TeTab *tab;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return 0;
+
+    return tab->show_line_numbers;
+}
+
+void te_app_set_filename(TeApp *app, const char *val)
+{
+    TeTab *tab;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return;
+
+    strncpy(tab->filename, val, TAB_FILENAME_MAX - 1);
+    tab->filename[TAB_FILENAME_MAX - 1] = '\0';
+}
+
+void te_app_clear_filename(TeApp *app)
+{
+    TeTab *tab;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return;
+
+    tab->filename[0] = '\0';
+}
+
+void te_app_set_show_line_numbers(TeApp *app, int val)
+{
+    TeTab *tab;
+
+    app->show_line_numbers = val;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return;
+
+    tab->show_line_numbers = val;
+}
+
+/* Initialize ncurses colors from config */
 void te_init_colors(const TeConfig *cfg)
 {
     int i;
@@ -122,7 +381,7 @@ void te_init_colors(const TeConfig *cfg)
     }
 }
 
-/* Status */
+/* Set status bar message */
 void te_status(TeApp *app, const char *fmt, ...)
 {
     va_list ap;
@@ -135,7 +394,7 @@ void te_status(TeApp *app, const char *fmt, ...)
     va_end(ap);
 }
 
-/* Drawing helpers */
+/* Draw title bar with filename and cursor info */
 void te_draw_titlebar(TeApp *app)
 {
     int x;
@@ -146,6 +405,7 @@ void te_draw_titlebar(TeApp *app)
     int prefix_len, suffix_len, max_fn_len, fn_len;
     char truncated[128];
     int avail;
+    TeTab *tab;
 
     attron(COLOR_PAIR(COL_TITLEBAR));
 
@@ -154,32 +414,31 @@ void te_draw_titlebar(TeApp *app)
     for (x = 0; x < COLS; x++)
         addch(' ');
 
-    /* Left: "tinyedit - filename [*]" */
+    tab = te_app_get_active_tab(app);
 
-    if (app && app->filename[0])
+    if (tab && tab->filename[0])
     {
-        const char *last_slash = strrchr(app->filename, '/');
+        const char *last_slash = strrchr(tab->filename, '/');
 
         if (!last_slash)
-            last_slash = strrchr(app->filename, '\\');
+            last_slash = strrchr(tab->filename, '\\');
 
-        fn = last_slash ? last_slash + 1 : app->filename;
+        fn = last_slash ? last_slash + 1 : tab->filename;
     }
     else
     {
         fn = "[No Name]";
     }
 
-    if (app && app->editor)
+    if (tab && tab->editor)
     {
-        ed_get_info(app->editor, &info);
+        ed_get_info(tab->editor, &info);
         mod = info.modified;
     }
 
-    /* Truncate filename if too long based on actual terminal width */
     prefix_len = (int)strlen(WRAPPER_PID) + 2;
     suffix_len = mod ? 4 : 0;
-    max_fn_len = COLS - prefix_len - suffix_len - 30; /* Reserve space for right side */
+    max_fn_len = COLS - prefix_len - suffix_len - 30;
 
     fn_len = (int)strlen(fn);
 
@@ -191,17 +450,18 @@ void te_draw_titlebar(TeApp *app)
             avail = 0;
 
         strncpy(truncated, fn, avail);
+
         truncated[avail] = '\0';
+
         strcat(truncated, "...");
         fn = truncated;
     }
 
     snprintf(left, sizeof(left), "%s  %s%s", WRAPPER_PID, fn, mod ? " [+]" : "");
 
-    /* Right: "Ln X/Y  Col Z  INS/OVR" */
-    if (app && app->editor)
+    if (tab && tab->editor)
     {
-        ed_get_info(app->editor, &info);
+        ed_get_info(tab->editor, &info);
         snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", info.insert_mode ? "INS" : "OVR");
     }
     else
@@ -223,12 +483,14 @@ void te_draw_titlebar(TeApp *app)
     attroff(COLOR_PAIR(COL_TITLEBAR));
 }
 
+/* Draw status bar with hints and charset info */
 void te_draw_statusbar(TeApp *app)
 {
     int x, y;
     int msg_len, rzone_len, rzone_start, max_left;
     char hint[64];
     char charset_info[128];
+    TeTab *tab;
 
     y = LINES - 1;
     attron(COLOR_PAIR(COL_STATUS));
@@ -237,11 +499,7 @@ void te_draw_statusbar(TeApp *app)
     for (x = 0; x < COLS; x++)
         addch(' ');
 
-    /* Right: short key hint */
-    if (app && app->search.is_mode)
-        snprintf(hint, sizeof(hint), " F3=Prev F4=Next F5=Change F6=ALL ESC=Exit ");
-    else
-        snprintf(hint, sizeof(hint), " F2=Save F3=Charset F1=Help ");
+    snprintf(hint, sizeof(hint), " F2=Save F3=Charset F1=Help ");
 
     rzone_len = (int)strlen(hint);
     rzone_start = COLS - rzone_len - 1;
@@ -252,36 +510,35 @@ void te_draw_statusbar(TeApp *app)
     if (rzone_start < COLS)
         mvaddnstr(y, rzone_start, hint, rzone_len);
 
-    /* Left: status message or match info or charset info */
-    if (app && (app->search.is_mode || app->search.only_mode) && app->search.match_total > 0)
+    if (app)
     {
-        char match_msg[64];
+        tab = te_app_get_active_tab(app);
 
-        snprintf(match_msg, sizeof(match_msg), "Match %d/%d", app->search.match_current, app->search.match_total);
-        msg_len = (int)strlen(match_msg);
-        max_left = (rzone_start < COLS ? rzone_start : COLS) - 2;
+        if (tab)
+        {
+            const char *fn;
+            const char *last_slash;
 
-        if (max_left > msg_len)
-            max_left = msg_len;
+            if (tab->filename[0])
+            {
+                last_slash = strrchr(tab->filename, '/');
 
-        if (max_left > 0)
-            mvaddnstr(y, 1, match_msg, max_left);
-    }
-    else if (app && app->status[0])
-    {
-        msg_len = (int)strlen(app->status);
-        max_left = (rzone_start < COLS ? rzone_start : COLS) - 2;
+                if (!last_slash)
+                    last_slash = strrchr(tab->filename, '\\');
 
-        if (max_left > msg_len)
-            max_left = msg_len;
+                fn = last_slash ? last_slash + 1 : tab->filename;
 
-        if (max_left > 0)
-            mvaddnstr(y, 1, app->status, max_left);
-    }
-    else if (app)
-    {
-        /* Show charset info when no status message */
-        snprintf(charset_info, sizeof(charset_info), "View: %s  Save: %s", app->charset_in[0] ? app->charset_in : "UTF-8", app->charset_out[0] ? app->charset_out : "UTF-8");
+                snprintf(charset_info, sizeof(charset_info), "%s  View: %s  Save: %s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8");
+            }
+            else
+            {
+                snprintf(charset_info, sizeof(charset_info), "View: %s  Save: %s", tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8");
+            }
+        }
+        else
+        {
+            snprintf(charset_info, sizeof(charset_info), "View: UTF-8  Save: UTF-8");
+        }
 
         msg_len = (int)strlen(charset_info);
         max_left = (rzone_start < COLS ? rzone_start : COLS) - 2;
@@ -296,6 +553,7 @@ void te_draw_statusbar(TeApp *app)
     attroff(COLOR_PAIR(COL_STATUS));
 }
 
+/* Draw box with borders */
 void ui_box(int y, int x, int h, int w)
 {
     int i;
@@ -321,6 +579,7 @@ void ui_box(int y, int x, int h, int w)
     }
 }
 
+/* Draw horizontal line */
 void te_hline(int y, int x, int len)
 {
     int i;

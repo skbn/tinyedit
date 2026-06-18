@@ -71,19 +71,25 @@ static const char *HELP_LINES[] =
         "",
         "  Files:",
         "    F7 / Alt+O       Insert file at cursor",
-        "    Ctrl+L           Open file (clears editor)",
-        "    Ctrl+N           New file (clears editor)",
+        "    Ctrl+L           Open file (new tab)",
+        "    Ctrl+N           New file (new tab)",
         "    F2 / Ctrl+S      Save",
         "    ESC / F10        Quit (confirm if modified)",
         "    F1 / Alt+Y       This help",
         "",
+        "  Tabs:",
+        "    F9 / Alt+L       Toggle tabs panel",
+        "    Alt+J            Next tab",
+        "    Alt+K            Previous tab",
+        "    Alt+W            Close current tab",
+        "",
         "  Other:",
         "    F4 / Alt+T       Setup / configuration",
-        "    Alt+U            ",
+        "    Alt+U            Unicode glyph picker",
 };
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
 
-/* Soft-wrap viewport: anchored by top line/sub-row, O(distance) walking for performance */
+/* Soft-wrap viewport: anchored by top line/sub-row */
 static int s_soft_top_line = 0;
 static int s_soft_top_sub = 0;
 static int s_soft_desired_vcol = -1;
@@ -94,7 +100,7 @@ void soft_reset_desired(void)
     s_soft_desired_vcol = -1;
 }
 
-/* Soft-wrap: break at last space or hard-cut at visual boundary */
+/* Soft-wrap: break at last space or hard-cut at boundary */
 static int wrap_next(const wchar_t *line, int len, int width, int start)
 {
     int vcol = 0;
@@ -104,7 +110,7 @@ static int wrap_next(const wchar_t *line, int len, int width, int start)
     if (width < 1)
         width = 1;
 
-    /* Walk forward from start, accumulating visual width with wcswidth */
+    /* Walk forward, accumulating visual width */
     while (k < len)
     {
         int w = wcswidth(&line[k], 1);
@@ -124,18 +130,18 @@ static int wrap_next(const wchar_t *line, int len, int width, int start)
     if (k >= len)
         return len;
 
-    /* Search backwards from hard_end for a space to break at */
+    /* Search backwards for space to break */
     for (k = hard_end; k > start; k--)
     {
         if (line[k - 1] == L' ' || line[k - 1] == L'\t')
             return k;
     }
 
-    /* No space found: hard cut at visual boundary */
+    /* No space: hard cut at visual boundary */
     return hard_end;
 }
 
-/* Number of visual sub-rows a logical line occupies (>= 1) */
+/* Number of visual sub-rows a logical line occupies */
 static int wrap_count(const wchar_t *line, int len, int width)
 {
     int pos = 0;
@@ -161,7 +167,7 @@ static int wrap_count(const wchar_t *line, int len, int width)
     return rows;
 }
 
-/* Return wchar range for target sub-row, O(target_sub) bounded by line length */
+/* Return wchar range for target sub-row. O(target_sub) */
 static int line_subrow_range(const wchar_t *l, int len, int width, int target_sub, int *seg_start, int *seg_end)
 {
     int pos = 0;
@@ -193,8 +199,7 @@ static int line_subrow_range(const wchar_t *l, int len, int width, int target_su
     }
 }
 
-/* Returns the sub-row index inside line where the column col lives
- * Walks segments until col falls within one. O(sub-rows in line) */
+/* Return sub-row index where column col lives. O(sub-rows in line) */
 static int line_subrow_of_col(const wchar_t *l, int len, int width, int col)
 {
     int pos = 0;
@@ -218,26 +223,24 @@ static int line_subrow_of_col(const wchar_t *l, int len, int width, int col)
     }
 }
 
-/* Reset soft-wrap viewport to cursor position
- * Used by goto start/end to avoid slow walking from old viewport position */
+/* Reset soft-wrap viewport to cursor position */
 void soft_reset_viewport_to_cursor(TeApp *app, int width)
 {
     EdInfo info;
     const wchar_t *l;
     int len;
 
-    ed_get_info(app->editor, &info);
+    ed_get_info(te_app_get_editor(app), &info);
 
-    l = ed_line_wcs(app->editor, info.row);
-    len = ed_line_len(app->editor, info.row);
+    l = ed_line_wcs(te_app_get_editor(app), info.row);
+    len = ed_line_len(te_app_get_editor(app), info.row);
+
     s_soft_top_line = info.row;
     s_soft_top_sub = line_subrow_of_col(l ? l : L"", l ? len : 0, width, info.col);
     s_soft_desired_vcol = -1;
 }
 
-/* Walk N visual rows down/up from (from_line, from_sub). Clamps to doc
- * Cost: O(delta_lines). In practice delta is bounded by body_rows for
- * arrow keys, or by pg for PgUp/PgDn. Doesn't scan the document */
+/* Walk N visual rows from (from_line, from_sub). O(delta_lines) */
 static void walk_vrows_forward(Ed *ed, int width, int from_line, int from_sub, int delta, int *out_line, int *out_sub)
 {
     EdInfo info;
@@ -252,7 +255,7 @@ static void walk_vrows_forward(Ed *ed, int width, int from_line, int from_sub, i
         const wchar_t *l = ed_line_wcs(ed, line);
         int len = ed_line_len(ed, line);
         int n = wrap_count(l ? l : L"", l ? len : 0, width);
-        int avail = n - sub - 1; /* remaining sub-rows in this line below sub */
+        int avail = n - sub - 1; /* remaining sub-rows below sub */
 
         if (remaining <= avail)
         {
@@ -261,7 +264,7 @@ static void walk_vrows_forward(Ed *ed, int width, int from_line, int from_sub, i
             break;
         }
 
-        /* consume the rest of this line and move to the next */
+        /* consume rest of line, move to next */
         remaining -= (avail + 1);
         line++;
         sub = 0;
@@ -317,7 +320,7 @@ static void walk_vrows_backward(Ed *ed, int width, int from_line, int from_sub, 
                 break;
         }
 
-        /* sub == 0 now; step to previous line if possible */
+        /* step to previous line if possible */
         if (line == 0)
         {
             sub = 0;
@@ -349,9 +352,7 @@ static void walk_vrows_backward(Ed *ed, int width, int from_line, int from_sub, 
     *out_sub = sub;
 }
 
-/* Cursor position vs viewport
- * Returns the visual column (in display cells) of the cursor within
- * its own sub-row. O(width of sub-row) */
+/* Return visual column of cursor within its sub-row. O(width of sub-row) */
 static int soft_cursor_vcol(Ed *ed, int width)
 {
     EdInfo info;
@@ -383,9 +384,7 @@ static int soft_cursor_vcol(Ed *ed, int width)
     return wcs_vwidth(&l[seg_start], n);
 }
 
-/* Number of visual rows between (a_line, a_sub) and (b_line, b_sub)
- * Returns positive if b is after a, negative if before
- * Cost: O(|b_line - a_line|) */
+/* Return visual rows between two positions. O(|b_line - a_line|) */
 static int soft_vrows_between(Ed *ed, int width, int a_line, int a_sub, int b_line, int b_sub)
 {
     int i;
@@ -418,7 +417,7 @@ static int soft_vrows_between(Ed *ed, int width, int a_line, int a_sub, int b_li
         return delta;
     }
 
-    /* a_line > b_line: walk backward */
+    /* walk backward */
     l = ed_line_wcs(ed, b_line);
     len = ed_line_len(ed, b_line);
     n = wrap_count(l ? l : L"", l ? len : 0, width);
@@ -437,13 +436,11 @@ static int soft_vrows_between(Ed *ed, int width, int a_line, int a_sub, int b_li
     return -delta;
 }
 
-/* Compute the cursor's screen row given current viewport
- * Returns negative if cursor is above viewport, >= body_rows if below
- * O(|info.row - s_soft_top_line|) */
+/* Return cursor screen row. O(|info.row - s_soft_top_line|) */
 static int soft_cursor_screen_row(TeApp *app, int width)
 {
     EdInfo info;
-    Ed *ed = app->editor;
+    Ed *ed = te_app_get_editor(app);
     int sub_cursor;
     const wchar_t *l;
     int len;
@@ -457,13 +454,11 @@ static int soft_cursor_screen_row(TeApp *app, int width)
     return soft_vrows_between(ed, width, s_soft_top_line, s_soft_top_sub, info.row, sub_cursor);
 }
 
-/* Adjust viewport (s_soft_top_line, s_soft_top_sub) so the cursor is
- * inside [0, body_rows). Cost bounded by body_rows + body_rows-ish
- * for typical movement; clamps to document boundaries */
+/* Adjust viewport to keep cursor visible. Bounded by body_rows */
 static void soft_ensure_visible(TeApp *app, int width, int body_rows)
 {
     EdInfo info;
-    Ed *ed = app->editor;
+    Ed *ed = te_app_get_editor(app);
     int sub_cursor;
     int screen_row;
     const wchar_t *l;
@@ -498,7 +493,7 @@ static void soft_ensure_visible(TeApp *app, int width, int body_rows)
     if (s_soft_top_sub >= tn)
         s_soft_top_sub = tn - 1;
 
-    /* Where is the cursor relative to the viewport? */
+    /* Cursor position relative to viewport */
     l = ed_line_wcs(ed, info.row);
     len = ed_line_len(ed, info.row);
     sub_cursor = line_subrow_of_col(l ? l : L"", l ? len : 0, width, info.col);
@@ -507,13 +502,13 @@ static void soft_ensure_visible(TeApp *app, int width, int body_rows)
 
     if (screen_row < 0)
     {
-        /* Cursor is above viewport: pull top up to cursor */
+        /* Cursor above viewport: pull top up */
         s_soft_top_line = info.row;
         s_soft_top_sub = sub_cursor;
     }
     else if (screen_row >= body_rows)
     {
-        /* Cursor is below viewport: push top down so cursor lands at last row */
+        /* Cursor below viewport: push top down */
         int over = screen_row - (body_rows - 1);
         int new_line, new_sub;
 
@@ -540,8 +535,7 @@ static void soft_set_cursor_at(Ed *ed, int width, int line, int sub, int desired
     if (desired_vcol < 0)
         desired_vcol = 0;
 
-    /* Walk through chars of the sub-row, accumulating visual width until
-     * we reach desired_vcol. Land just before exceeding */
+    /* Walk through chars, accumulate visual width until desired_vcol */
     v = 0;
     col = seg_start;
 
@@ -562,9 +556,7 @@ static void soft_set_cursor_at(Ed *ed, int width, int line, int sub, int desired
         }
     }
 
-    /* If on the last sub-row, allow placing cursor at the literal end of
-     * line (one past last char). Otherwise stop at seg_end-1 so we don't
-     * jump to the next sub-row's first column */
+    /* On last sub-row: allow cursor at line end. Otherwise stop at seg_end-1 */
     if (seg_end < len && col >= seg_end)
         col = seg_end > seg_start ? seg_end - 1 : seg_start;
 
@@ -577,13 +569,11 @@ static void soft_set_cursor_at(Ed *ed, int width, int line, int sub, int desired
     ed_set_pos(ed, line, col);
 }
 
-/* Move cursor delta visual rows (positive = down, negative = up)
- * Preserves s_soft_desired_vcol so a sequence of UP/DOWN keys returns
- * to the original column on long lines. O(|delta|) */
+/* Move cursor delta visual rows. Preserves desired_vcol. O(|delta|) */
 static void soft_move_vrows(TeApp *app, int width, int delta)
 {
     EdInfo info;
-    Ed *ed = app->editor;
+    Ed *ed = te_app_get_editor(app);
     const wchar_t *l;
     int len;
     int sub_cursor;
@@ -615,7 +605,7 @@ static void soft_move_vrows(TeApp *app, int width, int delta)
     soft_set_cursor_at(ed, width, new_line, new_sub, vcol);
 }
 
-/* Handlers used by ui_editor key dispatch */
+/* Handlers for ui_editor key dispatch */
 static void soft_move_up_visual(TeApp *app, int width)
 {
     soft_move_vrows(app, width, -1);
@@ -629,7 +619,7 @@ static void soft_move_down_visual(TeApp *app, int width)
 static void soft_move_home_visual(TeApp *app, int width)
 {
     EdInfo info;
-    Ed *ed = app->editor;
+    Ed *ed = te_app_get_editor(app);
     const wchar_t *l;
     int len;
     int sub_cursor;
@@ -650,7 +640,7 @@ static void soft_move_home_visual(TeApp *app, int width)
 static void soft_move_end_visual(TeApp *app, int width)
 {
     EdInfo info;
-    Ed *ed = app->editor;
+    Ed *ed = te_app_get_editor(app);
     const wchar_t *l;
     int len;
     int sub_cursor;
@@ -665,9 +655,7 @@ static void soft_move_end_visual(TeApp *app, int width)
 
     line_subrow_range(l ? l : L"", l ? len : 0, width, sub_cursor, &seg_start, &seg_end);
 
-    /* End-of-sub-row: if this is the last sub-row, put cursor at line end
-     * (one past last char). Otherwise put at the last visible char of the
-     * sub-row (so cursor doesn't jump to the next sub-row's first col) */
+    /* End-of-sub-row: put cursor at line end if last sub-row, else at last visible char */
     if (seg_end >= len)
         target_col = len;
     else
@@ -680,16 +668,15 @@ static void soft_move_end_visual(TeApp *app, int width)
 static void soft_move_pgup_visual(TeApp *app, int width, int pg)
 {
     int new_line, new_sub;
-    Ed *ed = app->editor;
+    Ed *ed = te_app_get_editor(app);
 
     if (pg <= 0)
         pg = 1;
 
-    /* Move the cursor up pg visual rows */
+    /* Move cursor up pg visual rows */
     soft_move_vrows(app, width, -pg);
 
-    /* Slide the viewport up by pg visual rows so the cursor stays at
-     * roughly the same screen row */
+    /* Slide viewport up by pg visual rows */
     walk_vrows_backward(ed, width, s_soft_top_line, s_soft_top_sub, pg, &new_line, &new_sub);
 
     s_soft_top_line = new_line;
@@ -699,7 +686,7 @@ static void soft_move_pgup_visual(TeApp *app, int width, int pg)
 static void soft_move_pgdn_visual(TeApp *app, int width, int pg)
 {
     int new_line, new_sub;
-    Ed *ed = app->editor;
+    Ed *ed = te_app_get_editor(app);
 
     if (pg <= 0)
         pg = 1;
@@ -712,17 +699,15 @@ static void soft_move_pgdn_visual(TeApp *app, int width, int pg)
     s_soft_top_sub = new_sub;
 }
 
-/* Word-wrap UTF-8 paste to col columns, preserving
- * newlines. No hard-breaks for URLs/code */
+/* Word-wrap UTF-8 paste to col columns, preserving newlines */
 static int paste_char_width(wchar_t c)
 {
-    /* For FTN editing: does this char take 1 column
-     * or 0? Zero-width cases: combining marks, BOM. CJK treated as 1 */
+    /* For FTN editing: char column width (0 for combining marks, BOM) */
     if (c == 0)
         return 0;
 
     if (c < 0x20)
-        return 0; /* control chars, including \r */
+        return 0; /* control chars */
 
     if (c >= 0x0300 && c <= 0x036F)
         return 0; /* combining diacritical marks */
@@ -829,25 +814,25 @@ char *wrap_paste_text(const char *utf8, int col)
     return result;
 }
 
-/* Effective wrap column. Clamp AUTOWRAP to COLS-1; 0=disabled */
+/* Effective wrap column. Clamp to COLS-1; 0=disabled */
 int editor_eff_wrap(const TeApp *app)
 {
     int cfgw = app->wrap_col;
-    int limit = COLS - 1; /* leave one column of margin */
+    int limit = COLS - 1; /* one column margin */
 
     if (cfgw <= 0)
-        return 0; /* AUTOWRAP disabled in config: never wrap */
+        return 0; /* AUTOWRAP disabled */
 
     if (COLS <= 10)
-        return 0; /* Unusably narrow: scroll instead of wrapping */
+        return 0; /* Too narrow: scroll instead */
 
     if (cfgw > limit)
-        return limit; /* Screen narrower than the configured column */
+        return limit; /* Screen narrower than configured */
 
     return cfgw;
 }
 
-/* Calculate width needed for line numbers (digits + 1 space) */
+/* Calculate width for line numbers (digits + 1 space) */
 static int lineno_width(int line_count)
 {
     int width = 1;
@@ -862,40 +847,57 @@ static int lineno_width(int line_count)
         width++;
     }
 
-    return width + 1; /* +1 for space after number */
+    return width + 1; /* space after number */
 }
 
-/* Body drawing */
+/* Draw editor body */
 static void draw_body(TeApp *app)
 {
     EdInfo info;
-    int body_top = 1;         /* row 0 = titlebar */
-    int body_bot = LINES - 2; /* last row = statusbar */
-    int body_rows = body_bot - body_top;
+    TeWindow *win;
+    int body_top = 1;
+    int body_bot = LINES - 2;
+    int body_rows;
     int width = COLS;
+    int offset_x = 0;
+    int offset_y = 0;
     int soft = !app->hard_wrap;
     int b_r1 = -1;
     int b_c1 = 0;
     int b_r2 = -1;
     int b_c2 = 0;
     int screen_row;
-    int ln_width = 0;  /* line number width */
-    int ln_offset = 0; /* offset for editor content */
-    int show_lnum = app->show_line_numbers;
+    int ln_width = 0;
+    int ln_offset = 0;
+    int show_lnum = te_app_get_show_line_numbers(app);
+
+    /* Use window coordinates from layout manager */
+    win = wm_get_window_by_type(app->wm, WIN_EDITOR);
+
+    if (win && win->visible)
+    {
+        body_top = win->y;
+        body_bot = win->y + win->h - 1;
+        width = win->w;
+        offset_x = win->x;
+        offset_y = win->y;
+    }
+
+    body_rows = body_bot - body_top;
 
     if (body_rows < 1)
         body_rows = 1;
 
-    ed_set_page(app->editor, body_rows);
-    ed_ensure_visible(app->editor);
-    ed_get_info(app->editor, &info);
+    ed_set_page(te_app_get_editor(app), body_rows);
+    ed_ensure_visible(te_app_get_editor(app));
+    ed_get_info(te_app_get_editor(app), &info);
 
     /* Calculate line number width if enabled */
     if (show_lnum)
     {
         ln_width = lineno_width(info.line_count);
         ln_offset = ln_width;
-        width = COLS - ln_offset; /* Reduce available width for text */
+        width = win->w - ln_offset; /* reduce width for text */
     }
 
     /* Normalize block range */
@@ -927,42 +929,38 @@ static void draw_body(TeApp *app)
         int li, sr;
         int sub_skip;
 
-        /* Make sure the cursor is inside the viewport. This adjusts
-         * s_soft_top_line / s_soft_top_sub as needed -- O(distance to
-         * cursor), which is bounded by body_rows */
+        /* Ensure cursor is inside viewport. Adjust s_soft_top_line/sub */
         soft_ensure_visible(app, width, body_rows);
 
-        /* Clear the body region */
+        /* Clear body region */
         for (sr = 0; sr < body_rows; sr++)
         {
-            move(body_top + sr, 0);
+            move(offset_y + sr, offset_x);
             clrtoeol();
         }
 
-        /* Start drawing from s_soft_top_line, skipping the first
-         * s_soft_top_sub sub-rows of that line */
+        /* Start from s_soft_top_line, skipping first s_soft_top_sub sub-rows */
         li = s_soft_top_line;
         sub_skip = s_soft_top_sub;
         sr = 0;
 
         while (li < info.line_count && sr < body_rows)
         {
-            const wchar_t *l = ed_line_wcs(app->editor, li);
-            int len = ed_line_len(app->editor, li);
+            const wchar_t *l = ed_line_wcs(te_app_get_editor(app), li);
+            int len = ed_line_len(te_app_get_editor(app), li);
             int pos = 0;
-            int s = 0;         /* sub-row index within this line */
-            int first_seg = 1; /* tracks first painted sub-row for line number */
+            int s = 0;         /* sub-row index within line */
+            int first_seg = 1; /* first painted sub-row for line number */
 
             if (!l || len <= 0)
             {
-                /* Empty line: it occupies exactly one (blank) sub-row
-                 * Only paint it if not skipped */
+                /* Empty line: one blank sub-row. Paint if not skipped */
                 if (sub_skip == 0)
                 {
                     if (show_lnum)
                     {
                         attron(COLOR_PAIR(COL_BORDER));
-                        mvprintw(body_top + sr, 0, "%*d", ln_width - 1, li + 1);
+                        mvprintw(offset_y + sr, offset_x, "%*d", ln_width - 1, li + 1);
                         attroff(COLOR_PAIR(COL_BORDER));
                     }
 
@@ -970,7 +968,7 @@ static void draw_body(TeApp *app)
                     if (b_r1 >= 0 && li >= b_r1 && li <= b_r2)
                     {
                         attron(A_REVERSE);
-                        mvaddch(body_top + sr, ln_offset, ' ');
+                        mvaddch(offset_y + sr, offset_x + ln_offset, ' ');
                         attroff(A_REVERSE);
                     }
 
@@ -995,17 +993,18 @@ static void draw_body(TeApp *app)
                     if (seg_len < 0)
                         seg_len = 0;
 
-                    /* Line number on the first painted sub-row of this line */
+                    /* Line number on first painted sub-row */
                     if (show_lnum && first_seg)
                     {
                         attron(COLOR_PAIR(COL_BORDER));
-                        mvprintw(body_top + sr, 0, "%*d", ln_width - 1, li + 1);
+                        mvprintw(offset_y + sr, offset_x, "%*d", ln_width - 1, li + 1);
                         attroff(COLOR_PAIR(COL_BORDER));
+
                         first_seg = 0;
                     }
 
                     if (seg_len > 0)
-                        mvaddnwstr(body_top + sr, ln_offset, &l[seg_start], seg_len);
+                        mvaddnwstr(offset_y + sr, offset_x + ln_offset, &l[seg_start], seg_len);
 
                     /* Highlight search matches */
                     if (app->search.rows && app->search.cols && app->search.count > 0)
@@ -1023,21 +1022,21 @@ static void draw_body(TeApp *app)
                                 if (match_col >= seg_start && match_end <= seg_end)
                                 {
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                                    mvaddnwstr(body_top + sr, ln_offset + wcs_vwidth(&l[seg_start], match_col - seg_start), &l[match_col], match_len);
+                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth(&l[seg_start], match_col - seg_start), &l[match_col], match_len);
                                     attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                                 }
                                 else if (match_col >= seg_start && match_col < seg_end)
                                 {
                                     int partial_len = seg_end - match_col;
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                                    mvaddnwstr(body_top + sr, ln_offset + wcs_vwidth(&l[seg_start], match_col - seg_start), &l[match_col], partial_len);
+                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth(&l[seg_start], match_col - seg_start), &l[match_col], partial_len);
                                     attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                                 }
                                 else if (match_end > seg_start && match_end <= seg_end)
                                 {
                                     int partial_len = match_end - seg_start;
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                                    mvaddnwstr(body_top + sr, ln_offset, &l[seg_start], partial_len);
+                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset, &l[seg_start], partial_len);
                                     attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                                 }
                             }
@@ -1059,13 +1058,13 @@ static void draw_body(TeApp *app)
                         if (hs < he)
                         {
                             attron(A_REVERSE);
-                            mvaddnwstr(body_top + sr, ln_offset + wcs_vwidth(&l[seg_start], hs - seg_start), &l[hs], he - hs);
+                            mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth(&l[seg_start], hs - seg_start), &l[hs], he - hs);
                             attroff(A_REVERSE);
                         }
                         else if (hs == seg_start && he == seg_start)
                         {
                             attron(A_REVERSE);
-                            mvaddch(body_top + sr, ln_offset, ' ');
+                            mvaddch(offset_y + sr, offset_x + ln_offset, ' ');
                             attroff(A_REVERSE);
                         }
                     }
@@ -1088,7 +1087,7 @@ static void draw_body(TeApp *app)
             sub_skip = 0; /* subsequent lines start at sub-row 0 */
         }
     }
-    else /* HARD-WRAP: classic 1 logical line == 1 screen row */
+    else /* HARD-WRAP: 1 logical line == 1 screen row */
     {
         int i;
 
@@ -1098,7 +1097,7 @@ static void draw_body(TeApp *app)
             int line_len;
             const wchar_t *wl;
 
-            move(body_top + i, 0);
+            move(offset_y + i, offset_x);
             clrtoeol();
 
             if (line_idx >= info.line_count)
@@ -1108,16 +1107,24 @@ static void draw_body(TeApp *app)
             if (show_lnum)
             {
                 attron(COLOR_PAIR(COL_BORDER));
-                mvprintw(body_top + i, 0, "%*d", ln_width - 1, line_idx + 1);
+                mvprintw(offset_y + i, offset_x, "%*d", ln_width - 1, line_idx + 1);
                 attroff(COLOR_PAIR(COL_BORDER));
             }
 
-            /* mvaddnwstr: n is in wide chars, no UTF-8 conversion needed */
-            wl = ed_line_wcs(app->editor, line_idx);
-            line_len = ed_line_len(app->editor, line_idx);
+            /* mvaddnwstr: n is in wide chars */
+            wl = ed_line_wcs(te_app_get_editor(app), line_idx);
+            line_len = ed_line_len(te_app_get_editor(app), line_idx);
 
             if (wl && line_len > 0)
-                mvaddnwstr(body_top + i, ln_offset, wl, line_len);
+            {
+                /* Limit line length to available width */
+                int max_chars = width;
+
+                if (line_len > max_chars)
+                    line_len = max_chars;
+
+                mvaddnwstr(offset_y + i, offset_x + ln_offset, wl, line_len);
+            }
 
             /* Highlight search matches */
             if (app->search.rows && app->search.cols && app->search.count > 0)
@@ -1134,7 +1141,7 @@ static void draw_body(TeApp *app)
                         if (match_col >= 0 && match_col + match_len <= line_len)
                         {
                             attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                            mvaddnwstr(body_top + i, ln_offset + wcs_vwidth(wl, match_col), &wl[match_col], match_len);
+                            mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth(wl, match_col), &wl[match_col], match_len);
                             attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                         }
                     }
@@ -1161,14 +1168,14 @@ static void draw_body(TeApp *app)
                 if (hs < he)
                 {
                     attron(A_REVERSE);
-                    mvaddnwstr(body_top + i, ln_offset + wcs_vwidth(wl, hs), &wcs[hs], he - hs);
+                    mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth(wl, hs), &wcs[hs], he - hs);
                     attroff(A_REVERSE);
                 }
                 else if (hs == 0 && he == 0)
                 {
-                    /* Cursor at col 0 or empty line: show one reversed space */
+                    /* Cursor at col 0 or empty line: show reversed space */
                     attron(A_REVERSE);
-                    mvaddch(body_top + i, ln_offset, ' ');
+                    mvaddch(offset_y + i, offset_x + ln_offset, ' ');
                     attroff(A_REVERSE);
                 }
             }
@@ -1178,27 +1185,42 @@ static void draw_body(TeApp *app)
     attroff(COLOR_PAIR(COL_NORMAL));
 }
 
-/* Position the actual terminal cursor on the editor cursor */
+/* Position terminal cursor on editor cursor */
 static void position_cursor(TeApp *app)
 {
     EdInfo info;
+    TeWindow *win;
     int body_top = 1;
     int body_rows = LINES - 2;
     int width = COLS;
+    int offset_x = 0;
+    int offset_y = 0;
     int soft = !app->hard_wrap;
     int ln_offset = 0;
-    int show_lnum = app->show_line_numbers;
+    int show_lnum = te_app_get_show_line_numbers(app);
+
+    /* Use window coordinates from layout manager */
+    win = wm_get_window_by_type(app->wm, WIN_EDITOR);
+
+    if (win && win->visible)
+    {
+        body_top = win->y;
+        body_rows = win->h;
+        width = win->w;
+        offset_x = win->x;
+        offset_y = win->y;
+    }
 
     if (body_rows < 1)
         body_rows = 1;
 
-    ed_get_info(app->editor, &info);
+    ed_get_info(te_app_get_editor(app), &info);
 
     /* Calculate line number offset if enabled */
     if (show_lnum)
     {
         ln_offset = lineno_width(info.line_count);
-        width = COLS - ln_offset;
+        width = width - ln_offset;
     }
 
     if (soft)
@@ -1209,25 +1231,25 @@ static void position_cursor(TeApp *app)
         int vcol;
 
         screen_row = soft_cursor_screen_row(app, width);
-        vcol = soft_cursor_vcol(app->editor, width);
+        vcol = soft_cursor_vcol(te_app_get_editor(app), width);
 
-        cy = body_top + screen_row;
-        cx = ln_offset + vcol;
+        cy = offset_y + screen_row;
+        cx = offset_x + ln_offset + vcol;
 
         /* Clamp to body region */
-        max_y = body_top + body_rows - 1;
+        max_y = offset_y + body_rows - 1;
 
-        if (max_y < body_top)
-            max_y = body_top;
+        if (max_y < offset_y)
+            max_y = offset_y;
 
-        if (cy < body_top)
-            cy = body_top;
+        if (cy < offset_y)
+            cy = offset_y;
 
         if (cy > max_y)
             cy = max_y;
 
-        if (cx < ln_offset)
-            cx = ln_offset;
+        if (cx < offset_x + ln_offset)
+            cx = offset_x + ln_offset;
 
         if (cx > COLS - 1)
             cx = COLS - 1;
@@ -1236,22 +1258,20 @@ static void position_cursor(TeApp *app)
     }
     else
     {
-        int cy = body_top + (info.row - info.top);
+        int cy = offset_y + (info.row - info.top);
         int cx;
-        const wchar_t *wl = ed_line_wcs(app->editor, info.row);
-        int line_len = ed_line_len(app->editor, info.row);
+        const wchar_t *wl = ed_line_wcs(te_app_get_editor(app), info.row);
+        int line_len = ed_line_len(te_app_get_editor(app), info.row);
         int wchar_col = info.col;
 
-        /* info.col is a wchar index; convert to visual column using the
-         * current line so wide glyphs (CJK / wide emoji) place the cursor
-         * at the correct pixel column */
+        /* Convert wchar index to visual column for wide glyphs */
         if (wchar_col > line_len)
             wchar_col = line_len;
 
         if (wchar_col < 0)
             wchar_col = 0;
 
-        cx = ln_offset + (wl ? wcs_vwidth(wl, wchar_col) : wchar_col);
+        cx = offset_x + ln_offset + (wl ? wcs_vwidth(wl, wchar_col) : wchar_col);
 
         if (cy >= LINES - 1)
             cy = LINES - 2;
@@ -1319,22 +1339,21 @@ static char *collect_bracketed_paste(void)
     return out;
 }
 
-/* Detect rapid paste (fallback for terminals
- * without bracketed paste support) */
+/* Detect rapid paste (fallback for terminals without bracketed paste) */
 static char *collect_rapid_paste(wint_t first_wch)
 {
     wchar_t *wbuf = NULL;
     int wlen = 0, wcap = 0;
     char *out;
-    const int MAX_CHARS = 10; /* If 10+ chars arrive instantly, it's a paste not manual typing */
+    const int MAX_CHARS = 10; /* 10+ chars = paste, not typing */
 
-    /* Check if more characters are available (rapid paste detection) */
+    /* Check for more characters (rapid paste detection) */
     nodelay(stdscr, TRUE);
 
     wint_t next_wch;
     int next_wrc = get_wch(&next_wch);
 
-    /* No more characters: not a paste, return NULL so caller handles single char */
+    /* No more chars: not a paste, return NULL */
     if (next_wrc == ERR)
     {
         nodelay(stdscr, FALSE);
@@ -1348,19 +1367,19 @@ static char *collect_rapid_paste(wint_t first_wch)
         return NULL;
     }
 
-    /* At least one more char available - check for 2 more to confirm paste */
+    /* One more char available - check for 2 more to confirm paste */
     wint_t third_wch;
     int third_wrc = get_wch(&third_wch);
 
     if (third_wrc == ERR || third_wrc == KEY_CODE_YES)
     {
-        /* Only 2 chars total, probably manual typing - push back the second char */
+        /* Only 2 chars: probably typing - push back second char */
         nodelay(stdscr, FALSE);
         ungetch((int)next_wch);
         return NULL;
     }
 
-    /* We have at least 3 chars - this is a paste, collect them all */
+    /* At least 3 chars: paste, collect all */
     wbuf = (wchar_t *)malloc(256 * sizeof(wchar_t));
 
     if (!wbuf)
@@ -1370,6 +1389,7 @@ static char *collect_rapid_paste(wint_t first_wch)
     }
 
     wcap = 256;
+
     wbuf[wlen++] = (wchar_t)first_wch;
     wbuf[wlen++] = (wchar_t)next_wch;
     wbuf[wlen++] = (wchar_t)third_wch;
@@ -1380,7 +1400,7 @@ static char *collect_rapid_paste(wint_t first_wch)
         wint_t more_wch;
         int more_wrc = get_wch(&more_wch);
 
-        /* No more characters: end of rapid paste */
+        /* No more chars: end of rapid paste */
         if (more_wrc == ERR)
             break;
 
@@ -1419,7 +1439,7 @@ static char *collect_rapid_paste(wint_t first_wch)
     return out;
 }
 
-/* Save */
+/* Save file */
 static int do_save(TeApp *app)
 {
     char *utf8;
@@ -1428,21 +1448,22 @@ static int do_save(TeApp *app)
     char *text;
     char dir_input[1024];
     char name_input[1024];
+    char filename_buf[TAB_FILENAME_MAX];
     const char *last_slash;
 
     /* Extract directory and name from current filename */
-    if (app->filename[0])
+    if (te_app_get_filename(app)[0])
     {
-        last_slash = strrchr(app->filename, '/');
+        last_slash = strrchr(te_app_get_filename(app), '/');
 
         if (!last_slash)
-            last_slash = strrchr(app->filename, '\\');
+            last_slash = strrchr(te_app_get_filename(app), '\\');
 
         if (last_slash)
         {
-            int dir_len = (int)(last_slash - app->filename);
+            int dir_len = (int)(last_slash - te_app_get_filename(app));
 
-            strncpy(dir_input, app->filename, dir_len);
+            strncpy(dir_input, te_app_get_filename(app), dir_len);
             dir_input[dir_len] = '\0';
 
             strncpy(name_input, last_slash + 1, sizeof(name_input) - 1);
@@ -1451,7 +1472,7 @@ static int do_save(TeApp *app)
         else
         {
             dir_input[0] = '\0';
-            strncpy(name_input, app->filename, sizeof(name_input) - 1);
+            strncpy(name_input, te_app_get_filename(app), sizeof(name_input) - 1);
             name_input[sizeof(name_input) - 1] = '\0';
         }
     }
@@ -1462,13 +1483,18 @@ static int do_save(TeApp *app)
     }
 
     /* Always show save dialog */
-    if (ui_files_save("Save as", dir_input, name_input, app->filename, sizeof(app->filename)) != 0)
+    strncpy(filename_buf, te_app_get_filename(app), sizeof(filename_buf) - 1);
+    filename_buf[sizeof(filename_buf) - 1] = '\0';
+
+    if (ui_files_save("Save as", dir_input, name_input, filename_buf, sizeof(filename_buf)) != 0)
         return -1;
 
-    if (!app->filename[0])
+    if (!filename_buf[0])
         return -1;
 
-    utf8 = ed_to_string(app->editor);
+    te_app_set_filename(app, filename_buf);
+
+    utf8 = ed_to_string(te_app_get_editor(app));
 
     if (!utf8)
     {
@@ -1476,16 +1502,16 @@ static int do_save(TeApp *app)
         return -1;
     }
 
-    fp = fopen(app->filename, "wb");
+    fp = fopen(te_app_get_filename(app), "wb");
 
     if (!fp)
     {
-        te_status(app, "Cannot write: %s", app->filename);
+        te_status(app, "Cannot write: %s", te_app_get_filename(app));
         free(utf8);
         return -1;
     }
 
-    /* Charset conversion if requested using charset_out */
+    /* Charset conversion if requested */
     if (app->charset_out[0] && strcasecmp(app->charset_out, "UTF-8") != 0 && strcasecmp(app->charset_out, "UTF8") != 0)
     {
         int srclen = (int)strlen(utf8);
@@ -1519,33 +1545,33 @@ static int do_save(TeApp *app)
 
     fclose(fp);
 
-    /* Update raw_bytes to match what was written to disk so charset re-decode stays current.
-     * If we encoded to charset_out, re-read those bytes; otherwise raw_bytes = utf8 (UTF-8) */
+    /* Update raw_bytes to match disk content for charset re-decode */
     if (app->charset_out[0] && strcasecmp(app->charset_out, "UTF-8") != 0 && strcasecmp(app->charset_out, "UTF8") != 0)
     {
         int srclen = (int)strlen(utf8);
+        char *new_bytes;
 
-        free(app->raw_bytes);
+        free(te_app_get_raw_bytes(app));
 
-        app->raw_bytes = (char *)malloc(srclen + 1);
+        new_bytes = (char *)malloc(srclen + 1);
 
-        if (app->raw_bytes)
+        if (new_bytes)
         {
-            memcpy(app->raw_bytes, utf8, srclen + 1);
-            app->raw_len = srclen;
+            memcpy(new_bytes, utf8, srclen + 1);
+            te_app_set_raw_bytes(app, new_bytes, srclen);
         }
         else
         {
-            app->raw_len = 0;
+            te_app_set_raw_bytes(app, NULL, 0);
         }
     }
     else
     {
         /* UTF-8: raw_bytes = utf8 (ownership transferred) */
-        free(app->raw_bytes);
+        free(te_app_get_raw_bytes(app));
 
-        app->raw_bytes = utf8;
-        app->raw_len = (int)strlen(utf8);
+        te_app_set_raw_bytes(app, utf8, (int)strlen(utf8));
+
         utf8 = NULL; /* Don't free below */
     }
 
@@ -1553,20 +1579,27 @@ static int do_save(TeApp *app)
         free(utf8);
 
     /* Clear modified flag */
-    ed_set_modified(app->editor, 0);
+    ed_set_modified(te_app_get_editor(app), 0);
 
-    te_status(app, "Saved: %s", app->filename);
+    te_status(app, "Saved: %s", te_app_get_filename(app));
 
     return r;
 }
 
-/* Handle function keys (F1-F7) */
+/* Handle function keys */
 static int handle_function_keys(TeApp *app, int ch, int is_key)
 {
     /* F1 / ? : help */
     if ((is_key && ch == KEY_F(1)) || (is_key && ch == KEY_ALT('Y')))
     {
-        ui_popup_help("tinyedit Help", HELP_LINES, HELP_N);
+        ui_popup_help("Help", HELP_LINES, HELP_N);
+        return 1;
+    }
+
+    /* F9 : toggle tabs panel */
+    if (is_key && ch == KEY_F(9))
+    {
+        app->show_tabs = !app->show_tabs;
         return 1;
     }
 
@@ -1577,7 +1610,7 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 
-    /* F3 / Alt+C : charset OR Previous match in search mode */
+    /* F3 / Alt+C : charset or Previous match */
     if ((is_key && ch == KEY_F(3)) || (ch == KEY_ALT('C')))
     {
         if (app->search.only_mode || (app->search.is_mode && app->search.count > 0))
@@ -1586,7 +1619,7 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
             return charset_select(app);
     }
 
-    /* F4 / Alt+T : Setup or Next match in search mode */
+    /* F4 / Alt+T : Setup or Next match */
     if ((is_key && ch == KEY_F(4)) || (ch == KEY_ALT('T')))
     {
         if (app->search.only_mode || (app->search.is_mode && app->search.count > 0))
@@ -1606,18 +1639,20 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
             {
                 /* Config saved: apply changes */
                 if (app->cfg.undo_levels > 0)
-                    ed_set_undo_levels(app->editor, app->cfg.undo_levels);
+                    ed_set_undo_levels(te_app_get_editor(app), app->cfg.undo_levels);
 
                 app->hard_wrap = app->cfg.hard_wrap;
-                ed_set_hard_wrap(app->editor, app->cfg.hard_wrap);
+                ed_set_hard_wrap(te_app_get_editor(app), app->cfg.hard_wrap);
+
                 app->wrap_col = app->cfg.autowrap_col;
-                app->show_line_numbers = app->cfg.show_line_numbers;
+                te_app_set_show_line_numbers(app, app->cfg.show_line_numbers);
 
                 /* If charset changed in setup, update charset_out */
                 if (strcasecmp(old_charset, app->cfg.charset) != 0)
                 {
                     strncpy(app->charset_out, app->cfg.charset, sizeof(app->charset_out) - 1);
-                    app->charset_out[sizeof(app->charset_out) - 1] = '\0';
+                    app->charset_out
+                        [sizeof(app->charset_out) - 1] = '\0';
                 }
 
                 te_init_colors(&app->cfg);
@@ -1646,7 +1681,7 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         else if (!app->search.only_mode && !app->search.is_mode)
         {
             /* Normal block anchor functionality */
-            ed_block_anchor(app->editor);
+            ed_block_anchor(te_app_get_editor(app));
             return 1;
         }
     }
@@ -1662,7 +1697,7 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
 
         if (cp >= 0)
         {
-            ed_insert_char(app->editor, (wchar_t)cp);
+            ed_insert_char(te_app_get_editor(app), (wchar_t)cp);
             clear_search_highlights(app);
         }
 
@@ -1672,7 +1707,7 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
     return 0;
 }
 
-/* Handle control key combinations (Ctrl+...) */
+/* Handle control key combinations */
 static int handle_control_keys(TeApp *app, int ch, int is_key)
 {
     /* Ctrl+V : paste from internal buffer or system clipboard */
@@ -1682,6 +1717,57 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     /* Alt+G : goto line */
     if (ch == KEY_ALT('G'))
         return ui_editor_goto_line(app);
+
+    /* Alt+J : next tab */
+    if (ch == KEY_ALT('J'))
+        return ui_tabs_switch_next(app);
+
+    /* Alt+K : previous tab */
+    if (ch == KEY_ALT('K'))
+        return ui_tabs_switch_prev(app);
+
+    /* Alt+W : close current tab */
+    if (ch == KEY_ALT('W'))
+    {
+        TeTab *tab;
+        EdInfo info;
+
+        tab = app->tabs[app->active_tab];
+
+        if (tab)
+        {
+            ed_get_info(tab->editor, &info);
+
+            if (info.modified)
+            {
+                if (ui_popup_confirm("Close tab", "Tab has unsaved changes. Close anyway?") != 1)
+                    return 1;
+            }
+        }
+
+        te_app_close_tab(app, app->active_tab);
+
+        /* If no tabs left, create a new empty tab */
+        if (app->tab_count == 0)
+        {
+            TeTab *new_tab = te_tab_new();
+
+            if (new_tab)
+            {
+                te_app_add_tab(app, new_tab);
+                te_app_switch_tab(app, 0);
+            }
+        }
+
+        return 1;
+    }
+
+    /* Alt+L : toggle tabs panel */
+    if (ch == KEY_ALT('L'))
+    {
+        app->show_tabs = !app->show_tabs;
+        return 1;
+    }
 
     /* Ctrl+R : find & replace */
     if (!is_key && ch == CTRL('R'))
@@ -1699,50 +1785,41 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     if (!is_key && ch == CTRL('O'))
         return ui_editor_export(app);
 
-    /* Ctrl+L : open file (clears editor) */
+    /* Ctrl+L : open file (create new tab) */
     if (!is_key && ch == CTRL('L'))
     {
-        EdInfo info;
-        ed_get_info(app->editor, &info);
+        TeTab *new_tab;
+        int result;
 
-        if (info.modified)
-        {
-            if (ui_popup_confirm("Open file", "Unsaved changes: opening file will lose edits. Continue?") != 1)
-                return 1;
-        }
+        new_tab = te_tab_new();
 
-        return ui_files_open(app);
+        if (!new_tab)
+            return 1;
+
+        te_app_add_tab(app, new_tab);
+        te_app_switch_tab(app, app->tab_count - 1);
+
+        result = ui_files_open(app);
+
+        /* Re-apply configuration after loading file */
+        ed_set_undo_levels(te_app_get_editor(app), app->cfg.undo_levels);
+        ed_set_hard_wrap(te_app_get_editor(app), app->cfg.hard_wrap);
+
+        return result;
     }
 
-    /* Ctrl+N : new file (clears editor) */
+    /* Ctrl+N : new file (create new tab) */
     if (!is_key && ch == CTRL('N'))
     {
-        EdInfo info;
-        int has_content;
+        TeTab *new_tab;
 
-        ed_get_info(app->editor, &info);
+        new_tab = te_tab_new();
 
-        has_content = info.modified || info.line_count > 1;
+        if (!new_tab)
+            return 1;
 
-        if (!has_content && info.line_count == 1)
-        {
-            int first_line_len = ed_line_len(app->editor, 0);
-            has_content = (first_line_len > 0);
-        }
-
-        if (has_content)
-        {
-            if (ui_popup_confirm("New file", "Editor has content: new file will clear it. Continue?") != 1)
-                return 1;
-        }
-
-        ed_load(app->editor, "");
-        app->filename[0] = '\0';
-
-        free(app->raw_bytes);
-
-        app->raw_bytes = NULL;
-        app->raw_len = 0;
+        te_app_add_tab(app, new_tab);
+        te_app_switch_tab(app, app->tab_count - 1);
 
         te_status(app, "[No Name]");
 
@@ -1764,7 +1841,7 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     return 0;
 }
 
-/* Handle navigation keys (arrow keys, page up/down, etc.) */
+/* Handle navigation keys */
 static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int body_rows, int *preserve_desired)
 {
     switch (ch)
@@ -1776,7 +1853,7 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
             *preserve_desired = 1;
         }
         else
-            ed_move_up(app->editor);
+            ed_move_up(te_app_get_editor(app));
 
         return 1;
 
@@ -1787,23 +1864,23 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
             *preserve_desired = 1;
         }
         else
-            ed_move_down(app->editor);
+            ed_move_down(te_app_get_editor(app));
 
         return 1;
 
     case KEY_LEFT:
-        ed_move_left(app->editor);
+        ed_move_left(te_app_get_editor(app));
         return 1;
 
     case KEY_RIGHT:
-        ed_move_right(app->editor);
+        ed_move_right(te_app_get_editor(app));
         return 1;
 
     case KEY_HOME:
         if (soft)
             soft_move_home_visual(app, width);
         else
-            ed_move_home(app->editor);
+            ed_move_home(te_app_get_editor(app));
 
         return 1;
 
@@ -1811,7 +1888,7 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         if (soft)
             soft_move_end_visual(app, width);
         else
-            ed_move_end(app->editor);
+            ed_move_end(te_app_get_editor(app));
 
         return 1;
 
@@ -1822,7 +1899,7 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
             *preserve_desired = 1;
         }
         else
-            ed_move_pgup(app->editor, 0);
+            ed_move_pgup(te_app_get_editor(app), 0);
 
         return 1;
 
@@ -1833,12 +1910,12 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
             *preserve_desired = 1;
         }
         else
-            ed_move_pgdn(app->editor, 0);
+            ed_move_pgdn(te_app_get_editor(app), 0);
 
         return 1;
 
     case KEY_ENTER:
-        ed_enter(app->editor);
+        ed_enter(te_app_get_editor(app));
         clear_search_highlights(app);
 
         return 1;
@@ -1846,15 +1923,15 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
     case KEY_BACKSPACE:
     {
         EdInfo i2;
-        ed_get_info(app->editor, &i2);
+        ed_get_info(te_app_get_editor(app), &i2);
 
         if (i2.block.active)
         {
-            ed_block_delete(app->editor);
+            ed_block_delete(te_app_get_editor(app));
             te_status(app, "Block deleted");
         }
         else
-            ed_backspace(app->editor);
+            ed_backspace(te_app_get_editor(app));
 
         clear_search_highlights(app);
 
@@ -1864,15 +1941,15 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
     case KEY_DC:
     {
         EdInfo i2;
-        ed_get_info(app->editor, &i2);
+        ed_get_info(te_app_get_editor(app), &i2);
 
         if (i2.block.active)
         {
-            ed_block_delete(app->editor);
+            ed_block_delete(te_app_get_editor(app));
             te_status(app, "Block deleted");
         }
         else
-            ed_delete(app->editor);
+            ed_delete(te_app_get_editor(app));
 
         clear_search_highlights(app);
 
@@ -1881,32 +1958,33 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
 
     case KEY_IC: /* Ins */
     case KEY_ALT('I'):
-        ed_toggle_insert(app->editor);
+        ed_toggle_insert(te_app_get_editor(app));
         return 1;
 
     case KEY_CLEFT:
-        ed_word_left(app->editor);
+        ed_word_left(te_app_get_editor(app));
         return 1;
 
     case KEY_CRIGHT:
-        ed_word_right(app->editor);
+        ed_word_right(te_app_get_editor(app));
         return 1;
 
     case KEY_ALT('Z'):
-        ed_redo(app->editor);
-        app->hard_wrap = ed_get_hard_wrap(app->editor);
+        ed_redo(te_app_get_editor(app));
+        app->hard_wrap = ed_get_hard_wrap(te_app_get_editor(app));
         clear_search_highlights(app);
 
         return 1;
 
     case KEY_ALT('D'):
-        app->show_line_numbers = !app->show_line_numbers;
-        te_status(app, "Line numbers: %s", app->show_line_numbers ? "ON" : "OFF");
+        te_app_set_show_line_numbers(app, !te_app_get_show_line_numbers(app));
+        te_status(app, "Line numbers: %s", te_app_get_show_line_numbers(app) ? "ON" : "OFF");
         return 1;
 
     case KEY_ALT('Q'):
     {
         app->hard_wrap = !app->hard_wrap;
+        ed_set_hard_wrap(te_app_get_editor(app), app->hard_wrap);
         return 1;
     }
 
@@ -1915,21 +1993,21 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
     }
 }
 
-/* Handle text editing keys (printable chars and control chars) */
+/* Handle text editing keys */
 static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int width, int body_rows, int *preserve_desired)
 {
     switch (ch)
     {
     case '\n':
     case '\r':
-        ed_enter(app->editor);
+        ed_enter(te_app_get_editor(app));
         clear_search_highlights(app);
 
         return 1;
 
     case 8:
     case 127:
-        ed_backspace(app->editor);
+        ed_backspace(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
 
@@ -1937,7 +2015,7 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         if (soft)
             soft_move_home_visual(app, width);
         else
-            ed_move_home(app->editor);
+            ed_move_home(te_app_get_editor(app));
 
         return 1;
 
@@ -1945,7 +2023,7 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         if (soft)
             soft_move_end_visual(app, width);
         else
-            ed_move_end(app->editor);
+            ed_move_end(te_app_get_editor(app));
 
         return 1;
 
@@ -1956,7 +2034,7 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
             *preserve_desired = 1;
         }
         else
-            ed_move_pgup(app->editor, 0);
+            ed_move_pgup(te_app_get_editor(app), 0);
 
         return 1;
 
@@ -1967,40 +2045,40 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
             *preserve_desired = 1;
         }
         else
-            ed_move_pgdn(app->editor, 0);
+            ed_move_pgdn(te_app_get_editor(app), 0);
 
         return 1;
 
     case CTRL('Y'):
-        ed_delete_line(app->editor);
+        ed_delete_line(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
 
     case CTRL('Z'):
-        ed_undo(app->editor);
-        app->hard_wrap = ed_get_hard_wrap(app->editor);
+        ed_undo(te_app_get_editor(app));
+        app->hard_wrap = ed_get_hard_wrap(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
 
     case CTRL('T'):
-        ed_delete_word_right(app->editor);
+        ed_delete_word_right(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
 
     case CTRL('_'):
-        ed_delete_word_left(app->editor);
+        ed_delete_word_left(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
 
     case '\t':
-        ed_insert_tab(app->editor, 4);
+        ed_insert_tab(te_app_get_editor(app), 4);
         clear_search_highlights(app);
         return 1;
 
     default:
         if (wch >= 0x20 && wch != 127)
         {
-            ed_insert_char(app->editor, (wchar_t)wch);
+            ed_insert_char(te_app_get_editor(app), (wchar_t)wch);
             clear_search_highlights(app);
 
             /* HARD-WRAP only: insert CR at wrap col; soft-wrap leaves line intact */
@@ -2013,12 +2091,12 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
                     EdInfo wi;
                     int linelen;
 
-                    ed_get_info(app->editor, &wi);
-                    linelen = ed_line_len(app->editor, wi.row);
+                    ed_get_info(te_app_get_editor(app), &wi);
+                    linelen = ed_line_len(te_app_get_editor(app), wi.row);
 
                     if (wi.col > eff_wrap && wi.col == linelen)
                     {
-                        const wchar_t *line = ed_line_wcs(app->editor, wi.row);
+                        const wchar_t *line = ed_line_wcs(te_app_get_editor(app), wi.row);
                         int brk = -1;
                         int k;
 
@@ -2041,20 +2119,21 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
 
                         if (wch == L' ')
                         {
-                            ed_backspace(app->editor); /* replace trailing space with newline */
-                            ed_enter(app->editor);
+                            ed_backspace(te_app_get_editor(app)); /* replace trailing space with newline */
+                            ed_enter(te_app_get_editor(app));
+
                             clear_search_highlights(app);
                         }
                         else if (brk >= 0)
                         {
                             int tail = linelen - brk - 1;
 
-                            ed_set_pos(app->editor, wi.row, brk);
-                            ed_delete(app->editor);
-                            ed_enter(app->editor);
+                            ed_set_pos(te_app_get_editor(app), wi.row, brk);
+                            ed_delete(te_app_get_editor(app));
+                            ed_enter(te_app_get_editor(app));
 
                             clear_search_highlights(app);
-                            ed_set_pos(app->editor, wi.row + 1, tail);
+                            ed_set_pos(te_app_get_editor(app), wi.row + 1, tail);
                         }
                     }
                 }
@@ -2075,6 +2154,9 @@ void ui_editor_run(TeApp *app)
     if (!app)
         return;
 
+    if (!te_app_get_editor(app))
+        return;
+
     /* Reset soft-wrap state */
     s_soft_top_line = 0;
     s_soft_top_sub = 0;
@@ -2087,17 +2169,35 @@ void ui_editor_run(TeApp *app)
     {
         wint_t wch;
         int wrc, ch, is_key, preserve_desired;
+        TeWindow *win;
+
+        /* Get editor window for dimensions */
+        win = wm_get_window_by_type(app->wm, WIN_EDITOR);
+
+        if (!win || !win->visible)
+        {
+            width = COLS;
+            body_rows = LINES - 2;
+        }
+        else
+        {
+            width = win->w;
+            body_rows = win->h;
+        }
 
         soft = !app->hard_wrap;
-        width = COLS;
-        body_rows = LINES - 2;
 
         /* Adjust width for line numbers if enabled */
-        if (app->show_line_numbers)
+        if (te_app_get_show_line_numbers(app))
         {
             EdInfo info;
-            ed_get_info(app->editor, &info);
-            width = COLS - lineno_width(info.line_count);
+
+            ed_get_info(te_app_get_editor(app), &info);
+
+            if (win && win->visible)
+                width = win->w - lineno_width(info.line_count);
+            else
+                width = COLS - lineno_width(info.line_count);
         }
 
         if (body_rows < 1)
@@ -2106,11 +2206,17 @@ void ui_editor_run(TeApp *app)
         if (COLS != s_soft_last_width)
         {
             soft_reset_desired();
+
             s_soft_last_width = COLS;
         }
 
         erase();
+
+        /* Recalculate layout */
+        wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->show_translate, app->show_spell);
+
         te_draw_titlebar(app);
+        ui_tabs_draw_panel(app);
         draw_body(app);
         te_draw_statusbar(app);
         position_cursor(app);
@@ -2131,6 +2237,50 @@ void ui_editor_run(TeApp *app)
 
         preserve_desired = 0;
 
+        /* Tabs panel navigation mode */
+        if (app->tabs_panel_active)
+        {
+            if (is_key && ch == KEY_UP)
+            {
+                if (app->tabs_panel_selected > 0)
+                    app->tabs_panel_selected--;
+                continue;
+            }
+
+            if (is_key && ch == KEY_DOWN)
+            {
+                if (app->tabs_panel_selected < app->tab_count - 1)
+                    app->tabs_panel_selected++;
+                continue;
+            }
+
+            if (is_key && ch == KEY_ENTER)
+            {
+                te_app_switch_tab(app, app->tabs_panel_selected);
+                app->tabs_panel_active = 0;
+                continue;
+            }
+
+            if (is_key && ch == 27) /* ESC */
+            {
+                app->tabs_panel_active = 0;
+                continue;
+            }
+
+            /* Any other key exits panel mode */
+            app->tabs_panel_active = 0;
+        }
+        else
+        {
+            /* Enter tabs panel mode with Tab key */
+            if (!is_key && ch == '\t' && app->show_tabs)
+            {
+                app->tabs_panel_active = 1;
+                app->tabs_panel_selected = app->active_tab;
+                continue;
+            }
+        }
+
         /* Bracketed paste - check BEFORE other keys to avoid interference */
         if (is_key && ch == KEY_PASTE_START)
         {
@@ -2142,7 +2292,7 @@ void ui_editor_run(TeApp *app)
                 const char *to_insert = buf;
                 int reported_len;
 
-                ed_save_undo(app->editor);
+                ed_save_undo(te_app_get_editor(app));
 
                 /* HARD-WRAP only: reflow pasted text; soft-wrap inserts verbatim */
                 if (app->hard_wrap)
@@ -2158,7 +2308,7 @@ void ui_editor_run(TeApp *app)
                     }
                 }
 
-                ed_paste_text_with_undo(app->editor, to_insert);
+                ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
 
                 clear_search_highlights(app);
                 soft_reset_desired();
@@ -2179,8 +2329,9 @@ void ui_editor_run(TeApp *app)
         /* Handle TAB key explicitly before function keys */
         if (!is_key && ch == '\t')
         {
-            ed_save_undo(app->editor);
-            ed_insert_tab(app->editor, 4);
+            ed_save_undo(te_app_get_editor(app));
+            ed_insert_tab(te_app_get_editor(app), 4);
+
             clear_search_highlights(app);
             continue;
         }
@@ -2195,6 +2346,7 @@ void ui_editor_run(TeApp *app)
             if (app->search.is_mode || app->search.only_mode)
             {
                 clear_search_highlights(app);
+
                 app->search.is_mode = 0;
                 app->search.only_mode = 0;
                 te_status(app, "Search mode exited");
@@ -2202,7 +2354,7 @@ void ui_editor_run(TeApp *app)
             }
 
             EdInfo info;
-            ed_get_info(app->editor, &info);
+            ed_get_info(te_app_get_editor(app), &info);
 
             if (info.modified)
             {
@@ -2222,7 +2374,7 @@ void ui_editor_run(TeApp *app)
         if (is_key && ch == KEY_F(10))
         {
             EdInfo info;
-            ed_get_info(app->editor, &info);
+            ed_get_info(te_app_get_editor(app), &info);
 
             if (info.modified)
             {
@@ -2274,7 +2426,7 @@ void ui_editor_run(TeApp *app)
                     const char *to_insert = rapid_buf;
                     int reported_len;
 
-                    ed_save_undo(app->editor);
+                    ed_save_undo(te_app_get_editor(app));
 
                     /* HARD-WRAP only: reflow pasted text; soft-wrap inserts verbatim */
                     if (app->hard_wrap)
@@ -2290,7 +2442,7 @@ void ui_editor_run(TeApp *app)
                         }
                     }
 
-                    ed_paste_text_with_undo(app->editor, to_insert);
+                    ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
 
                     clear_search_highlights(app);
                     soft_reset_desired();

@@ -75,16 +75,16 @@ static char *load_file(const char *path, TeApp *app)
     buf[r] = '\0';
 
     /* Keep raw bytes for live charset re-decode */
-    app->raw_bytes = (char *)malloc(r + 1);
+    char *new_bytes = (char *)malloc(r + 1);
 
-    if (app->raw_bytes)
+    if (new_bytes)
     {
-        memcpy(app->raw_bytes, buf, r + 1);
-        app->raw_len = (int)r;
+        memcpy(new_bytes, buf, r + 1);
+        te_app_set_raw_bytes(app, new_bytes, (int)r);
     }
     else
     {
-        app->raw_len = 0;
+        te_app_set_raw_bytes(app, NULL, 0);
     }
 
     /* Convert to UTF-8 if needed */
@@ -236,82 +236,35 @@ int main(int argc, char **argv)
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
     /* Register bracketed paste sequences */
-    if (define_key("\033[200~", KEY_PASTE_START) != OK)
-        fprintf(stderr, "Warning: define_key(200~) failed\n");
-
-    if (define_key("\033[201~", KEY_PASTE_END) != OK)
-        fprintf(stderr, "Warning: define_key(201~) failed\n");
+    define_key("\033[200~", KEY_PASTE_START);
+    define_key("\033[201~", KEY_PASTE_END);
 
     /* Register Ctrl+arrow key sequences for word navigation */
-    if (define_key("\033[1;5D", KEY_CLEFT) != OK)
-        fprintf(stderr, "Warning: define_key(Ctrl+Left) failed\n");
-
-    if (define_key("\033[1;5C", KEY_CRIGHT) != OK)
-        fprintf(stderr, "Warning: define_key(Ctrl+Right) failed\n");
-
-    if (define_key("\033y", KEY_ALT('Y')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Y) failed\n");
+    define_key("\033[1;5D", KEY_CLEFT);
+    define_key("\033[1;5C", KEY_CRIGHT);
+    define_key("\033y", KEY_ALT('Y'));
 
     /* Register Alt+key sequences for editor functions */
-    if (define_key("\033g", KEY_ALT('G')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+G) failed\n");
-
-    if (define_key("\033G", KEY_ALT('G')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+G) failed\n");
-
-    if (define_key("\033d", KEY_ALT('D')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+D) failed\n");
-
-    if (define_key("\033D", KEY_ALT('D')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+D) failed\n");
-
-    if (define_key("\033s", KEY_ALT('S')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+S) failed\n");
-
-    if (define_key("\033S", KEY_ALT('S')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+S) failed\n");
-
-    if (define_key("\033t", KEY_ALT('T')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+T) failed\n");
-
-    if (define_key("\033T", KEY_ALT('T')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+T) failed\n");
-
-    if (define_key("\033c", KEY_ALT('C')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+C) failed\n");
-
-    if (define_key("\033C", KEY_ALT('C')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+C) failed\n");
-
-    if (define_key("\033f", KEY_ALT('F')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+F) failed\n");
-
-    if (define_key("\033F", KEY_ALT('F')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+F) failed\n");
-
-    if (define_key("\033b", KEY_ALT('B')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+B) failed\n");
-
-    if (define_key("\033B", KEY_ALT('B')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+B) failed\n");
-
-    if (define_key("\033o", KEY_ALT('O')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+O) failed\n");
-
-    if (define_key("\033O", KEY_ALT('O')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+O) failed\n");
-
-    if (define_key("\033q", KEY_ALT('Q')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Q) failed\n");
-
-    if (define_key("\033Q", KEY_ALT('Q')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+Q) failed\n");
-
-    if (define_key("\033z", KEY_ALT('Z')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Z) failed\n");
-
-    if (define_key("\033Z", KEY_ALT('Z')) != OK)
-        fprintf(stderr, "Warning: define_key(Alt+Shift+Z) failed\n");
+    define_key("\033g", KEY_ALT('G'));
+    define_key("\033G", KEY_ALT('G'));
+    define_key("\033d", KEY_ALT('D'));
+    define_key("\033D", KEY_ALT('D'));
+    define_key("\033s", KEY_ALT('S'));
+    define_key("\033S", KEY_ALT('S'));
+    define_key("\033t", KEY_ALT('T'));
+    define_key("\033T", KEY_ALT('T'));
+    define_key("\033c", KEY_ALT('C'));
+    define_key("\033C", KEY_ALT('C'));
+    define_key("\033f", KEY_ALT('F'));
+    define_key("\033F", KEY_ALT('F'));
+    define_key("\033b", KEY_ALT('B'));
+    define_key("\033B", KEY_ALT('B'));
+    define_key("\033o", KEY_ALT('O'));
+    define_key("\033O", KEY_ALT('O'));
+    define_key("\033q", KEY_ALT('Q'));
+    define_key("\033Q", KEY_ALT('Q'));
+    define_key("\033z", KEY_ALT('Z'));
+    define_key("\033Z", KEY_ALT('Z'));
 #endif
 
     curs_set(1);
@@ -344,18 +297,19 @@ int main(int argc, char **argv)
     if (!app)
     {
         endwin();
+
         fprintf(stderr, "tinyedit: out of memory\n");
         return 1;
     }
 
     /* Apply config to editor */
     if (cfg.undo_levels > 0)
-        ed_set_undo_levels(app->editor, cfg.undo_levels);
+        ed_set_undo_levels(te_app_get_editor(app), cfg.undo_levels);
 
     app->hard_wrap = cfg.hard_wrap;
-    ed_set_hard_wrap(app->editor, cfg.hard_wrap);
+    ed_set_hard_wrap(te_app_get_editor(app), cfg.hard_wrap);
     app->wrap_col = cfg.autowrap_col;
-    app->show_line_numbers = cfg.show_line_numbers;
+    te_app_set_show_line_numbers(app, cfg.show_line_numbers);
 
     strncpy(app->cfg_path, cfg_path, sizeof(app->cfg_path) - 1);
 
@@ -374,15 +328,39 @@ int main(int argc, char **argv)
     /* Load file if given */
     if (argc >= 2)
     {
-        strncpy(app->filename, argv[1], sizeof(app->filename) - 1);
-        app->filename[sizeof(app->filename) - 1] = '\0';
+        TeTab *tab;
+        char *raw_bytes;
+        int raw_len;
 
-        content = load_file(app->filename, app);
+        content = load_file(argv[1], app);
+        raw_bytes = te_app_get_raw_bytes(app);
+        raw_len = te_app_get_raw_len(app);
+
+        tab = te_tab_new_with_content(argv[1], content, raw_bytes, raw_len);
+
+        if (tab)
+        {
+            tab->show_line_numbers = cfg.show_line_numbers;
+            te_app_add_tab(app, tab);
+            te_app_switch_tab(app, 0);
+        }
+
+        /* Clear app->raw_bytes since tab took ownership */
+        te_app_set_raw_bytes(app, NULL, 0);
 
         if (content)
-        {
-            ed_load(app->editor, content);
             free(content);
+    }
+    else
+    {
+        TeTab *tab = te_tab_new();
+
+        if (tab)
+        {
+            tab->show_line_numbers = cfg.show_line_numbers;
+
+            te_app_add_tab(app, tab);
+            te_app_switch_tab(app, 0);
         }
     }
 

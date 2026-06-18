@@ -29,6 +29,8 @@
 #include "../core/keys.h"
 #include "../components/editor.h"
 #include "../components/config.h"
+#include "tabs.h"
+#include "wm.h"
 
 /* CTRL(x) */
 #ifndef CTRL
@@ -116,25 +118,49 @@ typedef struct
 /* App state */
 typedef struct
 {
-    Ed *editor;
-    char filename[1024];  /* current file path; empty = unnamed buffer */
-    char charset_in[32];  /* charset used to read the file (view) */
-    char charset_out[32]; /* charset used to write the file (save) */
-    char *raw_bytes;      /* original file bytes kept for live charset re-decode */
-    int raw_len;
-    int hard_wrap;         /* 0=soft-wrap (default), 1=hard-wrap */
-    int wrap_col;          /* hard-wrap column (0=disabled) */
-    int show_line_numbers; /* 0=hide line numbers, 1=show line numbers */
-    TeSearch search;       /* search state */
-    char status[256];      /* status bar message */
-    char cfg_path[512];    /* path to config file */
-    TeConfig cfg;          /* live config (for setup access) */
+    TeWindowManager *wm;
+    TeTab **tabs;
+    int tab_count;
+    int tab_cap;
+    int active_tab;
+    int hard_wrap;
+    int wrap_col;
+    int show_line_numbers;
+    int show_tabs;
+    int show_translate;
+    int show_spell;
+    int tabs_panel_active;   /* Navigation mode in tabs panel */
+    int tabs_panel_selected; /* Currently selected tab in panel */
+
+    char status[256];
+    char cfg_path[512];
+
+    TeConfig cfg;
+    TeSearch search;
+
+    char charset_in[32];
+    char charset_out[32];
 } TeApp;
+
+/* Helper functions to access active tab data */
+Ed *te_app_get_editor(TeApp *app);
+const char *te_app_get_filename(TeApp *app);
+char *te_app_get_raw_bytes(TeApp *app);
+int te_app_get_raw_len(TeApp *app);
+int te_app_get_show_line_numbers(TeApp *app);
+void te_app_set_filename(TeApp *app, const char *val);
+void te_app_clear_filename(TeApp *app);
+void te_app_set_show_line_numbers(TeApp *app, int val);
 
 /* te_app.c */
 TeApp *te_app_new(void);
 void te_app_free(TeApp *app);
 void te_init_colors(const TeConfig *cfg);
+TeTab *te_app_get_active_tab(TeApp *app);
+int te_app_add_tab(TeApp *app, TeTab *tab);
+int te_app_close_tab(TeApp *app, int index);
+void te_app_switch_tab(TeApp *app, int index);
+void te_app_set_raw_bytes(TeApp *app, char *ptr, int len);
 
 /* ui_editor.c */
 void ui_editor_run(TeApp *app);
@@ -165,5 +191,11 @@ void te_draw_titlebar(TeApp *app);
 void ui_box(int y, int x, int h, int w);
 void te_hline(int y, int x, int len);
 const char *te_wcs2u8(const wchar_t *wcs);
+
+/* ui_tabs.c (tab navigation) */
+int ui_tabs_switch_next(TeApp *app);
+int ui_tabs_switch_prev(TeApp *app);
+int ui_tabs_switch_by_index(TeApp *app, int index);
+void ui_tabs_draw_panel(TeApp *app);
 
 #endif /* TE_H */
