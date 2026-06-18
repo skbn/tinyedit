@@ -19,17 +19,6 @@
 #include "config.h"
 #include "../core/charset.h"
 
-/* Color pair indices (must match te.h) */
-#ifndef COL_NORMAL
-#define COL_NORMAL 1
-#define COL_STATUS 2
-#define COL_TITLEBAR 3
-#define COL_POPUP 4
-#define COL_POPUP_SEL 5
-#define COL_BORDER 6
-#define COL_SEARCH_MATCH 7
-#endif
-
 static void strip_trailing(char *s)
 {
     int len = (int)strlen(s);
@@ -255,6 +244,9 @@ static int pair_by_name(const char *s)
     if (strcasecmp(s, "SEARCHMATCH") == 0)
         return COL_SEARCH_MATCH;
 
+    if (strcasecmp(s, "SPELLCURRENT") == 0)
+        return COL_SPELL_CURRENT;
+
     return -1;
 }
 
@@ -297,6 +289,25 @@ void te_cfg_defaults(TeConfig *cfg)
         cfg->ttf_fallback_size[i] = 0;
     }
 
+#ifdef HAVE_HUNSPELL
+    /* Spell checker defaults: disabled, empty paths */
+    cfg->spell_enabled = 0;
+    /* Default Hunspell dictionary path (platform-specific) */
+#if defined(PLATFORM_UNIX)
+    strncpy(cfg->spell_dict_path, "/usr/share/hunspell", sizeof(cfg->spell_dict_path) - 1);
+#elif defined(PLATFORM_WIN32)
+    strncpy(cfg->spell_dict_path, "C:\\Program Files\\LibreOffice\\share\\extensions\\dict-en", sizeof(cfg->spell_dict_path) - 1);
+#elif defined(PLATFORM_AMIGA)
+    strncpy(cfg->spell_dict_path, "ENVARC:dictionaries", sizeof(cfg->spell_dict_path) - 1);
+#else
+    cfg->spell_dict_path[0] = '\0';
+#endif
+    cfg->spell_dict_path[sizeof(cfg->spell_dict_path) - 1] = '\0';
+    cfg->spell_dict_name[0] = '\0';
+    /* Custom dict path for user dictionaries (relative to ~/.tinyedit/) */
+    cfg->spell_custom_dict[0] = '\0';
+#endif
+
     /* White-on-black fallback */
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
     {
@@ -332,6 +343,10 @@ void te_cfg_defaults(TeConfig *cfg)
     /* COL_SEARCH_MATCH (7) */
     cfg->color_fg[COL_SEARCH_MATCH] = 0;
     cfg->color_bg[COL_SEARCH_MATCH] = 3;
+
+    /* COL_SPELL_CURRENT (8) */
+    cfg->color_fg[COL_SPELL_CURRENT] = 7;
+    cfg->color_bg[COL_SPELL_CURRENT] = 5;
 }
 
 /* Load */
@@ -658,6 +673,46 @@ int te_cfg_load(TeConfig *cfg, const char *path)
                 cfg->color_bg[pi] = bi;
             }
         }
+#ifdef HAVE_HUNSPELL
+        else if (strcasecmp(word, "SPELL_ENABLED") == 0)
+        {
+            cfg->spell_enabled = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "SPELL_DICT_PATH") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+
+            /* Only overwrite if not empty, keep default otherwise */
+            if (tmp[0] != '\0')
+            {
+                strncpy(cfg->spell_dict_path, tmp, sizeof(cfg->spell_dict_path) - 1);
+                cfg->spell_dict_path[sizeof(cfg->spell_dict_path) - 1] = '\0';
+            }
+        }
+        else if (strcasecmp(word, "SPELL_DICT_NAME") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+            strncpy(cfg->spell_dict_name, tmp, sizeof(cfg->spell_dict_name) - 1);
+
+            cfg->spell_dict_name[sizeof(cfg->spell_dict_name) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "SPELL_CUSTOM_DICT") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+            strncpy(cfg->spell_custom_dict, tmp, sizeof(cfg->spell_custom_dict) - 1);
+
+            cfg->spell_custom_dict[sizeof(cfg->spell_custom_dict) - 1] = '\0';
+        }
+#endif
     }
 
     fclose(f);
@@ -792,7 +847,11 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "DEFAULT_BG_COLOR") == 0 ||
                 strcasecmp(word, "CURSORCOLOR") == 0 ||
                 strcasecmp(word, "COLOR") == 0 ||
-                strcasecmp(word, "COLORMAP") == 0)
+                strcasecmp(word, "COLORMAP") == 0
+#ifdef HAVE_HUNSPELL
+                || strcasecmp(word, "SPELL_ENABLED") == 0 || strcasecmp(word, "SPELL_DICT_PATH") == 0 || strcasecmp(word, "SPELL_DICT_NAME") == 0 || strcasecmp(word, "SPELL_CUSTOM_DICT") == 0
+#endif
+            )
             {
                 skip_line = 1;
             }
@@ -853,6 +912,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "COLOR POPUPSEL %s %s\n", color_name(cfg->color_fg[COL_POPUP_SEL]), color_name(cfg->color_bg[COL_POPUP_SEL]));
     fprintf(out, "COLOR BORDER %s %s\n", color_name(cfg->color_fg[COL_BORDER]), color_name(cfg->color_bg[COL_BORDER]));
     fprintf(out, "COLOR SEARCH %s %s\n", color_name(cfg->color_fg[COL_SEARCH_MATCH]), color_name(cfg->color_bg[COL_SEARCH_MATCH]));
+    fprintf(out, "COLOR SPELLCURRENT %s %s\n", color_name(cfg->color_fg[COL_SPELL_CURRENT]), color_name(cfg->color_bg[COL_SPELL_CURRENT]));
 
     /* COLORMAP for Amiga */
     if (cfg->color_map_initialized)
@@ -863,6 +923,14 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
         for (ci = 0; ci < 16; ci++)
             fprintf(out, "COLORMAP %s %d\n", color_names[ci], cfg->color_map[ci]);
     }
+
+#ifdef HAVE_HUNSPELL
+    /* Spell checker settings */
+    fprintf(out, "SPELL_ENABLED %s\n", cfg->spell_enabled ? "YES" : "NO");
+    fprintf(out, "SPELL_DICT_PATH %s\n", cfg->spell_dict_path);
+    fprintf(out, "SPELL_DICT_NAME %s\n", cfg->spell_dict_name);
+    fprintf(out, "SPELL_CUSTOM_DICT %s\n", cfg->spell_custom_dict);
+#endif
 
     fclose(out);
 

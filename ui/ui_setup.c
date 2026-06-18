@@ -18,17 +18,43 @@
 #include "te.h"
 #include "ui_setup.h"
 #include "ui_files.h"
+#include "core/portable.h"
 #include "../components/config.h"
 #include "../core/charset.h"
 #include "../core/keys.h"
+#include "../core/utf8.h"
+
+#ifdef HAVE_HUNSPELL
+#include "../spell/spell.h"
+#endif
 
 /* Tabs */
 #if defined(PLATFORM_AMIGA)
+#ifdef AMIGA_TTF_TE
+#ifdef HAVE_HUNSPELL
+#define ST_TAB_COUNT 4
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF Fallbacks", "Dictionary"};
+#else
 #define ST_TAB_COUNT 3
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF Fallbacks"};
+#endif
+#else
+#ifdef HAVE_HUNSPELL
+#define ST_TAB_COUNT 3
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Dictionary"};
 #else
 #define ST_TAB_COUNT 2
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
+#endif
+#endif
+#else
+#ifdef HAVE_HUNSPELL
+#define ST_TAB_COUNT 3
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Dictionary"};
+#else
+#define ST_TAB_COUNT 2
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
+#endif
 #endif
 
 /* Field types */
@@ -41,6 +67,11 @@ typedef enum
     FT_CHARSET,  /* cycle through available charsets */
     FT_CYCLE,    /* cycle through predefined string options */
     FT_COLORPAIR /* color pair configuration (fg/bg) */
+#ifdef HAVE_HUNSPELL
+    ,
+    FT_DICTLIST,  /* cycle through available Hunspell dictionaries */
+    FT_CUSTOMDICT /* select or create custom dictionary */
+#endif
 } FieldType;
 
 typedef struct
@@ -89,6 +120,7 @@ static const SetupField st_fields[] =
         {1, "Popup Sel", FT_COLORPAIR, F_OFF(color_fg) + COL_POPUP_SEL * sizeof(int), 0},
         {1, "Border", FT_COLORPAIR, F_OFF(color_fg) + COL_BORDER * sizeof(int), 0},
         {1, "Search", FT_COLORPAIR, F_OFF(color_fg) + COL_SEARCH_MATCH * sizeof(int), 0},
+        {1, "Spell Current", FT_COLORPAIR, F_OFF(color_fg) + COL_SPELL_CURRENT * sizeof(int), 0},
         {1, "Cursor color", FT_INT, F_OFF(cursor_color), 0},
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "Default BG", FT_INT, F_OFF(default_bg_color), 0},
@@ -113,9 +145,50 @@ static const SetupField st_fields[] =
         {2, "Fallback 8", FT_STR, F_OFF(ttf_fallback[7]), TE_CFG_STR_MAX},
         {2, "Fallback 8 Size", FT_INT, F_OFF(ttf_fallback_size[7]), 0},
 #endif
+
+/* Dictionary */
+#ifdef HAVE_HUNSPELL
+#if defined(PLATFORM_AMIGA)
+        {3, "Spell Enabled", FT_BOOL, F_OFF(spell_enabled), 0},
+        {3, "Dict Path", FT_STR, F_OFF(spell_dict_path), TE_CFG_STR_MAX},
+        {3, "Dictionary", FT_DICTLIST, F_OFF(spell_dict_name), 0},
+        {3, "Custom Dict", FT_CUSTOMDICT, F_OFF(spell_custom_dict), 0},
+#else
+        {2, "Spell Enabled", FT_BOOL, F_OFF(spell_enabled), 0},
+        {2, "Dict Path", FT_STR, F_OFF(spell_dict_path), TE_CFG_STR_MAX},
+        {2, "Dictionary", FT_DICTLIST, F_OFF(spell_dict_name), 0},
+        {2, "Custom Dict", FT_CUSTOMDICT, F_OFF(spell_custom_dict), 0},
+#endif
+#endif
 };
 
 #define ST_FIELD_COUNT ((int)(sizeof(st_fields) / sizeof(st_fields[0])))
+
+/* Get tinyedit base directory (platform-specific) */
+static void get_tinyedit_base_dir(char *buf, size_t bufsz)
+{
+    char *home;
+
+#if defined(PLATFORM_WIN32)
+    home = getenv("APPDATA");
+
+    if (home && home[0])
+        snprintf(buf, bufsz, "%s\\tinyedit", home);
+    else
+        snprintf(buf, bufsz, "tinyedit");
+
+#elif defined(PLATFORM_AMIGA)
+    snprintf(buf, bufsz, "ENVARC:tinyedit");
+#else
+
+    home = getenv("HOME");
+
+    if (home && home[0])
+        snprintf(buf, bufsz, "%s/.tinyedit", home);
+    else
+        snprintf(buf, bufsz, ".tinyedit");
+#endif
+}
 
 /* Format a field value into buf for display */
 static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf, int bufsz)
@@ -181,6 +254,22 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
         snprintf(buf, bufsz, "%s", label);
         break;
     }
+#ifdef HAVE_HUNSPELL
+    case FT_DICTLIST:
+    {
+        const char *s = (const char *)(base + fld->off);
+
+        snprintf(buf, bufsz, "%s", s[0] ? s : "(none)");
+        break;
+    }
+    case FT_CUSTOMDICT:
+    {
+        const char *s = (const char *)(base + fld->off);
+
+        snprintf(buf, bufsz, "%s", s[0] ? s : "(none)");
+        break;
+    }
+#endif
     case FT_COLORPAIR:
     {
         int pair_index = (fld->off - F_OFF(color_fg)) / sizeof(int);
@@ -337,6 +426,8 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
                 ui_popup_center(9, 50, &y, &x, &h, &w);
 
+                standend();
+
                 ui_draw_popup_frame(y, x, h, w, fld->label);
                 attron(COLOR_PAIR(COL_POPUP));
 
@@ -421,6 +512,20 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
             tmp[sizeof(tmp) - 1] = '\0';
 
             if (ui_files_pick(fld->label, "", tmp, sizeof(tmp)) == 0)
+            {
+                strncpy(s, tmp, TE_CFG_STR_MAX - 1);
+                s[TE_CFG_STR_MAX - 1] = '\0';
+            }
+        }
+        else if (strcmp(fld->label, "Dict Path") == 0)
+        {
+            /* Use directory picker for Dict Path */
+            char tmp[TE_CFG_STR_MAX];
+
+            strncpy(tmp, s, sizeof(tmp) - 1);
+            tmp[sizeof(tmp) - 1] = '\0';
+
+            if (ui_files_pick_dir(fld->label, "", tmp, sizeof(tmp)) == 0)
             {
                 strncpy(s, tmp, TE_CFG_STR_MAX - 1);
                 s[TE_CFG_STR_MAX - 1] = '\0';
@@ -593,6 +698,158 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         break;
     }
+#ifdef HAVE_HUNSPELL
+    case FT_DICTLIST:
+    {
+        char *s = (char *)(base + fld->off);
+        char **dicts;
+        int n_dicts;
+        int i;
+        int current = -1;
+        int selected;
+
+        /* Get dictionary path from config */
+        char *dict_path = w->spell_dict_path;
+
+        if (!dict_path || !dict_path[0])
+        {
+            mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Dict Path not set", 24);
+            refresh();
+            wrapper_getch();
+            break;
+        }
+
+        /* List available dictionaries */
+        dicts = spell_list_dictionaries(dict_path, &n_dicts);
+
+        if (!dicts || n_dicts == 0)
+        {
+            mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"No dictionaries found", 20);
+            refresh();
+            wrapper_getch();
+            break;
+        }
+
+        /* Find current dictionary in list */
+        for (i = 0; i < n_dicts; i++)
+        {
+            if (strcmp(s, dicts[i]) == 0)
+            {
+                current = i;
+                break;
+            }
+        }
+
+        /* Show popup to select dictionary */
+        selected = ui_popup_list("Select Dictionary", (const char **)dicts, n_dicts, current);
+
+        if (selected >= 0 && selected < n_dicts)
+        {
+            strncpy(s, dicts[selected], TE_CFG_STR_MAX - 1);
+            s[TE_CFG_STR_MAX - 1] = '\0';
+        }
+
+        spell_free_dictionaries(dicts, n_dicts);
+        break;
+    }
+    case FT_CUSTOMDICT:
+    {
+        char *s = (char *)(base + fld->off);
+        const char *options[] = {"Select existing", "Create new"};
+        int selected;
+
+        selected = ui_popup_list("Custom Dictionary", options, 2, -1);
+
+        if (selected == 0)
+        {
+            /* Select existing */
+            char dicts_dir[TE_CFG_STR_MAX];
+            char parent_dir[TE_CFG_STR_MAX];
+            char selected_file[TE_CFG_STR_MAX];
+
+            /* Get custom dicts directory */
+            get_tinyedit_base_dir(parent_dir, sizeof(parent_dir));
+
+#if defined(PLATFORM_WIN32)
+            snprintf(dicts_dir, sizeof(dicts_dir), "%s\\dicts", parent_dir);
+#else
+            snprintf(dicts_dir, sizeof(dicts_dir), "%s/dicts", parent_dir);
+#endif
+
+            /* Create parent directory if it doesn't exist */
+            port_mkdir_one(parent_dir);
+            port_mkdir_one(dicts_dir);
+
+            /* Select file */
+            selected_file[0] = '\0';
+
+            if (ui_files_pick("Select custom dictionary", dicts_dir, selected_file, sizeof(selected_file)) == 0 && selected_file[0])
+            {
+                /* Check if selected file ends with .dic */
+                size_t len = strlen(selected_file);
+
+                if (len >= 4 && strcmp(selected_file + len - 4, ".dic") == 0)
+                {
+                    strncpy(s, selected_file, TE_CFG_STR_MAX - 1);
+                    s[TE_CFG_STR_MAX - 1] = '\0';
+                }
+            }
+        }
+        else if (selected == 1)
+        {
+            /* Create new */
+            char dicts_dir[TE_CFG_STR_MAX];
+            char parent_dir[TE_CFG_STR_MAX];
+            wchar_t dict_name[TE_CFG_STR_MAX];
+            char dict_path[TE_CFG_STR_MAX];
+
+            /* Get custom dicts directory */
+            get_tinyedit_base_dir(parent_dir, sizeof(parent_dir));
+
+#if defined(PLATFORM_WIN32)
+            snprintf(dicts_dir, sizeof(dicts_dir), "%s\\dicts", parent_dir);
+#else
+            snprintf(dicts_dir, sizeof(dicts_dir), "%s/dicts", parent_dir);
+#endif
+
+            /* Create parent directory if it doesn't exist */
+            port_mkdir_one(parent_dir);
+            port_mkdir_one(dicts_dir);
+
+            /* Ask for dictionary name */
+            dict_name[0] = L'\0';
+
+            if (ui_popup_input_wcs("Create custom dictionary", "Dictionary name (without .dic):", dict_name, TE_CFG_STR_MAX) == 0 && dict_name[0])
+            {
+                /* Convert wchar_t to UTF-8 for file path */
+                int wcs_len = (int)wcslen(dict_name);
+                char *utf8_name = wcs_to_utf8(dict_name, wcs_len);
+
+                if (utf8_name)
+                {
+                    /* Build full path */
+                    snprintf(dict_path, sizeof(dict_path), "%s/%s.dic", dicts_dir, utf8_name);
+
+                    /* Create empty file using portable function */
+                    if (port_file_create_empty(dict_path) == 0)
+                    {
+                        strncpy(s, dict_path, TE_CFG_STR_MAX - 1);
+                        s[TE_CFG_STR_MAX - 1] = '\0';
+                    }
+                    else
+                    {
+                        mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Cannot create dictionary", 30);
+                        refresh();
+                        wrapper_getch();
+                    }
+
+                    free(utf8_name);
+                }
+            }
+        }
+        break;
+    }
+#endif
     }
 }
 
@@ -615,6 +872,14 @@ static void st_clear_field(TeConfig *w, const SetupField *fld)
         *v = 0; /* Zero as default */
         break;
     }
+#ifdef HAVE_HUNSPELL
+    case FT_CUSTOMDICT:
+    {
+        char *s = (char *)(base + fld->off);
+        s[0] = '\0'; /* Empty string */
+        break;
+    }
+#endif
     /* FT_CHARSET, FT_CYCLE, FT_COLORPAIR: ignore DELETE */
     default:
         break;
@@ -675,6 +940,7 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
         nfields = st_tab_field_count(tab);
 
         erase();
+        standend();
 
         /* Title bar */
         attron(COLOR_PAIR(COL_TITLEBAR));

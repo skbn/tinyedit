@@ -23,6 +23,7 @@ const char __attribute__((used)) binkd_stack_size[] = "$STACK:65536";
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include "core/portable.h"
 
 #ifdef PLATFORM_AMIGA
 #include "ncursesw_amiga.h"
@@ -36,6 +37,10 @@ const char __attribute__((used)) binkd_stack_size[] = "$STACK:65536";
 #include "core/charset.h"
 #include "components/config.h"
 #include "core/clipboard.h"
+
+#ifdef HAVE_HUNSPELL
+#include "ui/ui_spell.h"
+#endif
 
 /* Read a whole file into a malloc'd UTF-8 buffer with charset conversion */
 static char *load_file(const char *path, TeApp *app)
@@ -135,34 +140,36 @@ int main(int argc, char **argv)
     IFFParseBase = OpenLibrary("iffparse.library", 0L);
 #endif
 
-    /* Resolve config path */
+    /* Resolve config path - use ~/.tinyedit/ directory */
 #if defined(PLATFORM_WIN32)
-
     home = getenv("APPDATA");
 
     if (home && home[0])
-        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s\\tinyedit\\tinyedit.cfg", home);
+        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s\\tinyedit\\config", home);
     else
-        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "tinyedit.cfg");
+        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "tinyedit\\config");
 
 #elif defined(PLATFORM_AMIGA)
-    snprintf(cfg_path_buf, sizeof(cfg_path_buf), "ENVARC:tinyedit.cfg");
+    snprintf(cfg_path_buf, sizeof(cfg_path_buf), "ENVARC:tinyedit/config");
 #else
 
     home = getenv("HOME");
 
     if (home && home[0])
-        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s/.tinyedit.conf", home);
+        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s/.tinyedit/config", home);
     else
-        snprintf(cfg_path_buf, sizeof(cfg_path_buf), ".tinyedit.conf");
+        snprintf(cfg_path_buf, sizeof(cfg_path_buf), ".tinyedit/config");
 
 #endif
 
     cfg_path = cfg_path_buf;
 
-#ifdef PLATFORM_WIN32
     /* Create config directory if it doesn't exist */
+#if defined(PLATFORM_WIN32)
     last_sep = strrchr(cfg_path, '\\');
+#else
+    last_sep = strrchr(cfg_path, '/');
+#endif
 
     if (last_sep)
     {
@@ -171,10 +178,8 @@ int main(int argc, char **argv)
         strncpy(dir_path, cfg_path, len);
         dir_path[len] = '\0';
 
-        mkdir(dir_path);
+        port_mkdir_one(dir_path);
     }
-
-#endif
 
     /* Load config (creates default file if missing) */
     te_cfg_load(&cfg, cfg_path);
@@ -261,6 +266,8 @@ int main(int argc, char **argv)
     define_key("\033B", KEY_ALT('B'));
     define_key("\033o", KEY_ALT('O'));
     define_key("\033O", KEY_ALT('O'));
+    define_key("\033p", KEY_ALT('P'));
+    define_key("\033P", KEY_ALT('P'));
     define_key("\033q", KEY_ALT('Q'));
     define_key("\033Q", KEY_ALT('Q'));
     define_key("\033z", KEY_ALT('Z'));
@@ -315,6 +322,15 @@ int main(int argc, char **argv)
 
     app->cfg_path[sizeof(app->cfg_path) - 1] = '\0';
     app->cfg = cfg;
+
+#ifdef HAVE_HUNSPELL
+    /* Initialize spell_enabled from config */
+    app->spell_enabled = cfg.spell_enabled;
+    app->spell_active = 0; /* Disabled by default, user must activate with Alt+H */
+
+    /* Load spell checker from config */
+    spell_load_from_config(app);
+#endif
 
     /* Initialize charsets from config */
     /* View charset is always UTF-8 by default */

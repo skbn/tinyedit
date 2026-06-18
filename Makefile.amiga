@@ -43,6 +43,29 @@ ifeq ($(USE_HUNSPELL),1)
                   $(HUNSPELL_OBJDIR)/replist.o $(HUNSPELL_OBJDIR)/suggestmgr.o
 endif
 
+# Hyphen support
+USE_HYPHEN ?= 0
+HYPHEN_DIR = $(HERE)hyphen
+HYPHEN_OBJDIR = $(HYPHEN_DIR)/objs.amiga
+HYPHEN_LIB = $(HYPHEN_DIR)/libhyphen.a
+HYPHEN_OBJS = $(HYPHEN_OBJDIR)/hnjalloc.o $(HYPHEN_OBJDIR)/hyphen.o
+
+ifeq ($(USE_HYPHEN),1)
+  CFLAGS += -DHAVE_HYPHEN -I$(HYPHEN_DIR)
+endif
+
+# MyThes support
+USE_MYTHES ?= 0
+MYTHES_DIR = $(HERE)mythes
+MYTHES_OBJDIR = $(MYTHES_DIR)/objs.amiga
+MYTHES_LIB = $(MYTHES_DIR)/libmythes.a
+MYTHES_OBJS = $(MYTHES_OBJDIR)/mythes.o
+
+ifeq ($(USE_MYTHES),1)
+  CXXFLAGS += -DHAVE_MYTHES -I$(MYTHES_DIR)
+  CFLAGS += -DHAVE_MYTHES -I$(MYTHES_DIR)
+endif
+
 # Directories -- separate obj dir from Linux build so .o files don't collide
 OBJDIR = $(HERE)objs.amiga
 COREDIR = $(HERE)core
@@ -51,17 +74,30 @@ UIDIR = $(HERE)ui
 
 # Object files in objs/
 CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
-            $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/ncursesw_amiga.o
+            $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/portable.o $(OBJDIR)/ncursesw_amiga.o
 COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_spell.o
+            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
+
+ifeq ($(USE_HUNSPELL),1)
+UI_OBJS   += $(OBJDIR)/ui_spell.o
+endif
+
 ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS)
 
 all: $(TARGET) tinyedit
 
 ifeq ($(USE_HUNSPELL),1)
 all: $(HUNSPELL_LIB)
+endif
+
+ifeq ($(USE_HYPHEN),1)
+all: $(HYPHEN_LIB)
+endif
+
+ifeq ($(USE_MYTHES),1)
+all: $(MYTHES_LIB)
 endif
 
 $(TARGET): $(ALL_OBJS)
@@ -86,6 +122,9 @@ $(OBJDIR)/search.o: $(COREDIR)/search.c $(COREDIR)/search.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)/utf8.o: $(COREDIR)/utf8.c $(COREDIR)/utf8.h | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJDIR)/portable.o: $(COREDIR)/portable.c $(COREDIR)/portable.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)/ncursesw_amiga.o: $(HERE)ncursesw_amiga.c $(HERE)ncursesw_amiga.h | $(OBJDIR)
@@ -132,8 +171,10 @@ $(OBJDIR)/wm.o: $(UIDIR)/wm.c $(UIDIR)/wm.h | $(OBJDIR)
 $(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+endif
 
 # Spell checker object (only if USE_HUNSPELL=1)
 $(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
@@ -148,8 +189,8 @@ ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS) $(HUNSPELL_LIB)
-	$(CXX) $(CFLAGS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) $(HUNSPELL_LIB) -o $@
+$(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB)
+	$(CXX) $(CFLAGS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB) -o $@
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(HERE)main.c $(ALL_OBJS) $(TARGET) -o $@
@@ -157,20 +198,47 @@ endif
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)
+	
 ifeq ($(USE_HUNSPELL),1)
-	rm -rf $(HUNSPELL_OBJDIR) $(HUNSPELL_LIB) $(HUNSPELL_VERSION_H)
+	rm -rf $(HUNSPELL_OBJDIR) $(HUNSPELL_LIB)
 endif
 
-# prep target - generate version header (always available)
+ifeq ($(USE_HYPHEN),1)
+	rm -rf $(HYPHEN_OBJDIR) $(HYPHEN_LIB)
+endif
+
+ifeq ($(USE_MYTHES),1)
+	rm -rf $(MYTHES_OBJDIR) $(MYTHES_LIB)
+endif
+
+# prep target - generate version header and patch w_char.hxx (always available)
 prep:
-	@echo ">>> Generating $(HUNSPELL_VERSION_H) from $(HUNSPELL_VERSION_IN)"
-	@sed \
-		-e 's/@HUNSPELL_VERSION_MAJOR@/1/g' \
-		-e 's/@HUNSPELL_VERSION_MINOR@/7/g' \
-		-e 's/@HUNSPELL_VERSION_PATCH@/0/g' \
-		-e 's/@VERSION@/1.7.0/g' \
-		$(HUNSPELL_VERSION_IN) > $(HUNSPELL_VERSION_H)
-	@echo ">>> Prep complete. Run 'make -f Makefile.amiga USE_HUNSPELL=1 all' to build."
+	@echo ">>> Generating $(HUNSPELL_VERSION_H)"
+	@cp $(HERE)hunspell/src/hunspell/hunversion.h.in $(HERE)hunspell/src/hunspell/hunversion.h
+	@sed -i -e 's|@HUNSPELL_VERSION_MAJOR@|1|g' $(HERE)hunspell/src/hunspell/hunversion.h
+	@sed -i -e 's|@HUNSPELL_VERSION_MINOR@|7|g' $(HERE)hunspell/src/hunspell/hunversion.h
+	@sed -i -e 's|@HUNSPELL_VERSION_PATCH@|3|g' $(HERE)hunspell/src/hunspell/hunversion.h
+	@sed -i -e 's|@VERSION@|1.7.3|g' $(HERE)hunspell/src/hunspell/hunversion.h
+
+	@echo ">>> Patching w_char.hxx for m68k big-endian support"
+
+	@if ! grep -q "defined(PLATFORM_AMIGA)" $(HUNSPELL_SRC)/w_char.hxx; then \
+	    sed -i 's/defined(__LITTLE_ENDIAN__)/defined(__LITTLE_ENDIAN__) || defined(PLATFORM_AMIGA)/g' $(HUNSPELL_SRC)/w_char.hxx; \
+	    echo ">>> w_char.hxx patched"; \
+	else \
+	    echo ">>> w_char.hxx already patched"; \
+	fi
+
+	@echo ">>> Patching csutil.cxx u8_u16 for m68k big-endian"
+	
+	@if ! grep -q "#ifdef PLATFORM_AMIGA" $(HUNSPELL_SRC)/csutil.cxx; then \
+	    sed -i 's/out->h = static_cast<unsigned char>(cp >> 8);/#ifdef PLATFORM_AMIGA\n    out->l = static_cast<unsigned char>(cp >> 8);\n#else\n    out->h = static_cast<unsigned char>(cp >> 8);\n#endif/g' $(HUNSPELL_SRC)/csutil.cxx; \
+	    sed -i 's/out->l = static_cast<unsigned char>(cp);/#ifdef PLATFORM_AMIGA\n    out->h = static_cast<unsigned char>(cp);\n#else\n    out->l = static_cast<unsigned char>(cp);\n#endif/g' $(HUNSPELL_SRC)/csutil.cxx; \
+	    echo ">>> csutil.cxx patched"; \
+	else \
+	    echo ">>> csutil.cxx already patched"; \
+	fi
+	@echo ">>> Prep complete. Run 'make -f Makefile.amiga USE_HUNSPELL=1 all' to build"
 
 # Hunspell build rules (only if USE_HUNSPELL=1)
 ifeq ($(USE_HUNSPELL),1)
@@ -181,13 +249,51 @@ $(HUNSPELL_OBJDIR):
 
 # Compile Hunspell C++ source files
 $(HUNSPELL_OBJDIR)/%.o: $(HUNSPELL_SRC)/%.cxx | $(HUNSPELL_OBJDIR)
-	$(CXX) $(CXXFLAGS) -I$(HUNSPELL_SRC) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -DPLATFORM_AMIGA -I$(HUNSPELL_SRC) -c $< -o $@
 
 # Create Hunspell static library
 $(HUNSPELL_LIB): $(HUNSPELL_OBJS)
 	$(AR) rcs $@ $(HUNSPELL_OBJS)
 	$(RANLIB) $@
 	@echo ">>> $(HUNSPELL_LIB) built successfully"
+
+endif
+
+# Hyphen build rules (only if USE_HYPHEN=1)
+ifeq ($(USE_HYPHEN),1)
+
+# Create Hyphen object directory
+$(HYPHEN_OBJDIR):
+	mkdir -p $(HYPHEN_OBJDIR)
+
+# Compile Hyphen C source files
+$(HYPHEN_OBJDIR)/%.o: $(HYPHEN_DIR)/%.c | $(HYPHEN_OBJDIR)
+	$(CC) $(CFLAGS) -I$(HYPHEN_DIR) -c $< -o $@
+
+# Create Hyphen static library
+$(HYPHEN_LIB): $(HYPHEN_OBJS)
+	$(AR) rcs $@ $(HYPHEN_OBJS)
+	$(RANLIB) $@
+	@echo ">>> $(HYPHEN_LIB) built successfully"
+
+endif
+
+# MyThes build rules (only if USE_MYTHES=1)
+ifeq ($(USE_MYTHES),1)
+
+# Create MyThes object directory
+$(MYTHES_OBJDIR):
+	mkdir -p $(MYTHES_OBJDIR)
+
+# Compile MyThes C++ source files
+$(MYTHES_OBJDIR)/%.o: $(MYTHES_DIR)/%.cxx | $(MYTHES_OBJDIR)
+	$(CXX) $(CXXFLAGS) -I$(MYTHES_DIR) -I$(HUNSPELL_SRC) -c $< -o $@
+
+# Create MyThes static library
+$(MYTHES_LIB): $(MYTHES_OBJS) $(HUNSPELL_LIB)
+	$(AR) rcs $@ $(MYTHES_OBJS)
+	$(RANLIB) $@
+	@echo ">>> $(MYTHES_LIB) built successfully"
 
 endif
 

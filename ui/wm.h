@@ -14,6 +14,8 @@
 
 #include "../core/keys.h"
 
+#define SPELL_PANEL_HEIGHT 5
+
 typedef enum
 {
     WIN_EDITOR,

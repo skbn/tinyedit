@@ -83,6 +83,8 @@ make -f Makefile.amiga.te clean all
 
 To compile with Hunspell spell checker:
 Hunspell source: https://github.com/hunspell/hunspell
+Hypehn source: https://github.com/hunspell/hyphen.git
+Mythes source: https://github.com/hunspell/mythes.git
 
 make -f Makefile.amiga prep
 make -f Makefile.amiga USE_HUNSPELL=1 all
@@ -93,6 +95,40 @@ make -f Makefile.amiga all
 For Makefile.amiga.te (with FreeType):
 make -f Makefile.amiga.te prep-hunspell
 make -f Makefile.amiga.te USE_HUNSPELL=1 all
+
+Note: The prep-hunspell target applies patches to Hunspell source code to fix endianness issues on m68k (big-endian architecture). These patches are necessary because:
+
+Vesrion 1.7.3:
+
+**w_char.hxx (line 58):**
+- Original: #if defined(_WIN32) || (defined(__BYTE_ORDER__) && (__BYTE_ORDER__==__ORDER_LITTLE_ENDIAN__)) || defined(__LITTLE_ENDIAN__)
+
+- Patched: #if defined(_WIN32) || (defined(__BYTE_ORDER__) && (__BYTE_ORDER__==__ORDER_LITTLE_ENDIAN__)) || defined(__LITTLE_ENDIAN__) || defined(PLATFORM_AMIGA)
+
+- Reason: Adds `PLATFORM_AMIGA` to little-endian detection so Hunspell uses memcpy conversion instead of manual shift
+
+**csutil.cxx (u8_u16 function, lines 228-229):**
+- Original:
+  ```cpp
+  out->h = static_cast<unsigned char>(cp >> 8);
+  out->l = static_cast<unsigned char>(cp);
+  ```
+- Patched:
+  ```cpp
+  #ifdef PLATFORM_AMIGA
+      out->l = static_cast<unsigned char>(cp >> 8);
+  #else
+      out->h = static_cast<unsigned char>(cp >> 8);
+  #endif
+  #ifdef PLATFORM_AMIGA
+      out->h = static_cast<unsigned char>(cp);
+  #else
+      out->l = static_cast<unsigned char>(cp);
+  #endif
+  ```
+- Reason: Inverts byte order for m68k big-endian compatibility (h/l swapped)
+
+These patches are applied automatically by the Makefile and only need to be run once. If Hunspell is updated to a new version, these patches may need to be reapplied or adjusted.
 
 Freetype fonts tested:
 
@@ -109,6 +145,18 @@ With ttengine:
 
 DejaVuSansMono.ttf
 LiberationMono-Regular.ttf
+
+Dictionaries:
+LibreOffice Dictionaries Collection (GitHub): https://github.com/wachin/libreoffice-dictionaries-collection - 138 dictionaries in 42 languages
+wooorm/dictionaries (GitHub): https://github.com/wooorm/dictionaries/ - Normalized dictionaries
+TinyMCE Spell Checker: https://www.tiny.cloud/docs/tinymce/7/self-hosting-hunspell/ - Packages hunspell-dictionaries-approved.zip and hunspell-dictionaries-all.zip
+
+For Spanish and English, download from LibreOffice Dictionaries Collection:
+- Spanish: es_ES.aff and es_ES.dic from es_ES/ directory
+- English (UK): en_GB.aff and en_GB.dic from en_GB/ directory
+- English (US): en_US.aff and en_US.dic from en_US/ directory
+
+On AmigaOS, place the .aff and .dic files in the "ENVARC:dictionaries" directory.
 
 The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA.
 ```

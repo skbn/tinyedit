@@ -24,6 +24,10 @@
 #include "../components/editor.h"
 #include "../wrapper.h"
 
+#ifdef HAVE_HUNSPELL
+#include "../spell/spell.h"
+#endif
+
 TeApp *te_app_new(void)
 {
     TeApp *app;
@@ -44,8 +48,8 @@ TeApp *te_app_new(void)
     /* Create windows for layout */
     wm_add_window(app->wm, WIN_TABLIST, 0, 1, 20, LINES - 1);
     wm_add_window(app->wm, WIN_EDITOR, 20, 1, COLS - 20, LINES - 1);
-    wm_add_window(app->wm, WIN_TRANSLATE, 20, LINES - 10, COLS - 20, 10);
-    wm_add_window(app->wm, WIN_SPELL, 20, LINES - 10, COLS - 20, 10);
+    wm_add_window(app->wm, WIN_TRANSLATE, 20, LINES - SPELL_PANEL_HEIGHT - 1, COLS - 20, SPELL_PANEL_HEIGHT);
+    wm_add_window(app->wm, WIN_SPELL, 20, LINES - SPELL_PANEL_HEIGHT - 1, COLS - 20, SPELL_PANEL_HEIGHT);
 
     app->tab_cap = 8;
     app->tabs = (TeTab **)calloc(app->tab_cap, sizeof(TeTab *));
@@ -78,6 +82,17 @@ TeApp *te_app_new(void)
     app->search.match_current = 0;
     app->search.match_total = 0;
     app->search.query[0] = L'\0';
+
+#ifdef HAVE_HUNSPELL
+    app->spell_handle = NULL;
+    app->spell_enabled = 0; /* Will be set from config after loading */
+    app->spell_active = 0;  /* Will be set from config after loading */
+    app->spell_current_word[0] = L'\0';
+    app->spell_word_status = 0;
+    app->spell_suggestions = NULL;
+    app->spell_suggestion_count = 0;
+    app->spell_scroll_offset = 0;
+#endif
 
     strncpy(app->charset_in, "UTF-8", sizeof(app->charset_in) - 1);
     app->charset_in[sizeof(app->charset_in) - 1] = '\0';
@@ -119,6 +134,14 @@ void te_app_free(TeApp *app)
         free(app->search.cols);
         app->search.cols = NULL;
     }
+
+#ifdef HAVE_HUNSPELL
+    if (app->spell_handle)
+    {
+        spell_free(app->spell_handle);
+        app->spell_handle = NULL;
+    }
+#endif
 
     if (app->wm)
     {
@@ -379,6 +402,7 @@ void te_init_colors(const TeConfig *cfg)
         init_pair(COL_POPUP_SEL, COLOR_BLACK, COLOR_CYAN);
         init_pair(COL_BORDER, COLOR_CYAN, COLOR_BLACK);
         init_pair(COL_SEARCH_MATCH, COLOR_BLACK, COLOR_YELLOW);
+        init_pair(COL_SPELL_CURRENT, COLOR_WHITE, COLOR_MAGENTA);
     }
 }
 
@@ -463,7 +487,12 @@ void te_draw_titlebar(TeApp *app)
     if (tab && tab->editor)
     {
         ed_get_info(tab->editor, &info);
+
+#ifdef HAVE_HUNSPELL
+        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", (app->spell_enabled && app->spell_active && app->spell_handle) ? "SPELL " : "", info.insert_mode ? "INS" : "OVR");
+#else
         snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", info.insert_mode ? "INS" : "OVR");
+#endif
     }
     else
     {

@@ -266,25 +266,42 @@ int replace_current(TeApp *app)
         new_cols = NULL;
         new_match_count = ed_search_all_custom(te_app_get_editor(app), app->search.query, app->search.case_sensitive, app->search.whole_word, &new_rows, &new_cols);
 
-        if (new_match_count > 0)
+        if (new_match_count > 0 && new_rows && new_cols)
         {
+            int i;
+            int next_idx = 0;
+
             app->search.rows = new_rows;
             app->search.cols = new_cols;
             app->search.count = new_match_count;
-            app->search.current_match = 0;
             app->search.match_current = 1;
             app->search.match_total = new_match_count;
 
-            /* Move cursor to first remaining match */
-            ed_set_pos(te_app_get_editor(app), new_rows[0], new_cols[0]);
+            /* Find first match after replacement position */
+            for (i = 0; i < new_match_count; i++)
+            {
+                if (new_rows[i] > match_row || (new_rows[i] == match_row && new_cols[i] > match_col))
+                {
+                    next_idx = i;
+                    break;
+                }
+            }
+
+            app->search.current_match = next_idx;
+
+            /* Move cursor to next match */
+            ed_set_pos(te_app_get_editor(app), new_rows[next_idx], new_cols[next_idx]);
             ed_ensure_visible(te_app_get_editor(app));
 
             te_status(app, "Replaced. %d match(es) remaining", new_match_count);
         }
         else
         {
-            free(new_rows);
-            free(new_cols);
+            if (new_rows)
+                free(new_rows);
+
+            if (new_cols)
+                free(new_cols);
 
             app->search.is_mode = 0;
             app->search.match_total = 0;

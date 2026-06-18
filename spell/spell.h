@@ -35,4 +35,7 @@ int spell_remove_word(SpellChecker *sc, const char *word);
 const char *spell_get_encoding(SpellChecker *sc);
 int spell_is_available(void);
 
+char **spell_list_dictionaries(const char *search_path, int *n_dicts);
+void spell_free_dictionaries(char **dicts, int n_dicts);
+
 #endif /* SPELL_H */

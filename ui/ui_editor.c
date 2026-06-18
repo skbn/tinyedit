@@ -66,9 +66,12 @@ static const char *HELP_LINES[] =
         "    Ctrl+O           Export block to file",
         "",
         "  Search:",
-        "    F5 / Alt+F       Search (show all matches)",
+        "    F5 / Alt+F       Search / Replace current",
         "    Ctrl+R           Find & replace",
         "    Alt+G            Go to line",
+        "    F3 / Alt+C       Prev",
+        "    F4 / Alt+T       Next",
+        "    F6 / Alt+B       Replace all",
         "",
         "  Files:",
         "    F7 / Alt+O       Insert file at cursor",
@@ -86,6 +89,8 @@ static const char *HELP_LINES[] =
         "",
         "  Spell/Translate:",
         "    Alt+S            Toggle spell/translate panel",
+        "    Alt+H            Toggle spell checker",
+        "    Alt+P            Spell check word under cursor",
         "",
         "  Other:",
         "    F4 / Alt+T       Setup / configuration",
@@ -1047,6 +1052,48 @@ static void draw_body(TeApp *app)
                         }
                     }
 
+#ifdef HAVE_HUNSPELL
+                    /* Highlight misspelled words */
+                    if (app->spell_active && app->spell_handle)
+                    {
+                        int word_start = seg_start;
+                        int word_end;
+
+                        standend();
+
+                        while (word_start < seg_end)
+                        {
+                            /* Skip non-alphanumeric characters */
+                            while (word_start < seg_end && !iswalnum(l[word_start]))
+                                word_start++;
+
+                            if (word_start >= seg_end)
+                                break;
+
+                            /* Find word end */
+                            word_end = word_start;
+
+                            while (word_end < seg_end && iswalnum(l[word_end]))
+                                word_end++;
+
+                            if (word_end > word_start)
+                            {
+                                int word_len = word_end - word_start;
+
+                                /* Ignore single-character words */
+                                if (word_len > 1 && ui_spell_check_word_simple(app, &l[word_start], word_len))
+                                {
+                                    attron(COLOR_PAIR(COL_SPELL_CURRENT));
+                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth(&l[seg_start], word_start - seg_start), &l[word_start], word_len);
+                                    attroff(COLOR_PAIR(COL_SPELL_CURRENT));
+                                }
+                            }
+
+                            word_start = word_end;
+                        }
+                    }
+#endif
+
                     /* Block-selection overlay */
                     if (b_r1 >= 0 && li >= b_r1 && li <= b_r2 && l)
                     {
@@ -1151,6 +1198,48 @@ static void draw_body(TeApp *app)
                     }
                 }
             }
+
+#ifdef HAVE_HUNSPELL
+            /* Highlight misspelled words */
+            if (app->spell_active && app->spell_handle)
+            {
+                int word_start = 0;
+                int word_end;
+
+                standend();
+
+                while (word_start < line_len)
+                {
+                    /* Skip non-alphanumeric characters */
+                    while (word_start < line_len && !iswalnum(wl[word_start]))
+                        word_start++;
+
+                    if (word_start >= line_len)
+                        break;
+
+                    /* Find word end */
+                    word_end = word_start;
+
+                    while (word_end < line_len && iswalnum(wl[word_end]))
+                        word_end++;
+
+                    if (word_end > word_start)
+                    {
+                        int word_len = word_end - word_start;
+
+                        /* Ignore single-character words like word processors do */
+                        if (word_len > 1 && ui_spell_check_word_simple(app, &wl[word_start], word_len))
+                        {
+                            attron(COLOR_PAIR(COL_SPELL_CURRENT));
+                            mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth(wl, word_start), &wl[word_start], word_len);
+                            attroff(COLOR_PAIR(COL_SPELL_CURRENT));
+                        }
+                    }
+
+                    word_start = word_end;
+                }
+            }
+#endif
 
             /* Block-selection overlay (logical-span) */
             if (b_r1 >= 0 && line_idx >= b_r1 && line_idx <= b_r2)
@@ -1722,6 +1811,31 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     if (ch == KEY_ALT('G'))
         return ui_editor_goto_line(app);
 
+#ifdef HAVE_HUNSPELL
+    /* Alt+P : spell check word under cursor */
+    if (ch == KEY_ALT('P'))
+    {
+        spell_check_word(app);
+        return 1; /* Force redraw */
+    }
+
+    /* Alt+H : toggle spell checker */
+    if (ch == KEY_ALT('H'))
+    {
+        if (app->spell_handle)
+        {
+            app->spell_active = !app->spell_active;
+            te_status(app, "Spell checker %s", app->spell_active ? "enabled" : "disabled");
+        }
+        else
+        {
+            te_status(app, "No dictionary loaded");
+        }
+
+        return 1;
+    }
+#endif
+
     /* Alt+J : next tab */
     if (ch == KEY_ALT('J'))
         return ui_tabs_switch_next(app);
@@ -2219,6 +2333,7 @@ void ui_editor_run(TeApp *app)
         }
 
         erase();
+        standend();
 
         /* Recalculate layout */
         wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode);
@@ -2228,7 +2343,9 @@ void ui_editor_run(TeApp *app)
 
         draw_body(app);
 
+#ifdef HAVE_HUNSPELL
         ui_spell_draw_panel(app);
+#endif
         te_draw_statusbar(app);
 
         position_cursor(app);

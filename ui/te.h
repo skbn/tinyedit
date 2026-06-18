@@ -66,15 +66,6 @@
 #define KEY_SIC 0x188
 #endif
 
-/* Color pairs */
-#define COL_NORMAL 1
-#define COL_STATUS 2
-#define COL_TITLEBAR 3
-#define COL_POPUP 4
-#define COL_POPUP_SEL 5
-#define COL_BORDER 6
-#define COL_SEARCH_MATCH 7
-
 /* Bracketed paste sequences */
 #define TE_BRACKET_PASTE_ON()  \
     do                         \
@@ -138,6 +129,17 @@ typedef struct
 
     TeConfig cfg;
     TeSearch search;
+
+#ifdef HAVE_HUNSPELL
+    void *spell_handle;              /* Hunspell handle (void* to avoid including hunspell.h here) */
+    int spell_enabled;               /* Spell checker enabled in config */
+    int spell_active;                /* Spell checker active (manual control) */
+    wchar_t spell_current_word[256]; /* Current word being checked (wchar_t) */
+    int spell_word_status;           /* 0=not checked, 1=correct, 2=incorrect */
+    char **spell_suggestions;        /* Suggestions from Hunspell */
+    int spell_suggestion_count;      /* Number of suggestions */
+    int spell_scroll_offset;         /* Scroll offset for suggestions */
+#endif
 
     char charset_in[32];
     char charset_out[32];

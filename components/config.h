@@ -16,7 +16,17 @@
 #include "../core/charset.h"
 
 #define TE_CFG_STR_MAX 256
-#define TE_CFG_COLOR_MAX 10 /* COL_* are 1..9; slot 0 unused */
+#define TE_CFG_COLOR_MAX 32 /* COL_* are 1..9; slot 0 unused */
+
+/* Color pairs */
+#define COL_NORMAL 1
+#define COL_STATUS 2
+#define COL_TITLEBAR 3
+#define COL_POPUP 4
+#define COL_POPUP_SEL 5
+#define COL_BORDER 6
+#define COL_SEARCH_MATCH 7
+#define COL_SPELL_CURRENT 8
 
 typedef struct
 {
@@ -63,6 +73,14 @@ typedef struct
     /* Amiga color palette mapping (COLORMAP): physical pen for each logical color */
     int color_map[16];
     int color_map_initialized; /* 1 if user configured COLORMAP explicitly */
+
+#ifdef HAVE_HUNSPELL
+    /* Spell checker configuration */
+    int spell_enabled;                      /* 0=disabled, 1=enabled */
+    char spell_dict_path[TE_CFG_STR_MAX];   /* Directory to search for .dic files */
+    char spell_dict_name[TE_CFG_STR_MAX];   /* Selected dictionary name (e.g. "en_US") */
+    char spell_custom_dict[TE_CFG_STR_MAX]; /* Path to custom dictionary */
+#endif
 
 } TeConfig;
 

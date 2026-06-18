@@ -58,13 +58,7 @@ void wm_free(TeWindowManager *wm)
     {
         if (wm->windows[i].nc_win)
         {
-#ifdef PLATFORM_AMIGA
             delwin((WINDOW *)wm->windows[i].nc_win);
-#elif defined(PLATFORM_WIN32)
-            delwin((WINDOW *)wm->windows[i].nc_win);
-#else
-            delwin((WINDOW *)wm->windows[i].nc_win);
-#endif
             wm->windows[i].nc_win = NULL;
         }
     }
@@ -126,13 +120,7 @@ int wm_remove_window(TeWindowManager *wm, int index)
 
     if (wm->windows[index].nc_win)
     {
-#ifdef PLATFORM_AMIGA
         delwin((WINDOW *)wm->windows[index].nc_win);
-#elif defined(PLATFORM_WIN32)
-        delwin((WINDOW *)wm->windows[index].nc_win);
-#else
-        delwin((WINDOW *)wm->windows[index].nc_win);
-#endif
         wm->windows[index].nc_win = NULL;
     }
 
@@ -159,13 +147,7 @@ void wm_destroy_all_ncurses(TeWindowManager *wm)
     {
         if (wm->windows[i].nc_win)
         {
-#ifdef PLATFORM_AMIGA
             delwin((WINDOW *)wm->windows[i].nc_win);
-#elif defined(PLATFORM_WIN32)
-            delwin((WINDOW *)wm->windows[i].nc_win);
-#else
-            delwin((WINDOW *)wm->windows[i].nc_win);
-#endif
             wm->windows[i].nc_win = NULL;
         }
     }
@@ -245,7 +227,7 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
         return;
 
     tab_w = show_tabs ? 20 : 0;
-    panel_h = (spell_panel_mode >= 0) ? 10 : 0;
+    panel_h = (spell_panel_mode >= 0) ? SPELL_PANEL_HEIGHT : 0;
 
     for (i = 0; i < wm->win_count; i++)
     {
@@ -271,7 +253,7 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
         else if (win->type == WIN_TRANSLATE)
         {
             win->x = tab_w;
-            win->y = screen_h - panel_h;
+            win->y = screen_h - panel_h - 1;
             win->w = screen_w - tab_w;
             win->h = panel_h;
             win->visible = (spell_panel_mode == 1);
@@ -279,7 +261,7 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
         else if (win->type == WIN_SPELL)
         {
             win->x = tab_w;
-            win->y = screen_h - panel_h;
+            win->y = screen_h - panel_h - 1;
             win->w = screen_w - tab_w;
             win->h = panel_h;
             win->visible = (spell_panel_mode == 0);

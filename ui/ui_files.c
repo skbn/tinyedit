@@ -807,6 +807,347 @@ int ui_files_pick(const char *title, const char *start_dir, char *out_path, int 
 
         /* Outer reload point */
         free_entries(ents, nents);
+
+        ents = NULL;
+        nents = 0;
+    }
+
+    free_entries(ents, nents);
+
+    return rc;
+}
+
+int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, int out_path_sz)
+{
+    char dir_input[UI_FILES_PATH_MAX];
+    int dir_cursor;
+    int edit_dir = 0;
+    int sel = 0, top = 0;
+    FileEnt *ents = NULL;
+    int nents = 0;
+    int y, x, h, w, visible;
+    int key;
+    int rc = -1;
+    int should_exit = 0;
+
+    if (!out_path || out_path_sz < 2)
+        return -2;
+
+    if (start_dir && start_dir[0])
+    {
+        strncpy(dir_input, start_dir, sizeof(dir_input) - 1);
+        dir_input[sizeof(dir_input) - 1] = '\0';
+    }
+    else
+    {
+#ifdef PLATFORM_WIN32
+        if (!GetCurrentDirectoryA(sizeof(dir_input), dir_input))
+        {
+            dir_input[0] = '.';
+            dir_input[1] = '\0';
+        }
+
+#elif defined(PLATFORM_AMIGA)
+        BPTR cur = Lock((STRPTR) "", ACCESS_READ);
+        dir_input[0] = '\0';
+
+        if (cur)
+        {
+            if (!NameFromLock(cur, (STRPTR)dir_input, (LONG)sizeof(dir_input)))
+                dir_input[0] = '\0';
+
+            UnLock(cur);
+        }
+#else
+        if (!getcwd(dir_input, sizeof(dir_input)))
+        {
+            dir_input[0] = '.';
+            dir_input[1] = '\0';
+        }
+#endif
+    }
+
+    dir_cursor = (int)strlen(dir_input);
+
+    for (;;)
+    {
+        ents = load_dir(dir_input, &nents);
+
+        if (!ents)
+        {
+            edit_dir = 1;
+            nents = 0;
+        }
+
+        /* Count directories first to adjust sel */
+        int dir_count_total = 0;
+        int i;
+
+        for (i = 0; i < nents; i++)
+        {
+            if (ents[i].is_dir)
+                dir_count_total++;
+        }
+
+        if (sel >= dir_count_total)
+            sel = dir_count_total - 1;
+
+        if (sel < 0)
+            sel = 0;
+
+        ui_popup_center(20, 60, &y, &x, &h, &w);
+        visible = h - 6;
+
+        /* Ensure top is valid before rendering */
+        if (top < 0)
+            top = 0;
+
+        if (top >= dir_count_total)
+            top = dir_count_total > 0 ? dir_count_total - 1 : 0;
+
+        if (sel < top)
+            top = sel;
+
+        if (sel >= top + visible)
+            top = sel - visible + 1;
+
+        if (top < 0)
+            top = 0;
+
+        for (;;)
+        {
+            int dir_count = 0;
+
+            standend();
+            draw_frame(y, x, h, w, title ? title : "Select directory");
+            attron(COLOR_PAIR(COL_POPUP));
+
+            mvaddnstr(y + 2, x + 2, "Dir: ", w - 4);
+
+            if (edit_dir)
+                attron(COLOR_PAIR(COL_POPUP_SEL));
+
+            mvaddnstr(y + 2, x + 7, dir_input, w - 9);
+
+            if (edit_dir)
+                attroff(COLOR_PAIR(COL_POPUP_SEL));
+
+            for (i = 0; i < nents; i++)
+            {
+                const FileEnt *en = &ents[i];
+                char line[256];
+
+                if (!en->is_dir)
+                    continue;
+
+                if (dir_count >= top && dir_count < top + visible)
+                {
+                    if (dir_count == sel && !edit_dir)
+                        attron(COLOR_PAIR(COL_POPUP_SEL));
+                    else
+                        attron(COLOR_PAIR(COL_POPUP));
+
+                    snprintf(line, sizeof(line), "[%s]", en->name);
+                    mvaddnstr(y + 4 + (dir_count - top), x + 2, line, w - 4);
+                    attroff(COLOR_PAIR(COL_POPUP_SEL));
+                }
+
+                dir_count++;
+            }
+
+            /* Adjust top to keep selection visible */
+            if (sel < top)
+                top = sel;
+            else if (sel >= top + visible)
+                top = sel - visible + 1;
+
+            attron(COLOR_PAIR(COL_POPUP));
+            mvaddnstr(y + h - 2, x + 2, "TAB=edit dir  Up/Down=move  Enter=enter  Space=select", w - 4);
+            attroff(COLOR_PAIR(COL_POPUP));
+            refresh();
+
+            key = wrapper_getch();
+
+            if (key == 27)
+            {
+                rc = -1;
+                should_exit = 1;
+                break;
+            }
+
+            if (key == '\t')
+            {
+                edit_dir = !edit_dir;
+                dir_cursor = (int)strlen(dir_input);
+                continue;
+            }
+
+            if (edit_dir)
+            {
+                if (key == KEY_BACKSPACE || key == 127 || key == 8)
+                {
+                    if (dir_cursor > 0)
+                    {
+                        dir_cursor--;
+                        dir_input[dir_cursor] = '\0';
+                    }
+                }
+                else if (key == '\n' || key == '\r' || key == KEY_ENTER)
+                {
+                    if (dir_input[0])
+                    {
+                        sel = 0;
+                        top = 0;
+                        edit_dir = 0;
+                        break;
+                    }
+                }
+                else if (key >= 32 && key < 127 && dir_cursor + 1 < (int)sizeof(dir_input))
+                {
+                    dir_input[dir_cursor++] = (char)key;
+                    dir_input[dir_cursor] = '\0';
+                }
+
+                continue;
+            }
+
+            if (key == KEY_BACKSPACE || key == 127 || key == 8)
+            {
+                path_go_parent(dir_input);
+                sel = 0;
+                top = 0;
+
+                break;
+            }
+            else if (key == KEY_UP)
+            {
+                if (sel > 0)
+                    sel--;
+
+                if (sel < top)
+                    top = sel;
+            }
+            else if (key == KEY_DOWN)
+            {
+                if (sel < dir_count_total - 1)
+                    sel++;
+
+                if (sel >= top + visible)
+                    top = sel - visible + 1;
+            }
+            else if (key == KEY_PPAGE || key == CTRL('U'))
+            {
+                sel -= visible;
+
+                if (sel < 0)
+                    sel = 0;
+
+                if (sel < top)
+                    top = sel;
+            }
+            else if (key == KEY_NPAGE || key == CTRL('D'))
+            {
+                sel += visible;
+
+                if (sel >= dir_count_total)
+                    sel = dir_count_total - 1;
+
+                if (sel >= top + visible)
+                    top = sel - visible + 1;
+            }
+            else if (key == KEY_HOME || key == CTRL('B'))
+            {
+                sel = 0;
+                top = 0;
+            }
+            else if (key == KEY_END || key == CTRL('E'))
+            {
+                sel = dir_count_total - 1;
+                top = sel - visible + 1;
+
+                if (top < 0)
+                    top = 0;
+            }
+            else if (key == '\n' || key == '\r' || key == KEY_ENTER)
+            {
+                int dir_idx = 0;
+
+                for (i = 0; i < nents; i++)
+                {
+                    if (!ents[i].is_dir)
+                        continue;
+
+                    if (dir_idx == sel)
+                    {
+                        if (strcmp(ents[i].name, "..") == 0)
+                        {
+                            path_go_parent(dir_input);
+
+                            sel = 0;
+                            top = 0;
+                        }
+                        else if (path_append(dir_input, sizeof(dir_input), ents[i].name) == 0)
+                        {
+                            sel = 0;
+                            top = 0;
+                        }
+
+                        break;
+                    }
+
+                    dir_idx++;
+                }
+
+                break;
+            }
+            else if (key == ' ')
+            {
+                int dir_idx = 0;
+
+                for (i = 0; i < nents; i++)
+                {
+                    if (!ents[i].is_dir)
+                        continue;
+
+                    if (dir_idx == sel)
+                    {
+                        char tmp[UI_FILES_PATH_MAX];
+                        strncpy(tmp, dir_input, sizeof(tmp) - 1);
+                        tmp[sizeof(tmp) - 1] = '\0';
+
+                        if (strcmp(ents[i].name, "..") == 0)
+                        {
+                            path_go_parent(tmp);
+                        }
+                        else if (path_append(tmp, sizeof(tmp), ents[i].name) == 0)
+                        {
+                            strncpy(out_path, tmp, (size_t)(out_path_sz - 1));
+                            out_path[out_path_sz - 1] = '\0';
+
+                            rc = 0;
+                            should_exit = 1;
+                        }
+                        else
+                        {
+                            rc = -2;
+                        }
+
+                        break;
+                    }
+
+                    dir_idx++;
+                }
+
+                if (should_exit)
+                    break;
+            }
+        }
+
+        if (should_exit)
+            break;
+
+        /* Outer reload point */
+        free_entries(ents, nents);
         ents = NULL;
         nents = 0;
     }
