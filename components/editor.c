@@ -96,6 +96,9 @@ static int line_grow(EdLine *ln, int need)
 
     nc = need + 64;
 
+    if (nc > SIZE_MAX / sizeof(wchar_t))
+        return -1;
+
     t = (wchar_t *)realloc(ln->wcs, (size_t)nc * sizeof(wchar_t));
 
     if (!t)

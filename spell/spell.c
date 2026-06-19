@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <limits.h>
 
 /* Per-platform directory listing */
 #ifdef PLATFORM_WIN32
@@ -302,6 +303,9 @@ char **spell_list_dictionaries(const char *search_path, int *n_dicts)
         {
             if (count >= capacity)
             {
+                if (capacity > INT_MAX / 2)
+                    break;
+
                 capacity *= 2;
                 new_dicts = (char **)realloc(dicts, capacity * sizeof(char *));
 
@@ -365,6 +369,9 @@ char **spell_list_dictionaries(const char *search_path, int *n_dicts)
             {
                 if (count >= capacity)
                 {
+                    if (capacity > INT_MAX / 2)
+                        break;
+
                     capacity *= 2;
                     new_dicts = (char **)realloc(dicts, capacity * sizeof(char *));
 
@@ -415,6 +422,9 @@ char **spell_list_dictionaries(const char *search_path, int *n_dicts)
         {
             if (count >= capacity)
             {
+                if (capacity > INT_MAX / 2)
+                    break;
+
                 capacity *= 2;
                 new_dicts = (char **)realloc(dicts, capacity * sizeof(char *));
 

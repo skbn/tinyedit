@@ -136,6 +136,8 @@ void te_app_free(TeApp *app)
     }
 
 #ifdef HAVE_HUNSPELL
+    ui_spell_free_app_suggestions(app);
+
     if (app->spell_handle)
     {
         spell_free(app->spell_handle);

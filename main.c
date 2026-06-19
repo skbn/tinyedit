@@ -65,6 +65,12 @@ static char *load_file(const char *path, TeApp *app)
         return NULL;
     }
 
+    if (size > SIZE_MAX - 1)
+    {
+        fclose(fp);
+        return NULL;
+    }
+
     buf = (char *)malloc((size_t)size + 1);
 
     if (!buf)
@@ -96,7 +102,15 @@ static char *load_file(const char *path, TeApp *app)
     if (app->charset_in[0] && strcasecmp(app->charset_in, "UTF-8") != 0 && strcasecmp(app->charset_in, "UTF8") != 0)
     {
         size_t outsz = (size_t)r * 4 + 16;
-        char *utf8 = (char *)malloc(outsz);
+        char *utf8 = NULL;
+
+        if (r > (SIZE_MAX - 16) / 4)
+        {
+            free(buf);
+            return NULL;
+        }
+
+        utf8 = (char *)malloc(outsz);
 
         if (utf8)
         {

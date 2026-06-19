@@ -1749,6 +1749,10 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
                 }
 
                 te_init_colors(&app->cfg);
+
+#ifdef HAVE_HUNSPELL
+                spell_load_from_config(app);
+#endif
             }
 
             return 1;

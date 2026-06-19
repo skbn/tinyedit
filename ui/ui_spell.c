@@ -177,7 +177,9 @@ int spell_load_from_config(TeApp *app)
     if (!app)
         return 0;
 
-    /* Free existing handle */
+    /* Free existing handle and suggestions */
+    ui_spell_free_app_suggestions(app);
+
     if (app->spell_handle)
     {
         spell_free(app->spell_handle);
@@ -298,6 +300,9 @@ int spell_check_word(TeApp *app)
     if (spell_check(app->spell_handle, word_buf))
     {
         te_status(app, "Word '%s' is correct", word_buf);
+
+        /* Free any previous suggestions before marking as correct */
+        ui_spell_free_app_suggestions(app);
 
         app->spell_word_status = 1; /* Correct */
         app->spell_suggestion_count = 0;
