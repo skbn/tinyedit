@@ -474,6 +474,11 @@ int ed_detect_quote_prefix(const wchar_t *line)
 
 int ed_rewrap_paragraph(Ed *ed, int width)
 {
+    return ed_rewrap_paragraph_ex(ed, width, NULL, NULL);
+}
+
+int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
+{
     int first, last, i;
     int prefix_len;
     const wchar_t *line;
@@ -635,6 +640,7 @@ int ed_rewrap_paragraph(Ed *ed, int width)
     while (pos < used)
     {
         int line_len, break_at;
+        int hyph_inserted = 0; /* set when we break mid-word with '-' */
 
         if (out_used + (size_t)prefix_len + (size_t)avail + 2 >= out_cap)
         {
@@ -665,13 +671,70 @@ int ed_rewrap_paragraph(Ed *ed, int width)
         if ((size_t)(pos + line_len) < used)
         {
             int j;
+            int space_found = 0;
 
             for (j = line_len; j > avail / 3; j--)
             {
                 if (joined[pos + j - 1] == L' ')
                 {
                     break_at = j;
+                    space_found = 1;
                     break;
+                }
+            }
+
+            /* No space and hyphenator available: split word with hyphen */
+            if (!space_found && hyph)
+            {
+                size_t ws, we;
+                char *uw;
+
+                /* Find word boundaries: ws back, we forward */
+                ws = pos + (size_t)line_len;
+
+                while (ws > pos && joined[ws - 1] != L' ')
+                    ws--;
+
+                we = pos + (size_t)line_len;
+
+                while (we < used && joined[we] != L' ')
+                    we++;
+
+                if (we > ws + 3)
+                {
+                    uw = wcs_to_utf8(&joined[ws], (int)(we - ws));
+
+                    if (uw)
+                    {
+                        int uw_bytes = (int)strlen(uw);
+                        int hp[16];
+                        int hn = 16;
+
+                        if (hyph(hyph_data, uw, uw_bytes, hp, &hn) && hn > 0)
+                        {
+                            int idx;
+
+                            /* Pick rightmost break that fits (avail - 1) */
+                            for (idx = hn - 1; idx >= 0; idx--)
+                            {
+                                int cco = utf8_charcount(uw, hp[idx]);
+                                int wc_pos = (int)ws + cco; /* in joined */
+                                int line_chars = wc_pos - (int)pos;
+
+                                if (line_chars >= avail) /* leave 1 col for '-' */
+                                    continue;
+
+                                if (line_chars <= 0)
+                                    break;
+
+                                break_at = line_chars;
+                                hyph_inserted = 1;
+                                break;
+                            }
+                        }
+
+                        free(uw);
+                    }
                 }
             }
         }
@@ -679,14 +742,23 @@ int ed_rewrap_paragraph(Ed *ed, int width)
         for (k = 0; k < break_at; k++)
             outw[out_used++] = joined[pos + k];
 
-        /* Trim trailing spaces from the line we just added */
-        while (out_used > 0 && outw[out_used - 1] == L' ')
-            out_used--;
+        if (hyph_inserted)
+        {
+            /* Emit hyphen, continue at word second half */
+            outw[out_used++] = L'-';
+            pos += (size_t)break_at;
+        }
+        else
+        {
+            /* Trim trailing spaces from the line we just added */
+            while (out_used > 0 && outw[out_used - 1] == L' ')
+                out_used--;
 
-        pos += (size_t)break_at;
+            pos += (size_t)break_at;
 
-        while (pos < used && joined[pos] == L' ')
-            pos++;
+            while (pos < used && joined[pos] == L' ')
+                pos++;
+        }
 
         outw[out_used++] = L'\n';
     }

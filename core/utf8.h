@@ -21,6 +21,7 @@
 
 int utf8_strlen(const char *s);
 int utf8_offset(const char *s, int charpos);
+int utf8_charcount(const char *s, int byte_len);
 uint32_t utf8_next(const char **p);
 int utf8_encode(uint32_t cp, char *buf);
 

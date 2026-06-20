@@ -199,10 +199,31 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
         if (count > visible)
         {
             char scroll_info[32];
+            int scroll_x = x + w - 2;
 
+            /* Up arrow if not at top */
+            if (top > 0)
+            {
+#ifdef ACS_UARROW
+                mvaddch(y + 1, scroll_x, ACS_UARROW);
+#else
+                mvaddch(y + 1, scroll_x, '^');
+#endif
+            }
+
+            /* Down arrow if not at bottom */
+            if (top + visible < count)
+            {
+#ifdef ACS_DARROW
+                mvaddch(y + h - 3, scroll_x, ACS_DARROW);
+#else
+                mvaddch(y + h - 3, scroll_x, 'v');
+#endif
+            }
+
+            /* Position counter */
             snprintf(scroll_info, sizeof(scroll_info), "%d/%d", sel + 1, count);
-
-            mvaddnstr(y + h - 2, x + w - (int)strlen(scroll_info) - 2, scroll_info, (int)strlen(scroll_info));
+            mvaddnstr(y + h - 2, x + w - (int)strlen(scroll_info) - 4, scroll_info, (int)strlen(scroll_info));
         }
 
         /* Status bar */

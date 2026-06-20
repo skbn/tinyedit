@@ -40,7 +40,16 @@ const char __attribute__((used)) binkd_stack_size[] = "$STACK:65536";
 
 #ifdef HAVE_HUNSPELL
 #include "ui/ui_spell.h"
+
+#ifdef HAVE_HYPHEN
+#include "ui/ui_hyph.h"
 #endif
+
+#ifdef HAVE_MYTHES
+#include "ui/ui_thes.h"
+#endif
+
+#endif /* HAVE_HUNSPELL */
 
 /* Read a whole file into a malloc'd UTF-8 buffer with charset conversion */
 static char *load_file(const char *path, TeApp *app)
@@ -288,6 +297,10 @@ int main(int argc, char **argv)
     define_key("\033Z", KEY_ALT('Z'));
     define_key("\033h", KEY_ALT('H'));
     define_key("\033H", KEY_ALT('H'));
+    define_key("\033a", KEY_ALT('A'));
+    define_key("\033A", KEY_ALT('A'));
+    define_key("\033e", KEY_ALT('E'));
+    define_key("\033E", KEY_ALT('E'));
 #endif
 
     curs_set(1);
@@ -346,7 +359,17 @@ int main(int argc, char **argv)
 
     /* Load spell checker from config */
     spell_load_from_config(app);
+
+#ifdef HAVE_HYPHEN
+    hyph_load_from_config(app);
+    app->hyph_wrap_enabled = cfg.hyph_wrap_enabled;
 #endif
+
+#ifdef HAVE_MYTHES
+    ui_thes_load_from_config(app);
+#endif
+
+#endif /* HAVE_HUNSPELL */
 
     /* Initialize charsets from config */
     /* View charset is always UTF-8 by default */

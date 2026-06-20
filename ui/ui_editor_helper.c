@@ -23,6 +23,39 @@
 #include "te.h"
 #include "ui_files.h"
 
+#ifdef HAVE_HYPHEN
+#include "../hyph_wrap/hyph_wrap.h"
+
+/* Thunk adapting hyph_breakpoints() to EdHyphenFn. user_data is HyphDict* */
+static int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count)
+{
+    HyphDict *h = (HyphDict *)user_data;
+    int cap, n;
+
+    if (!out_count)
+        return 0;
+
+    cap = *out_count;
+
+    if (cap > 16)
+        cap = 16;
+
+    n = 0;
+
+    if (!hyph_breakpoints(h, word, word_len, out_pos, &n) || n == 0)
+    {
+        *out_count = 0;
+        return 0;
+    }
+
+    if (n > cap)
+        n = cap;
+
+    *out_count = n;
+    return 1;
+}
+#endif
+
 /* Static variables that need to be accessible */
 static int s_soft_vtop = 0;
 static int s_soft_desired_vcol = -1;
@@ -74,7 +107,7 @@ void clear_search_highlights(TeApp *app)
     app->search.match_total = 0;
 }
 
-/* Navigate to previous match in editor.  Wraps at the start */
+/* Navigate to previous match, wraps at start */
 int search_prev(TeApp *app)
 {
     int match_row;
@@ -95,7 +128,7 @@ int search_prev(TeApp *app)
     return 1;
 }
 
-/* Navigate to next match in editor.  Wraps at the end */
+/* Navigate to next match, wraps at end */
 int search_next(TeApp *app)
 {
     int match_row;
@@ -124,13 +157,13 @@ static int do_replace(TeApp *app, const wchar_t *needle, const wchar_t *repl)
     int *rows = NULL, *cols = NULL;
     int match_count, i;
 
-    /* Find all matches with current case-sensitive and whole-word options */
+    /* Find all matches with current options */
     match_count = ed_search_all_custom(te_app_get_editor(app), needle, app->search.case_sensitive, app->search.whole_word, &rows, &cols);
 
     if (match_count == 0)
         return 0;
 
-    /* Replace from end to start to avoid position shifts */
+    /* Replace from end to start to avoid shifts */
     for (i = match_count - 1; i >= 0; i--)
     {
         int j;
@@ -195,7 +228,7 @@ int replace(TeApp *app)
         app->search.match_current = 1;
         app->search.match_total = match_count;
 
-        /* Move cursor to first match and ensure it's visible */
+        /* Move cursor to first match and ensure visible */
         ed_set_pos(te_app_get_editor(app), rows[0], cols[0]);
         ed_ensure_visible(te_app_get_editor(app));
     }
@@ -224,7 +257,7 @@ int replace_current(TeApp *app)
 
     if (app->search.last_replace[0] != L'\0')
     {
-        /* Use the last replacement text - no popup */
+        /* Use last replacement text - no popup */
         wchar_t repl[64];
         wcsncpy(repl, app->search.last_replace, 63);
         repl[63] = L'\0';
@@ -241,11 +274,11 @@ int replace_current(TeApp *app)
         /* Save undo state */
         ed_save_undo(te_app_get_editor(app));
 
-        /* Replace the current occurrence */
+        /* Replace current occurrence */
         nlen = (int)wcslen(app->search.query);
         rlen = (int)wcslen(repl);
 
-        /* Delete the search text */
+        /* Delete search text */
         for (i = 0; i < nlen; i++)
             ed_delete(te_app_get_editor(app));
 
@@ -253,7 +286,7 @@ int replace_current(TeApp *app)
         for (i = 0; i < rlen; i++)
             ed_insert_char(te_app_get_editor(app), repl[i]);
 
-        /* Update search results since text changed */
+        /* Update search results after text change */
         free(app->search.rows);
         free(app->search.cols);
 
@@ -397,7 +430,7 @@ int do_search(TeApp *app)
         return 1;
     }
 
-    /* Multiple matches: show the picker popup; user chooses one */
+    /* Multiple matches: show picker popup for user choice */
     choice = ui_popup_search_results_popup(app, app->search.query, rows, cols, match_count);
 
     if (choice >= 0)
@@ -492,7 +525,7 @@ int paste(TeApp *app)
 
                 if (pw > 0)
                 {
-                    wrapped = wrap_paste_text(clip, pw);
+                    wrapped = wrap_paste_text(app, clip, pw);
 
                     if (wrapped)
                         to_insert = wrapped;
@@ -695,8 +728,17 @@ int ui_editor_export(TeApp *app)
 int rewrap(TeApp *app)
 {
     int col = (app->wrap_col > 0) ? app->wrap_col : 75;
+    int rc;
 
-    if (ed_rewrap_paragraph(te_app_get_editor(app), col) == 0)
+#ifdef HAVE_HYPHEN
+    /* Use hyphenation when enabled and dict loaded, otherwise plain rewrap (breaks at spaces) */
+    if (app->hyph_wrap_enabled && app->hyph_handle)
+        rc = ed_rewrap_paragraph_ex(te_app_get_editor(app), col, ui_hyph_thunk, app->hyph_handle);
+    else
+#endif
+        rc = ed_rewrap_paragraph(te_app_get_editor(app), col);
+
+    if (rc == 0)
     {
         clear_search_highlights(app);
         te_status(app, "Paragraph rewrapped");

@@ -18,8 +18,12 @@
 #include "wm.h"
 #include "../core/utf8.h"
 #include "../components/editor.h"
+
 #ifdef HAVE_HUNSPELL
 #include "../spell/spell.h"
+#ifdef HAVE_MYTHES
+#include "../thes/thes.h"
+#endif
 #endif
 
 /* Draw spell/translate panel */
@@ -177,9 +181,13 @@ int spell_load_from_config(TeApp *app)
     if (!app)
         return 0;
 
-    /* Free existing handle and suggestions */
-    ui_spell_free_app_suggestions(app);
+#ifdef HAVE_MYTHES
+    /* Detach speller from thesaurus so concurrent thes_lookup() can't reach freed Hunhandle */
+    if (app->thes_handle)
+        thes_set_speller((ThesHandle *)app->thes_handle, NULL);
+#endif
 
+    /* Free existing handle */
     if (app->spell_handle)
     {
         spell_free(app->spell_handle);
@@ -212,6 +220,12 @@ int spell_load_from_config(TeApp *app)
         app->spell_enabled = 0;
         return 0;
     }
+
+#ifdef HAVE_MYTHES
+    /* Reattach fresh speller to thesaurus so stem fallback resumes working */
+    if (app->thes_handle)
+        thes_set_speller((ThesHandle *)app->thes_handle, (SpellChecker *)app->spell_handle);
+#endif
 
     /* Set spell_enabled from config */
     app->spell_enabled = app->cfg.spell_enabled;
@@ -300,9 +314,6 @@ int spell_check_word(TeApp *app)
     if (spell_check(app->spell_handle, word_buf))
     {
         te_status(app, "Word '%s' is correct", word_buf);
-
-        /* Free any previous suggestions before marking as correct */
-        ui_spell_free_app_suggestions(app);
 
         app->spell_word_status = 1; /* Correct */
         app->spell_suggestion_count = 0;

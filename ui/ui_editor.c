@@ -29,6 +29,14 @@
 #include "ui_setup.h"
 #include "ui_spell.h"
 
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+#include "ui_hyph.h"
+#endif
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_MYTHES)
+#include "ui_thes.h"
+#endif
+
 /* Help text */
 static const char *HELP_LINES[] =
     {
@@ -55,6 +63,7 @@ static const char *HELP_LINES[] =
         "    Tab              Insert tab (4 spaces)",
         "    Alt+Q            Toggle wrap mode",
         "    Alt+D            Toggle line numbers",
+        "    Alt+E            Toggle hyphen wrap",
         "    F3 / Alt+C       Choose output charset",
         "",
         "  Block (selection):",
@@ -91,6 +100,7 @@ static const char *HELP_LINES[] =
         "    Alt+S            Toggle spell/translate panel",
         "    Alt+H            Toggle spell checker",
         "    Alt+P            Spell check word under cursor",
+        "    Alt+A            Thesaurus lookup for word under cursor",
         "",
         "  Other:",
         "    F4 / Alt+T       Setup / configuration",
@@ -727,7 +737,7 @@ static int paste_char_width(wchar_t c)
     return 1;
 }
 
-char *wrap_paste_text(const char *utf8, int col)
+char *wrap_paste_text(TeApp *app, const char *utf8, int col)
 {
     wchar_t *w;
     int wlen = 0;
@@ -738,6 +748,11 @@ char *wrap_paste_text(const char *utf8, int col)
     int out_cap, out_len = 0;
     wchar_t *out;
     char *result;
+    int use_hyphen = 0;
+
+#ifdef HAVE_HYPHEN
+    use_hyphen = app && app->hyph_wrap_enabled && app->hyph_handle;
+#endif
 
     if (col <= 0)
         return NULL;
@@ -788,24 +803,119 @@ char *wrap_paste_text(const char *utf8, int col)
 
         col_pos += cw;
 
-        if (col_pos > col && last_space > line_start)
+        if (col_pos > col)
         {
             int new_start;
             int j;
             int width_after = 0;
+            int break_found = 0;
 
-            out[last_space] = L'\n';
-            new_start = last_space + 1;
-
-            for (j = new_start; j < out_len; j++)
+#ifdef HAVE_HYPHEN
+            if (use_hyphen)
             {
-                int w2 = (out[j] == L'\t') ? 1 : paste_char_width(out[j]);
-                width_after += w2;
-            }
+                /* Word starts after last space (or line start) and extends to current char */
+                int word_start = (last_space >= 0) ? last_space + 1 : line_start;
+                int word_end = out_len;
+                int word_wlen = word_end - word_start;
 
-            line_start = new_start;
-            last_space = -1;
-            col_pos = width_after;
+                if (word_wlen > 3 && word_wlen < 512)
+                {
+                    /* Convert to UTF-8 for libhyphen (works on bytes) */
+                    char *utf8_word = wcs_to_utf8(&out[word_start], word_wlen);
+
+                    if (utf8_word)
+                    {
+                        int utf8_len = (int)strlen(utf8_word);
+                        int hyph_pos[16];
+                        int hyph_count = 0;
+                        int k;
+
+                        if (hyph_split_word(app, utf8_word, utf8_len, hyph_pos, &hyph_count))
+                        {
+                            /* Walk from rightmost candidate, pick first fitting in wrap column. hyph_pos[k] is BYTE offset, convert to wchar offset */
+                            for (k = hyph_count - 1; k >= 0; k--)
+                            {
+                                int char_off = utf8_charcount(utf8_word, hyph_pos[k]);
+                                int break_at = word_start + char_off;
+                                int break_col = 0;
+                                int m;
+
+                                /* Must leave at least one char before and after break */
+                                if (break_at <= word_start || break_at >= word_end)
+                                    continue;
+
+                                if (break_at <= line_start)
+                                    continue;
+
+                                for (m = line_start; m < break_at; m++)
+                                    break_col += (out[m] == L'\t') ? 1 : paste_char_width(out[m]);
+
+                                /* Reserve one column for the trailing '-' */
+                                if (break_col > col - 1)
+                                    continue;
+
+                                /* Need room for two extra wchars: '-' and '\n'. Old code only reserved one and overwrote a letter */
+                                if (out_len + 2 > out_cap)
+                                    break; /* no room -- fall through */
+
+                                /* Shift [break_at..out_len) right by 2 (iterate from end to keep source intact) */
+                                for (m = out_len - 1; m >= break_at; m--)
+                                    out[m + 2] = out[m];
+
+                                out[break_at] = L'-';
+                                out[break_at + 1] = L'\n';
+
+                                out_len += 2;
+                                new_start = break_at + 2;
+                                break_found = 1;
+
+                                width_after = 0;
+
+                                for (m = new_start; m < out_len; m++)
+                                    width_after += (out[m] == L'\t') ? 1 : paste_char_width(out[m]);
+
+                                line_start = new_start;
+                                last_space = -1;
+                                col_pos = width_after;
+                                break;
+                            }
+                        }
+
+                        free(utf8_word);
+                    }
+                }
+            }
+#endif
+
+            if (!break_found && last_space > line_start)
+            {
+                /* Normal space-based break */
+                out[last_space] = L'\n';
+                new_start = last_space + 1;
+
+                for (j = new_start; j < out_len; j++)
+                {
+                    int w2 = (out[j] == L'\t') ? 1 : paste_char_width(out[j]);
+
+                    width_after += w2;
+                }
+
+                line_start = new_start;
+                last_space = -1;
+                col_pos = width_after;
+            }
+            else if (!break_found)
+            {
+                /* Hard cut at column limit */
+                if (out_len + 1 < out_cap)
+                {
+                    out[out_len++] = L'\n';
+
+                    line_start = out_len;
+                    last_space = -1;
+                    col_pos = 0;
+                }
+            }
         }
     }
 
@@ -1092,7 +1202,7 @@ static void draw_body(TeApp *app)
                             word_start = word_end;
                         }
                     }
-#endif
+#endif /* HAVE_HUNSPELL */
 
                     /* Block-selection overlay */
                     if (b_r1 >= 0 && li >= b_r1 && li <= b_r2 && l)
@@ -1239,7 +1349,7 @@ static void draw_body(TeApp *app)
                     word_start = word_end;
                 }
             }
-#endif
+#endif /* HAVE_HUNSPELL */
 
             /* Block-selection overlay (logical-span) */
             if (b_r1 >= 0 && line_idx >= b_r1 && line_idx <= b_r2)
@@ -1728,7 +1838,7 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
             strncpy(old_charset, app->cfg.charset, sizeof(old_charset) - 1);
             old_charset[sizeof(old_charset) - 1] = '\0';
 
-            if (ui_setup_run(&app->cfg, app->cfg_path) == 1)
+            if (ui_setup_run(app, &app->cfg, app->cfg_path) == 1)
             {
                 /* Config saved: apply changes */
                 if (app->cfg.undo_levels > 0)
@@ -1749,10 +1859,6 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
                 }
 
                 te_init_colors(&app->cfg);
-
-#ifdef HAVE_HUNSPELL
-                spell_load_from_config(app);
-#endif
             }
 
             return 1;
@@ -1826,16 +1932,53 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     /* Alt+H : toggle spell checker */
     if (ch == KEY_ALT('H'))
     {
+        if (!app->spell_handle && app->cfg.spell_enabled && app->cfg.spell_dict_path[0] && app->cfg.spell_dict_name[0])
+            spell_load_from_config(app);
+
         if (app->spell_handle)
         {
             app->spell_active = !app->spell_active;
             te_status(app, "Spell checker %s", app->spell_active ? "enabled" : "disabled");
         }
+        else if (!app->cfg.spell_enabled)
+        {
+            te_status(app, "Spell disabled in config (enable in Setup F2)");
+        }
+        else if (!app->cfg.spell_dict_path[0] || !app->cfg.spell_dict_name[0])
+        {
+            te_status(app, "Set dict path and name in Setup F2");
+        }
         else
         {
-            te_status(app, "No dictionary loaded");
+            te_status(app, "Cannot load %s/%s.aff ", app->cfg.spell_dict_path, app->cfg.spell_dict_name);
         }
 
+        return 1;
+    }
+#endif /* HAVE_HUNSPELL */
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_MYTHES)
+    /* Alt+A : thesaurus lookup for word under cursor */
+    if (ch == KEY_ALT('A'))
+    {
+        ui_thes_lookup_word(app);
+        return 1;
+    }
+#endif
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+    /* Alt+E : toggle hyphen wrap */
+    if (ch == KEY_ALT('E'))
+    {
+        if (app->hard_wrap)
+        {
+            app->hyph_wrap_enabled = !app->hyph_wrap_enabled;
+            te_status(app, "Hyphen wrap %s", app->hyph_wrap_enabled ? "ON" : "OFF");
+        }
+        else
+        {
+            te_status(app, "Hyphen wrap requires hard-wrap mode");
+        }
         return 1;
     }
 #endif
@@ -2220,62 +2363,154 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
                     ed_get_info(te_app_get_editor(app), &wi);
                     linelen = ed_line_len(te_app_get_editor(app), wi.row);
 
-                    if (wi.col > eff_wrap && wi.col == linelen)
+                    /* Activate when cursor is at end of line */
+                    if (wi.col == linelen)
                     {
                         const wchar_t *line = ed_line_wcs(te_app_get_editor(app), wi.row);
-                        int brk = -1;
-                        int k;
 
                         if (line)
                         {
-                            int limit = eff_wrap;
+                            int word_start = 0;
+                            int word_len;
+                            int space_available;
+                            int k;
+                            int hyphen_performed = 0;
 
-                            if (limit > linelen)
-                                limit = linelen;
-
-                            for (k = limit; k > 0; k--)
+                            /* Identify the current word (from last space to cursor) */
+                            for (k = wi.col; k > 0; k--)
                             {
-                                if (line[k - 1] == L' ')
+                                if (line[k - 1] == L' ' || line[k - 1] == L'\n' || line[k - 1] == L'\t')
                                 {
-                                    brk = k - 1;
+                                    word_start = k;
                                     break;
                                 }
                             }
-                        }
 
-                        if (wch == L' ')
-                        {
-                            ed_backspace(te_app_get_editor(app)); /* replace trailing space with newline */
-                            ed_enter(te_app_get_editor(app));
+                            word_len = wi.col - word_start;
+                            space_available = eff_wrap - word_start;
 
-                            clear_search_highlights(app);
-                        }
-                        else if (brk >= 0)
-                        {
-                            int tail = linelen - brk - 1;
+#ifdef HAVE_HYPHEN
+                            /* If word doesn't fit in available space, try hyphen */
+                            if (word_len > space_available && space_available >= 0 && app->hyph_wrap_enabled && app->hyph_handle)
+                            {
+                                int hyph_break = hyph_find_break(app, &line[word_start], word_len, space_available);
 
-                            ed_set_pos(te_app_get_editor(app), wi.row, brk);
-                            ed_delete(te_app_get_editor(app));
-                            ed_enter(te_app_get_editor(app));
+                                /* Validate hyphenation breakpoint: must be valid and leave at least one character after hyphen */
+                                if (hyph_break >= 0 && hyph_break > 0 && hyph_break < word_len - 1)
+                                {
+                                    int break_pos = word_start + hyph_break;
 
-                            clear_search_highlights(app);
-                            ed_set_pos(te_app_get_editor(app), wi.row + 1, tail);
+                                    /* Validate that break_pos is within the line */
+                                    if (break_pos < linelen)
+                                    {
+                                        /* Save state for undo */
+                                        ed_save_undo(te_app_get_editor(app));
+
+                                        /* Insert '-' at breakpoint */
+                                        ed_set_pos(te_app_get_editor(app), wi.row, break_pos);
+
+                                        if (ed_insert_char(te_app_get_editor(app), L'-') == 0)
+                                        {
+                                            /* Insert '\n' after '-' using ed_enter to properly split the line */
+                                            if (ed_enter(te_app_get_editor(app)) == 0)
+                                            {
+                                                /* Calculate tail: characters remaining after breakpoint in the word */
+                                                int tail = word_len - hyph_break;
+
+                                                if (tail < 0)
+                                                    tail = 0;
+
+                                                ed_set_pos(te_app_get_editor(app), wi.row + 1, tail);
+                                                clear_search_highlights(app);
+
+                                                hyphen_performed = 1;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+#endif
+
+                            /* If line exceeds limit, try to break at space (but not if hyphen already handled it) */
+                            if (wi.col > eff_wrap && !hyphen_performed)
+                            {
+                                int brk = -1;
+                                int limit = eff_wrap;
+
+                                if (limit > linelen)
+                                    limit = linelen;
+
+                                for (k = limit; k > 0; k--)
+                                {
+                                    if (line[k - 1] == L' ')
+                                    {
+                                        brk = k - 1;
+                                        break;
+                                    }
+                                }
+
+                                if (wch == L' ')
+                                {
+                                    ed_backspace(te_app_get_editor(app)); /* replace trailing space with newline */
+                                    ed_enter(te_app_get_editor(app));
+
+                                    clear_search_highlights(app);
+                                }
+                                else if (brk >= 0)
+                                {
+                                    int tail = linelen - brk - 1;
+
+                                    ed_set_pos(te_app_get_editor(app), wi.row, brk);
+                                    ed_delete(te_app_get_editor(app));
+                                    ed_enter(te_app_get_editor(app));
+
+                                    clear_search_highlights(app);
+                                    ed_set_pos(te_app_get_editor(app), wi.row + 1, tail);
+                                }
+                            }
                         }
                     }
                 }
             }
+
             return 1;
         }
 
         return 0;
     }
+
+    return 0;
 }
 
-/* Main event loop */
+/* Helper function to redraw editor */
+static void redraw_editor(TeApp *app)
+{
+    erase();
+    standend();
+
+    /* Recalculate layout */
+    wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode);
+
+    te_draw_titlebar(app);
+    ui_tabs_draw_panel(app);
+
+    draw_body(app);
+
+#ifdef HAVE_HUNSPELL
+    ui_spell_draw_panel(app);
+#endif /* HAVE_HUNSPELL */
+
+    te_draw_statusbar(app);
+
+    position_cursor(app);
+    refresh();
+}
+
 void ui_editor_run(TeApp *app)
 {
     int body_rows;
     int soft, width;
+    int screen_dirty;
 
     if (!app)
         return;
@@ -2290,6 +2525,8 @@ void ui_editor_run(TeApp *app)
     s_soft_last_width = COLS;
 
     TE_BRACKET_PASTE_ON();
+
+    screen_dirty = 1; /* Force initial redraw */
 
     for (;;)
     {
@@ -2313,6 +2550,21 @@ void ui_editor_run(TeApp *app)
 
         soft = !app->hard_wrap;
 
+        /* On resize, reset goal column to re-sync from new layout */
+        if (COLS != s_soft_last_width)
+        {
+            soft_reset_desired();
+            s_soft_last_width = COLS;
+            screen_dirty = 1;
+        }
+
+        /* Redraw only when screen is dirty (has changes) */
+        if (screen_dirty)
+        {
+            redraw_editor(app);
+            screen_dirty = 0;
+        }
+
         /* Adjust width for line numbers if enabled */
         if (te_app_get_show_line_numbers(app))
         {
@@ -2329,33 +2581,8 @@ void ui_editor_run(TeApp *app)
         if (body_rows < 1)
             body_rows = 1;
 
-        if (COLS != s_soft_last_width)
-        {
-            soft_reset_desired();
-
-            s_soft_last_width = COLS;
-        }
-
-        erase();
-        standend();
-
-        /* Recalculate layout */
-        wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode);
-
-        te_draw_titlebar(app);
-        ui_tabs_draw_panel(app);
-
-        draw_body(app);
-
-#ifdef HAVE_HUNSPELL
-        ui_spell_draw_panel(app);
-#endif
-        te_draw_statusbar(app);
-
-        position_cursor(app);
-        refresh();
-
         wrc = wrapper_read_key(&wch);
+
         if (wrc == ERR)
             continue;
 
@@ -2377,6 +2604,8 @@ void ui_editor_run(TeApp *app)
             {
                 if (app->tabs_panel_selected > 0)
                     app->tabs_panel_selected--;
+
+                screen_dirty = 1;
                 continue;
             }
 
@@ -2384,24 +2613,30 @@ void ui_editor_run(TeApp *app)
             {
                 if (app->tabs_panel_selected < app->tab_count - 1)
                     app->tabs_panel_selected++;
+
+                screen_dirty = 1;
                 continue;
             }
 
             if (is_key && ch == KEY_ENTER)
             {
                 te_app_switch_tab(app, app->tabs_panel_selected);
+
                 app->tabs_panel_active = 0;
+                screen_dirty = 1;
                 continue;
             }
 
             if (is_key && ch == 27) /* ESC */
             {
                 app->tabs_panel_active = 0;
+                screen_dirty = 1;
                 continue;
             }
 
             /* Any other key exits panel mode */
             app->tabs_panel_active = 0;
+            screen_dirty = 1;
         }
         else
         {
@@ -2410,6 +2645,8 @@ void ui_editor_run(TeApp *app)
             {
                 app->tabs_panel_active = 1;
                 app->tabs_panel_selected = app->active_tab;
+
+                screen_dirty = 1;
                 continue;
             }
         }
@@ -2434,7 +2671,7 @@ void ui_editor_run(TeApp *app)
 
                     if (pw > 0)
                     {
-                        wrapped = wrap_paste_text(buf, pw);
+                        wrapped = wrap_paste_text(app, buf, pw);
 
                         if (wrapped)
                             to_insert = wrapped;
@@ -2456,6 +2693,7 @@ void ui_editor_run(TeApp *app)
                     free(wrapped);
             }
 
+            screen_dirty = 1;
             continue;
         }
 
@@ -2466,12 +2704,16 @@ void ui_editor_run(TeApp *app)
             ed_insert_tab(te_app_get_editor(app), 4);
 
             clear_search_highlights(app);
+            screen_dirty = 1;
             continue;
         }
 
         /* Handle function keys */
         if (handle_function_keys(app, ch, is_key))
+        {
+            screen_dirty = 1;
             continue;
+        }
 
         /* ESC : exit search mode or quit */
         if (!is_key && ch == 27)
@@ -2482,7 +2724,9 @@ void ui_editor_run(TeApp *app)
 
                 app->search.is_mode = 0;
                 app->search.only_mode = 0;
+
                 te_status(app, "Search mode exited");
+                screen_dirty = 1;
                 continue;
             }
 
@@ -2525,29 +2769,34 @@ void ui_editor_run(TeApp *app)
 
         /* Resize */
         if (is_key && ch == KEY_RESIZE)
+        {
+            screen_dirty = 1;
             continue;
+        }
 
         /* Handle control keys */
         if (handle_control_keys(app, ch, is_key))
+        {
+            screen_dirty = 1;
             continue;
+        }
 
         /* Body key handling */
         if (is_key)
         {
             if (handle_navigation_keys(app, ch, soft, width, body_rows, &preserve_desired))
             {
-                /* Reset desired column unless this was a vertical move that
-                 * needs to preserve it (UP/DOWN/PgUp/PgDn set preserve_desired=1) */
+                /* Reset desired column unless vertical move (UP/DOWN/PgUp/PgDn preserve it) */
                 if (!preserve_desired)
                     soft_reset_desired();
 
+                screen_dirty = 1;
                 continue;
             }
         }
         else /* printable / control chars */
         {
-            /* Try rapid paste detection first (fallback for terminals
-             * without bracketed paste) */
+            /* Try rapid paste detection first (fallback for terminals without bracketed paste) */
             if (wch >= 0x20 && wch != 127)
             {
                 char *rapid_buf = collect_rapid_paste(wch);
@@ -2568,7 +2817,7 @@ void ui_editor_run(TeApp *app)
 
                         if (pw > 0)
                         {
-                            wrapped = wrap_paste_text(rapid_buf, pw);
+                            wrapped = wrap_paste_text(app, rapid_buf, pw);
 
                             if (wrapped)
                                 to_insert = wrapped;
@@ -2589,6 +2838,7 @@ void ui_editor_run(TeApp *app)
                     if (wrapped)
                         free(wrapped);
 
+                    screen_dirty = 1;
                     continue;
                 }
             }
@@ -2598,11 +2848,17 @@ void ui_editor_run(TeApp *app)
                 if (!preserve_desired)
                     soft_reset_desired();
 
+                screen_dirty = 1;
                 continue;
             }
         }
 
         if (!preserve_desired)
             soft_reset_desired();
+
+        /* Redraw after processing key */
+        redraw_editor(app);
+
+        screen_dirty = 0;
     }
 }

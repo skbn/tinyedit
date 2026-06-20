@@ -139,7 +139,17 @@ typedef struct
     char **spell_suggestions;        /* Suggestions from Hunspell */
     int spell_suggestion_count;      /* Number of suggestions */
     int spell_scroll_offset;         /* Scroll offset for suggestions */
+
+#ifdef HAVE_HYPHEN
+    void *hyph_handle;     /* HyphDict */
+    int hyph_wrap_enabled; /* Use hyphenation in hard-wrap mode */
 #endif
+
+#ifdef HAVE_MYTHES
+    void *thes_handle; /* ThesHandle */
+#endif
+
+#endif /* HAVE_HUNSPELL */
 
     char charset_in[32];
     char charset_out[32];

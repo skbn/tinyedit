@@ -26,22 +26,28 @@
 
 #ifdef HAVE_HUNSPELL
 #include "../spell/spell.h"
+#ifdef HAVE_HYPHEN
+#include "../hyph_wrap/hyph_wrap.h"
 #endif
+#ifdef HAVE_MYTHES
+#include "../thes/thes.h"
+#endif
+#endif /* HAVE_HUNSPELL */
 
 /* Tabs */
 #if defined(PLATFORM_AMIGA)
 #ifdef AMIGA_TTF_TE
 #ifdef HAVE_HUNSPELL
 #define ST_TAB_COUNT 4
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF Fallbacks", "Dictionary"};
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF", "Spell"};
 #else
 #define ST_TAB_COUNT 3
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF Fallbacks"};
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF"};
 #endif
 #else
 #ifdef HAVE_HUNSPELL
 #define ST_TAB_COUNT 3
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Dictionary"};
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Spell"};
 #else
 #define ST_TAB_COUNT 2
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
@@ -50,7 +56,7 @@ static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
 #else
 #ifdef HAVE_HUNSPELL
 #define ST_TAB_COUNT 3
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Dictionary"};
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Spell"};
 #else
 #define ST_TAB_COUNT 2
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
@@ -71,7 +77,16 @@ typedef enum
     ,
     FT_DICTLIST,  /* cycle through available Hunspell dictionaries */
     FT_CUSTOMDICT /* select or create custom dictionary */
+#ifdef HAVE_HYPHEN
+    ,
+    FT_HYPHLIST /* cycle through available Hyphen dictionaries */
 #endif
+#ifdef HAVE_MYTHES
+    ,
+    FT_THESLIST /* cycle through available MyThes dictionaries */
+#endif
+#endif /* HAVE_HUNSPELL */
+
 } FieldType;
 
 typedef struct
@@ -146,20 +161,32 @@ static const SetupField st_fields[] =
         {2, "Fallback 8 Size", FT_INT, F_OFF(ttf_fallback_size[7]), 0},
 #endif
 
+/* Dictionary tab number: slot 3 on Amiga (TTF Fallbacks takes slot 2), slot 2 elsewhere */
+#if defined(PLATFORM_AMIGA) && defined(AMIGA_TTF_TE)
+#define TAB_DICT 3
+#else
+#define TAB_DICT 2
+#endif
+
 /* Dictionary */
 #ifdef HAVE_HUNSPELL
-#if defined(PLATFORM_AMIGA)
-        {3, "Spell Enabled", FT_BOOL, F_OFF(spell_enabled), 0},
-        {3, "Dict Path", FT_STR, F_OFF(spell_dict_path), TE_CFG_STR_MAX},
-        {3, "Dictionary", FT_DICTLIST, F_OFF(spell_dict_name), 0},
-        {3, "Custom Dict", FT_CUSTOMDICT, F_OFF(spell_custom_dict), 0},
-#else
-        {2, "Spell Enabled", FT_BOOL, F_OFF(spell_enabled), 0},
-        {2, "Dict Path", FT_STR, F_OFF(spell_dict_path), TE_CFG_STR_MAX},
-        {2, "Dictionary", FT_DICTLIST, F_OFF(spell_dict_name), 0},
-        {2, "Custom Dict", FT_CUSTOMDICT, F_OFF(spell_custom_dict), 0},
-#endif
-#endif
+        {TAB_DICT, "Spell Enabled", FT_BOOL, F_OFF(spell_enabled), 0},
+        {TAB_DICT, "Dict Path", FT_STR, F_OFF(spell_dict_path), TE_CFG_STR_MAX},
+        {TAB_DICT, "Dictionary", FT_DICTLIST, F_OFF(spell_dict_name), 0},
+        {TAB_DICT, "Custom Dict", FT_CUSTOMDICT, F_OFF(spell_custom_dict), 0},
+#ifdef HAVE_HYPHEN
+        {TAB_DICT, "Hyphen Enabled", FT_BOOL, F_OFF(hyph_enabled), 0},
+        {TAB_DICT, "Hyphen Dict Path", FT_STR, F_OFF(hyph_dict_path), TE_CFG_STR_MAX},
+        {TAB_DICT, "Hyphen Dictionary", FT_HYPHLIST, F_OFF(hyph_dict_name), 0},
+        {TAB_DICT, "Hyphen Wrap", FT_BOOL, F_OFF(hyph_wrap_enabled), 0},
+#endif /* HAVE_HYPHEN */
+#ifdef HAVE_MYTHES
+        {TAB_DICT, "Thesaurus Enabled", FT_BOOL, F_OFF(thes_enabled), 0},
+        {TAB_DICT, "Thesaurus Path", FT_STR, F_OFF(thes_dict_path), TE_CFG_STR_MAX},
+        {TAB_DICT, "Thesaurus Dict", FT_THESLIST, F_OFF(thes_dict_name), 0},
+#endif /* HAVE_MYTHES */
+#endif /* HAVE_HUNSPELL */
+
 };
 
 #define ST_FIELD_COUNT ((int)(sizeof(st_fields) / sizeof(st_fields[0])))
@@ -269,7 +296,25 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
         snprintf(buf, bufsz, "%s", s[0] ? s : "(none)");
         break;
     }
+#ifdef HAVE_HYPHEN
+    case FT_HYPHLIST:
+    {
+        const char *s = (const char *)(base + fld->off);
+
+        snprintf(buf, bufsz, "%s", s[0] ? s : "(none)");
+        break;
+    }
 #endif
+#ifdef HAVE_MYTHES
+    case FT_THESLIST:
+    {
+        const char *s = (const char *)(base + fld->off);
+
+        snprintf(buf, bufsz, "%s", s[0] ? s : "(none)");
+        break;
+    }
+#endif /* HAVE_MYTHES */
+#endif /* HAVE_HUNSPELL */
     case FT_COLORPAIR:
     {
         int pair_index = (fld->off - F_OFF(color_fg)) / sizeof(int);
@@ -517,7 +562,7 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
                 s[TE_CFG_STR_MAX - 1] = '\0';
             }
         }
-        else if (strcmp(fld->label, "Dict Path") == 0)
+        else if (strcmp(fld->label, "Dict Path") == 0 || strcmp(fld->label, "Hyphen Dict Path") == 0 || strcmp(fld->label, "Thesaurus Path") == 0)
         {
             /* Use directory picker for Dict Path */
             char tmp[TE_CFG_STR_MAX];
@@ -724,9 +769,7 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (!dicts || n_dicts == 0)
         {
-            mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"No dictionaries found", 20);
-            refresh();
-            wrapper_getch();
+            ui_popup_confirm("Error", "No dictionaries found");
             break;
         }
 
@@ -752,104 +795,129 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
         spell_free_dictionaries(dicts, n_dicts);
         break;
     }
+#ifdef HAVE_HYPHEN
+    case FT_HYPHLIST:
+    {
+        char *s = (char *)(base + fld->off);
+        char **dicts;
+        int n_dicts;
+        int i;
+        int current = -1;
+        int selected;
+
+        /* Get hyphen path from config */
+        char *hyph_path = w->hyph_dict_path;
+
+        if (!hyph_path || !hyph_path[0])
+        {
+            mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Hyphen Path not set", 27);
+            refresh();
+            wrapper_getch();
+            break;
+        }
+
+        /* List available hyphen dictionaries */
+        dicts = hyph_list_dictionaries(hyph_path, &n_dicts);
+
+        if (!dicts || n_dicts == 0)
+        {
+            ui_popup_confirm("Error", "No hyphen dictionaries found");
+            break;
+        }
+
+        /* Find current dictionary in list */
+        for (i = 0; i < n_dicts; i++)
+        {
+            if (strcmp(s, dicts[i]) == 0)
+            {
+                current = i;
+                break;
+            }
+        }
+
+        /* Show popup to select dictionary */
+        selected = ui_popup_list("Select Hyphen", (const char **)dicts, n_dicts, current);
+
+        if (selected >= 0 && selected < n_dicts)
+        {
+            strncpy(s, dicts[selected], TE_CFG_STR_MAX - 1);
+            s[TE_CFG_STR_MAX - 1] = '\0';
+        }
+
+        hyph_free_dictionaries(dicts, n_dicts);
+        break;
+    }
+#endif /* HAVE_HYPHEN */
+#ifdef HAVE_MYTHES
+    case FT_THESLIST:
+    {
+        char *s = (char *)(base + fld->off);
+        char **dicts;
+        int n_dicts;
+        int i;
+        int current = -1;
+        int selected;
+
+        /* Get thesaurus path from config */
+        char *thes_path = w->thes_dict_path;
+
+        if (!thes_path || !thes_path[0])
+        {
+            mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Thesaurus Path not set", 28);
+            refresh();
+            wrapper_getch();
+            break;
+        }
+
+        /* List available thesaurus dictionaries */
+        dicts = thes_list_dictionaries(thes_path, &n_dicts);
+
+        if (!dicts || n_dicts == 0)
+        {
+            ui_popup_confirm("Error", "No thesaurus dictionaries found");
+            break;
+        }
+
+        /* Find current dictionary in list */
+        for (i = 0; i < n_dicts; i++)
+        {
+            if (strcmp(s, dicts[i]) == 0)
+            {
+                current = i;
+                break;
+            }
+        }
+
+        /* Show popup to select dictionary */
+        selected = ui_popup_list("Select Thesaurus", (const char **)dicts, n_dicts, current);
+
+        if (selected >= 0 && selected < n_dicts)
+        {
+            strncpy(s, dicts[selected], TE_CFG_STR_MAX - 1);
+            s[TE_CFG_STR_MAX - 1] = '\0';
+        }
+
+        thes_free_dictionaries(dicts, n_dicts);
+        break;
+    }
+#endif /* HAVE_MYTHES */
     case FT_CUSTOMDICT:
     {
         char *s = (char *)(base + fld->off);
-        const char *options[] = {"Select existing", "Create new"};
-        int selected;
+        char tmp[TE_CFG_STR_MAX];
 
-        selected = ui_popup_list("Custom Dictionary", options, 2, -1);
+        strncpy(tmp, s, sizeof(tmp) - 1);
+        tmp[sizeof(tmp) - 1] = '\0';
 
-        if (selected == 0)
+        if (ui_files_pick_dir(fld->label, "", tmp, sizeof(tmp)) == 0)
         {
-            /* Select existing */
-            char dicts_dir[TE_CFG_STR_MAX];
-            char parent_dir[TE_CFG_STR_MAX];
-            char selected_file[TE_CFG_STR_MAX];
-
-            /* Get custom dicts directory */
-            get_tinyedit_base_dir(parent_dir, sizeof(parent_dir));
-
-#if defined(PLATFORM_WIN32)
-            snprintf(dicts_dir, sizeof(dicts_dir), "%s\\dicts", parent_dir);
-#else
-            snprintf(dicts_dir, sizeof(dicts_dir), "%s/dicts", parent_dir);
-#endif
-
-            /* Create parent directory if it doesn't exist */
-            port_mkdir_one(parent_dir);
-            port_mkdir_one(dicts_dir);
-
-            /* Select file */
-            selected_file[0] = '\0';
-
-            if (ui_files_pick("Select custom dictionary", dicts_dir, selected_file, sizeof(selected_file)) == 0 && selected_file[0])
-            {
-                /* Check if selected file ends with .dic */
-                size_t len = strlen(selected_file);
-
-                if (len >= 4 && strcmp(selected_file + len - 4, ".dic") == 0)
-                {
-                    strncpy(s, selected_file, TE_CFG_STR_MAX - 1);
-                    s[TE_CFG_STR_MAX - 1] = '\0';
-                }
-            }
+            strncpy(s, tmp, TE_CFG_STR_MAX - 1);
+            s[TE_CFG_STR_MAX - 1] = '\0';
         }
-        else if (selected == 1)
-        {
-            /* Create new */
-            char dicts_dir[TE_CFG_STR_MAX];
-            char parent_dir[TE_CFG_STR_MAX];
-            wchar_t dict_name[TE_CFG_STR_MAX];
-            char dict_path[TE_CFG_STR_MAX];
 
-            /* Get custom dicts directory */
-            get_tinyedit_base_dir(parent_dir, sizeof(parent_dir));
-
-#if defined(PLATFORM_WIN32)
-            snprintf(dicts_dir, sizeof(dicts_dir), "%s\\dicts", parent_dir);
-#else
-            snprintf(dicts_dir, sizeof(dicts_dir), "%s/dicts", parent_dir);
-#endif
-
-            /* Create parent directory if it doesn't exist */
-            port_mkdir_one(parent_dir);
-            port_mkdir_one(dicts_dir);
-
-            /* Ask for dictionary name */
-            dict_name[0] = L'\0';
-
-            if (ui_popup_input_wcs("Create custom dictionary", "Dictionary name (without .dic):", dict_name, TE_CFG_STR_MAX) == 0 && dict_name[0])
-            {
-                /* Convert wchar_t to UTF-8 for file path */
-                int wcs_len = (int)wcslen(dict_name);
-                char *utf8_name = wcs_to_utf8(dict_name, wcs_len);
-
-                if (utf8_name)
-                {
-                    /* Build full path */
-                    snprintf(dict_path, sizeof(dict_path), "%s/%s.dic", dicts_dir, utf8_name);
-
-                    /* Create empty file using portable function */
-                    if (port_file_create_empty(dict_path) == 0)
-                    {
-                        strncpy(s, dict_path, TE_CFG_STR_MAX - 1);
-                        s[TE_CFG_STR_MAX - 1] = '\0';
-                    }
-                    else
-                    {
-                        mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Cannot create dictionary", 30);
-                        refresh();
-                        wrapper_getch();
-                    }
-
-                    free(utf8_name);
-                }
-            }
-        }
         break;
     }
-#endif
+#endif /* HAVE_HUNSPELL */
     }
 }
 
@@ -917,7 +985,7 @@ static int st_tab_field_count(int tab)
     return c;
 }
 
-int ui_setup_run(TeConfig *cfg, const char *cfg_path)
+int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 {
     TeConfig work;
     int tab = 0;
@@ -1106,6 +1174,31 @@ int ui_setup_run(TeConfig *cfg, const char *cfg_path)
 #endif
                     amiga_reload_ttf(work.ttf_font, work.ttf_size);
                 }
+            }
+#endif
+
+            /* Reload Hunspell dictionary when spell settings changed */
+#ifdef HAVE_HUNSPELL
+            if (cfg->spell_enabled != work.spell_enabled || strcmp(cfg->spell_dict_path, work.spell_dict_path) != 0 || strcmp(cfg->spell_dict_name, work.spell_dict_name) != 0)
+            {
+                *cfg = work;
+                spell_load_from_config(app);
+            }
+#endif
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+            if (cfg->hyph_enabled != work.hyph_enabled || strcmp(cfg->hyph_dict_path, work.hyph_dict_path) != 0 || strcmp(cfg->hyph_dict_name, work.hyph_dict_name) != 0)
+            {
+                *cfg = work;
+                hyph_load_from_config(app);
+            }
+#endif
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_MYTHES)
+            if (cfg->thes_enabled != work.thes_enabled || strcmp(cfg->thes_dict_path, work.thes_dict_path) != 0 || strcmp(cfg->thes_dict_name, work.thes_dict_name) != 0)
+            {
+                *cfg = work;
+                ui_thes_load_from_config(app);
             }
 #endif
 

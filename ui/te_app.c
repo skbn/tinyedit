@@ -92,6 +92,10 @@ TeApp *te_app_new(void)
     app->spell_suggestions = NULL;
     app->spell_suggestion_count = 0;
     app->spell_scroll_offset = 0;
+
+#ifdef HAVE_HYPHEN
+    app->hyph_wrap_enabled = 0; /* Will be set from config after loading */
+#endif
 #endif
 
     strncpy(app->charset_in, "UTF-8", sizeof(app->charset_in) - 1);
@@ -136,11 +140,9 @@ void te_app_free(TeApp *app)
     }
 
 #ifdef HAVE_HUNSPELL
-    ui_spell_free_app_suggestions(app);
-
     if (app->spell_handle)
     {
-        spell_free(app->spell_handle);
+        spell_free((SpellChecker *)app->spell_handle);
         app->spell_handle = NULL;
     }
 #endif
@@ -491,7 +493,13 @@ void te_draw_titlebar(TeApp *app)
         ed_get_info(tab->editor, &info);
 
 #ifdef HAVE_HUNSPELL
-        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", (app->spell_enabled && app->spell_active && app->spell_handle) ? "SPELL " : "", info.insert_mode ? "INS" : "OVR");
+        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", (app->spell_enabled && app->spell_active && app->spell_handle) ? "SP " : "",
+#ifdef HAVE_HYPHEN
+                 (app->hyph_wrap_enabled && app->hyph_handle) ? "HY " : "",
+#else
+                 "",
+#endif
+                 info.insert_mode ? "INS" : "OVR");
 #else
         snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", info.insert_mode ? "INS" : "OVR");
 #endif

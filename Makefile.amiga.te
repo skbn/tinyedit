@@ -51,7 +51,7 @@ ifeq ($(USE_HUNSPELL),1)
                   $(HUNSPELL_OBJDIR)/replist.o $(HUNSPELL_OBJDIR)/suggestmgr.o
 endif
 
-# Hyphen support
+# Hyphen support (requires Hunspell)
 USE_HYPHEN ?= 0
 HYPHEN_DIR = $(HERE)hyphen
 HYPHEN_OBJDIR = $(HYPHEN_DIR)/objs.amiga
@@ -59,10 +59,14 @@ HYPHEN_LIB = $(HYPHEN_DIR)/libhyphen.a
 HYPHEN_OBJS = $(HYPHEN_OBJDIR)/hnjalloc.o $(HYPHEN_OBJDIR)/hyphen.o
 
 ifeq ($(USE_HYPHEN),1)
-  CFLAGS += -DHAVE_HYPHEN -I$(HYPHEN_DIR)
+  ifeq ($(USE_HUNSPELL),0)
+    $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
+  endif
+  CFLAGS += -DHAVE_HYPHEN -I$(HYPHEN_DIR) -I$(HERE)hyph_wrap
+  HYPHWRAP_OBJS = $(OBJDIR)/hyph_wrap.o
 endif
 
-# MyThes support
+# MyThes support (requires Hunspell)
 USE_MYTHES ?= 0
 MYTHES_DIR = $(HERE)mythes
 MYTHES_OBJDIR = $(MYTHES_DIR)/objs.amiga
@@ -70,8 +74,12 @@ MYTHES_LIB = $(MYTHES_DIR)/libmythes.a
 MYTHES_OBJS = $(MYTHES_OBJDIR)/mythes.o
 
 ifeq ($(USE_MYTHES),1)
+  ifeq ($(USE_HUNSPELL),0)
+    $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
+  endif
   CXXFLAGS += -DHAVE_MYTHES -I$(MYTHES_DIR)
-  CFLAGS += -DHAVE_MYTHES -I$(MYTHES_DIR)
+  CFLAGS += -DHAVE_MYTHES -I$(MYTHES_DIR) -I$(HERE)thes
+  THES_OBJS = $(OBJDIR)/thes.o
 endif
 
 # External tree locations -- relative to HERE
@@ -103,10 +111,20 @@ COMP_OBJS  = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS    = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o \
              $(OBJDIR)/ui_popup.o $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
              $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
+			 
 ifeq ($(USE_HUNSPELL),1)
 UI_OBJS    += $(OBJDIR)/ui_spell.o
 endif
-ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS)
+
+ifeq ($(USE_HYPHEN),1)
+UI_OBJS    += $(OBJDIR)/ui_hyph.o
+endif
+
+ifeq ($(USE_MYTHES),1)
+UI_OBJS    += $(OBJDIR)/ui_thes.o
+endif
+
+ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS)
 
 # FreeType objects (with gzip + lzw modules) - all in OBJDIR
 FT_OBJS    := \
@@ -182,8 +200,16 @@ ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(HUNSPELL_LIB)
-	$(CXX) $(CFLAGS) $(OBJDIR)/main.o $(TARGET) $(HUNSPELL_LIB) -lm -o $@
+LINK_LIBS = $(HUNSPELL_LIB)
+ifeq ($(USE_HYPHEN),1)
+LINK_LIBS += $(HYPHEN_LIB)
+endif
+ifeq ($(USE_MYTHES),1)
+LINK_LIBS += $(MYTHES_LIB)
+endif
+
+$(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS) $(LINK_LIBS)
+	$(CXX) $(CFLAGS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) $(LINK_LIBS) -lm -o $@
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET)
 	$(CC) $(CFLAGS) $(HERE)main.c $(TARGET) -lm -o $@
@@ -473,6 +499,22 @@ $(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 endif
 
+ifeq ($(USE_HYPHEN),1)
+$(OBJDIR)/ui_hyph.o: $(UIDIR)/ui_hyph.c $(UIDIR)/ui_hyph.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/hyph_wrap.o: $(HERE)hyph_wrap/hyph_wrap.c $(HERE)hyph_wrap/hyph_wrap.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+endif
+
+ifeq ($(USE_MYTHES),1)
+$(OBJDIR)/ui_thes.o: $(UIDIR)/ui_thes.c $(UIDIR)/ui_thes.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/thes.o: $(HERE)thes/thes.cpp $(HERE)thes/thes.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+endif
+
 # Spell checker object (only if USE_HUNSPELL=1)
 $(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -572,7 +614,7 @@ $(MYTHES_OBJDIR):
 $(MYTHES_OBJDIR)/%.o: $(MYTHES_DIR)/%.cxx | $(MYTHES_OBJDIR)
 	$(CXX) $(CXXFLAGS) -I$(MYTHES_DIR) -I$(HUNSPELL_SRC) -c $< -o $@
 
-# Create MyThes static library
+# Create MyThes static library (depends on Hunspell)
 $(MYTHES_LIB): $(MYTHES_OBJS) $(HUNSPELL_LIB)
 	$(AR) rcs $@ $(MYTHES_OBJS)
 	$(RANLIB) $@

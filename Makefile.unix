@@ -70,6 +70,68 @@ ifeq ($(USE_HUNSPELL),1)
   SPELL_OBJS = $(OBJDIR)/spell.o
 endif
 
+# Hyphenation support (libhyphen)
+USE_HYPHEN ?= 0
+ifeq ($(USE_HYPHEN),1)
+  ifeq ($(USE_HUNSPELL),0)
+    $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
+  endif
+  CFLAGS += -DHAVE_HYPHEN -I$(HERE)hyph_wrap
+
+  HYPHEN_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags hyphen 2>/dev/null)
+  HYPHEN_PKG_CONFIG_LIBS   := $(shell pkg-config --libs   hyphen 2>/dev/null)
+
+  ifneq ($(HYPHEN_PKG_CONFIG_LIBS),)
+    CFLAGS += $(HYPHEN_PKG_CONFIG_CFLAGS)
+    HYPHEN_LIB = $(HYPHEN_PKG_CONFIG_LIBS)
+  else
+    ifeq ($(OS),NetBSD)
+      CFLAGS += -I/usr/pkg/include
+      HYPHEN_LIB = -L/usr/pkg/lib -Wl,-rpath,/usr/pkg/lib -lhyphen
+    else ifeq ($(OS),FreeBSD)
+      CFLAGS += -I/usr/local/include
+      HYPHEN_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lhyphen
+    else ifeq ($(OS),OpenBSD)
+      CFLAGS += -I/usr/local/include
+      HYPHEN_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lhyphen
+    else
+      HYPHEN_LIB = -lhyphen
+    endif
+  endif
+  HYPH_OBJS = $(OBJDIR)/hyph_wrap.o
+endif
+
+# Thesaurus support (mythes; C++)
+USE_MYTHES ?= 0
+ifeq ($(USE_MYTHES),1)
+  ifeq ($(USE_HUNSPELL),0)
+    $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
+  endif
+  CFLAGS += -DHAVE_MYTHES -I$(HERE)thes
+
+  MYTHES_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags mythes 2>/dev/null)
+  MYTHES_PKG_CONFIG_LIBS   := $(shell pkg-config --libs   mythes 2>/dev/null)
+
+  ifneq ($(MYTHES_PKG_CONFIG_LIBS),)
+    CFLAGS += $(MYTHES_PKG_CONFIG_CFLAGS)
+    MYTHES_LIB = $(MYTHES_PKG_CONFIG_LIBS)
+  else
+    ifeq ($(OS),NetBSD)
+      CFLAGS += -I/usr/pkg/include
+      MYTHES_LIB = -L/usr/pkg/lib -Wl,-rpath,/usr/pkg/lib -lmythes-1.2
+    else ifeq ($(OS),FreeBSD)
+      CFLAGS += -I/usr/local/include
+      MYTHES_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lmythes-1.2
+    else ifeq ($(OS),OpenBSD)
+      CFLAGS += -I/usr/local/include
+      MYTHES_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lmythes-1.2
+    else
+      MYTHES_LIB = -lmythes-1.2
+    endif
+  endif
+  THES_OBJS = $(OBJDIR)/thes.o
+endif
+
 # ncurses library detection:
 #   Linux, FreeBSD, NetBSD, OpenBSD  -> -lncursesw   (wide-char variant)
 #   macOS (Darwin)                   -> -lncurses     (system curses is wide-capable)
@@ -97,10 +159,17 @@ COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
+            
 ifeq ($(USE_HUNSPELL),1)
 UI_OBJS   += $(OBJDIR)/ui_spell.o
 endif
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS)
+ifeq ($(USE_HYPHEN),1)
+UI_OBJS   += $(OBJDIR)/ui_hyph.o
+endif
+ifeq ($(USE_MYTHES),1)
+UI_OBJS   += $(OBJDIR)/ui_thes.o
+endif
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(HYPH_OBJS) $(THES_OBJS)
 
 all: $(TARGET) tinyedit
 
@@ -176,26 +245,46 @@ $(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 
+ifeq ($(USE_HYPHEN),1)
+$(OBJDIR)/ui_hyph.o: $(UIDIR)/ui_hyph.c $(UIDIR)/ui_hyph.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
+
+ifeq ($(USE_MYTHES),1)
+$(OBJDIR)/ui_thes.o: $(UIDIR)/ui_thes.c $(UIDIR)/ui_thes.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
+
 # Spell checker object (only if USE_HUNSPELL=1)
 $(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# Hyphenation backend (only if USE_HYPHEN=1)
+$(OBJDIR)/hyph_wrap.o: $(HERE)hyph_wrap/hyph_wrap.c $(HERE)hyph_wrap/hyph_wrap.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# Thesaurus backend (only if USE_MYTHES=1; C++)
+$(OBJDIR)/thes.o: $(HERE)thes/thes.cpp $(HERE)thes/thes.h | $(OBJDIR)
+	$(CXX) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 # Application
 TINYEDIT = $(HERE)tinyedit
 
 tinyedit: $(TINYEDIT)
 
-ifeq ($(USE_HUNSPELL),1)
+# Always link with C++ driver if either Hunspell or MyThes (both can
+# pull in C++ runtime) -- keep the existing branching pattern.
+ifneq ($(USE_HUNSPELL)$(USE_MYTHES),00)
 $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
 	$(CXX) $(CFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB)
+	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB)
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB)
+	      -o $@ $(NCURSES_LIB) $(HYPHEN_LIB)
 endif
 
 clean:

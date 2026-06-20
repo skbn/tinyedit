@@ -23,7 +23,7 @@ void clear_search_highlights(TeApp *app);
 void soft_reset_desired(void);
 void soft_reset_viewport_to_cursor(TeApp *app, int width);
 int editor_eff_wrap(const TeApp *app);
-char *wrap_paste_text(const char *utf8, int col);
+char *wrap_paste_text(TeApp *app, const char *utf8, int col);
 
 /* Function key implementations */
 int search_prev(TeApp *app);

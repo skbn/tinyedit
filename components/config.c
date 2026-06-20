@@ -309,7 +309,19 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->spell_dict_name[0] = '\0';
     /* Custom dict path for user dictionaries (relative to ~/.tinyedit/) */
     cfg->spell_custom_dict[0] = '\0';
+
+#ifdef HAVE_HYPHEN
+    cfg->hyph_enabled = 0;
+    cfg->hyph_dict_name[0] = '\0';
+    cfg->hyph_wrap_enabled = 0;
 #endif
+
+#ifdef HAVE_MYTHES
+    cfg->thes_enabled = 0;
+    cfg->thes_dict_name[0] = '\0';
+#endif
+
+#endif /* HAVE_HUNSPELL */
 
     /* White-on-black fallback */
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
@@ -715,7 +727,69 @@ int te_cfg_load(TeConfig *cfg, const char *path)
 
             cfg->spell_custom_dict[sizeof(cfg->spell_custom_dict) - 1] = '\0';
         }
+#ifdef HAVE_HYPHEN
+        else if (strcasecmp(word, "HYPH_ENABLED") == 0)
+        {
+            cfg->hyph_enabled = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "HYPH_DICT_PATH") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+
+            if (tmp[0] != '\0')
+            {
+                strncpy(cfg->hyph_dict_path, tmp, sizeof(cfg->hyph_dict_path) - 1);
+                cfg->hyph_dict_path[sizeof(cfg->hyph_dict_path) - 1] = '\0';
+            }
+        }
+        else if (strcasecmp(word, "HYPH_DICT_NAME") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+            strncpy(cfg->hyph_dict_name, tmp, sizeof(cfg->hyph_dict_name) - 1);
+
+            cfg->hyph_dict_name[sizeof(cfg->hyph_dict_name) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "HYPH_WRAP_ENABLED") == 0)
+        {
+            cfg->hyph_wrap_enabled = parse_yesno(rest);
+        }
 #endif
+#ifdef HAVE_MYTHES
+        else if (strcasecmp(word, "THES_ENABLED") == 0)
+        {
+            cfg->thes_enabled = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "THES_DICT_PATH") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+
+            if (tmp[0] != '\0')
+            {
+                strncpy(cfg->thes_dict_path, tmp, sizeof(cfg->thes_dict_path) - 1);
+                cfg->thes_dict_path[sizeof(cfg->thes_dict_path) - 1] = '\0';
+            }
+        }
+        else if (strcasecmp(word, "THES_DICT_NAME") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+            strncpy(cfg->thes_dict_name, tmp, sizeof(cfg->thes_dict_name) - 1);
+
+            cfg->thes_dict_name[sizeof(cfg->thes_dict_name) - 1] = '\0';
+        }
+#endif
+#endif /* HAVE_HUNSPELL */
     }
 
     fclose(f);
@@ -853,6 +927,12 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "COLORMAP") == 0
 #ifdef HAVE_HUNSPELL
                 || strcasecmp(word, "SPELL_ENABLED") == 0 || strcasecmp(word, "SPELL_DICT_PATH") == 0 || strcasecmp(word, "SPELL_DICT_NAME") == 0 || strcasecmp(word, "SPELL_CUSTOM_DICT") == 0
+#ifdef HAVE_HYPHEN
+                || strcasecmp(word, "HYPH_ENABLED") == 0 || strcasecmp(word, "HYPH_DICT_PATH") == 0 || strcasecmp(word, "HYPH_DICT_NAME") == 0 || strcasecmp(word, "HYPH_WRAP_ENABLED") == 0
+#endif
+#ifdef HAVE_MYTHES
+                || strcasecmp(word, "THES_ENABLED") == 0 || strcasecmp(word, "THES_DICT_PATH") == 0 || strcasecmp(word, "THES_DICT_NAME") == 0
+#endif
 #endif
             )
             {
@@ -933,7 +1013,21 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "SPELL_DICT_PATH %s\n", cfg->spell_dict_path);
     fprintf(out, "SPELL_DICT_NAME %s\n", cfg->spell_dict_name);
     fprintf(out, "SPELL_CUSTOM_DICT %s\n", cfg->spell_custom_dict);
+
+#ifdef HAVE_HYPHEN
+    fprintf(out, "HYPH_ENABLED %s\n", cfg->hyph_enabled ? "YES" : "NO");
+    fprintf(out, "HYPH_DICT_PATH %s\n", cfg->hyph_dict_path);
+    fprintf(out, "HYPH_DICT_NAME %s\n", cfg->hyph_dict_name);
+    fprintf(out, "HYPH_WRAP_ENABLED %s\n", cfg->hyph_wrap_enabled ? "YES" : "NO");
 #endif
+
+#ifdef HAVE_MYTHES
+    fprintf(out, "THES_ENABLED %s\n", cfg->thes_enabled ? "YES" : "NO");
+    fprintf(out, "THES_DICT_PATH %s\n", cfg->thes_dict_path);
+    fprintf(out, "THES_DICT_NAME %s\n", cfg->thes_dict_name);
+#endif
+
+#endif /* HAVE_HUNSPELL */
 
     fclose(out);
 

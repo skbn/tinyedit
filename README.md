@@ -9,6 +9,8 @@ A lightweight text editor for AmigaOS, Linux, and Windows using ncurses
 - TTF rendering with full Unicode support (including emojis) on AmigaOS
 - Tab system for editing multiple files simultaneously
 - Spell checker panel with Hunspell integration (optional)
+- Hyphenation support with libhyphen (optional)
+- Thesaurus support with libmythes (optional)
 - Translator panel (placeholder for future implementation)
 - Configurable colors and fonts
 - Auto-wrap and hard-wrap modes
@@ -31,14 +33,29 @@ To compile with Hunspell spell checker (optional):
 - FreeBSD: `doas pkg install hunspell`
 - macOS: `brew install hunspell`
 
-Dictionaries are installed separately:
-- Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us` (example for Spanish and English)
-- Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us` (example for Spanish and English)
-- FreeBSD: `doas pkg install es-hunspell en-hunspell` (example for Spanish and English)
+To compile with hyphenation support (optional):
+- Debian/Ubuntu: `sudo apt install libhyphen-dev`
+- Arch Linux: `sudo pacman -S hyphen`
+- FreeBSD: `doas pkg install hyphen`
+
+To compile with thesaurus support (optional):
+- Debian/Ubuntu: `sudo apt install libmythes-dev`
+- Arch Linux: `sudo pacman -S libmythes`
+- FreeBSD: `doas pkg install mythes`
+
+Dictionaries, hyphenation patterns, and thesaurus data:
+- Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
+- Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us hyphen-es hyphen-en mythes-es mythes-en`
+- FreeBSD: `doas pkg install es-hunspell en-hunspell es-hyphen en-mythes es-mythes`
 - macOS: Dictionary files are included with hunspell
 
 ```bash
 make -f Makefile.unix USE_HUNSPELL=1
+```
+
+Or combine with hyphenation and thesaurus:
+```bash
+make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1
 ```
 
 ### Windows (MinGW)
@@ -175,6 +192,49 @@ make -f Makefile.win32
 To compile with Hunspell spell checker (requires libhunspell):
 ```bash
 make -f Makefile.win32 USE_HUNSPELL=1
+```
+
+## Hyphenation and Thesaurus Support
+
+tinyedit supports hyphenation and thesaurus functionality through optional libraries.
+
+### Package Installation by Distribution
+
+#### Arch Linux
+```bash
+# Hyphenation library and patterns
+sudo pacman -S hyphen hyphen-en hyphen-es
+
+# Thesaurus library and data
+sudo pacman -S libmythes mythes-en mythes-es
+```
+
+#### Debian/Ubuntu
+```bash
+# Hyphenation library and patterns
+sudo apt install libhyphen-dev libhyphen0 hyphen-en-us hyphen-es
+
+# Thesaurus library and data
+sudo apt install libmythes-dev libmythes-1.2-0 mythes-en-us mythes-es
+```
+
+#### FreeBSD
+```bash
+# Hyphenation library and patterns
+doas pkg install hyphen es-hyphen
+
+# Thesaurus library and data
+doas pkg install mythes en-mythes es-mythes
+```
+
+### Compilation
+```bash
+make -f Makefile.unix USE_HYPHEN=1 USE_MYTHES=1
+```
+
+Or combine with Hunspell:
+```bash
+make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1
 ```
 
 ## Usage

@@ -196,6 +196,12 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
 int ed_rewrap_paragraph(Ed *ed, int width);
 int ed_rewrap_document(Ed *ed, int width);
 
+/* Hyphenation callback: returns break positions in word_utf8 */
+typedef int (*EdHyphenFn)(void *user_data, const char *word_utf8, int word_byte_len, int *out_byte_pos, int *out_count);
+
+/* Like ed_rewrap_paragraph, but uses hyph to split overflow words */
+int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data);
+
 /* Insert a text file at the cursor position (with undo) */
 int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in);
 /* Export the current block selection (F6 to mark) to a text file */

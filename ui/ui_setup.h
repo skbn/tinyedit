@@ -14,8 +14,9 @@
 #define TINYEDIT_UI_SETUP_H
 
 #include "../components/config.h"
+#include "te.h"
 
 /* Run setup screen: modify cfg in place, return 1 if saved, 0 if cancelled */
-int ui_setup_run(TeConfig *cfg, const char *cfg_path);
+int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path);
 
 #endif /* TINYEDIT_UI_SETUP_H */

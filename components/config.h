@@ -80,7 +80,22 @@ typedef struct
     char spell_dict_path[TE_CFG_STR_MAX];   /* Directory to search for .dic files */
     char spell_dict_name[TE_CFG_STR_MAX];   /* Selected dictionary name (e.g. "en_US") */
     char spell_custom_dict[TE_CFG_STR_MAX]; /* Path to custom dictionary */
+
+#ifdef HAVE_HYPHEN
+    /* Hyphenation configuration */
+    int hyph_enabled;
+    char hyph_dict_path[TE_CFG_STR_MAX];
+    char hyph_dict_name[TE_CFG_STR_MAX];
+    int hyph_wrap_enabled; /* Use hyphenation in hard-wrap mode */
 #endif
+
+#ifdef HAVE_MYTHES
+    /* Thesaurus configuration */
+    int thes_enabled;
+    char thes_dict_path[TE_CFG_STR_MAX];
+    char thes_dict_name[TE_CFG_STR_MAX];
+#endif
+#endif /* HAVE_HUNSPELL */
 
 } TeConfig;
 

@@ -12,30 +12,48 @@
 #ifndef SPELL_H
 #define SPELL_H
 
-/* Spell checker wrapper for Hunspell C++ library */
-#ifdef HAVE_HUNSPELL
-#ifdef PLATFORM_AMIGA
-#include "hunspell.h"
-#elif defined(PLATFORM_BSD)
-#include <hunspell.h>
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+#if defined(PLATFORM_AMIGA)
+#ifndef SPELL_CACHE_N
+#define SPELL_CACHE_N 256
+#endif
+#ifndef SPELL_CACHE_KEY_MAX
+#define SPELL_CACHE_KEY_MAX 256
+#endif
 #else
-#include <hunspell/hunspell.h>
+#ifndef SPELL_CACHE_N
+#define SPELL_CACHE_N 4096
+#endif
+#ifndef SPELL_CACHE_KEY_MAX
+#define SPELL_CACHE_KEY_MAX 256
 #endif
 #endif
 
-typedef struct SpellChecker SpellChecker;
+    typedef struct SpellChecker SpellChecker;
 
-SpellChecker *spell_new(const char *aff_path, const char *dic_path);
-void spell_free(SpellChecker *sc);
-int spell_check(SpellChecker *sc, const char *word);
-char **spell_suggest(SpellChecker *sc, const char *word, int *n_suggestions);
-void spell_free_suggestions(SpellChecker *sc, char **suggestions, int n_suggestions);
-int spell_add_word(SpellChecker *sc, const char *word);
-int spell_remove_word(SpellChecker *sc, const char *word);
-const char *spell_get_encoding(SpellChecker *sc);
-int spell_is_available(void);
+    SpellChecker *spell_new(const char *aff_path, const char *dic_path);
+    void spell_free(SpellChecker *sc);
+    int spell_check(SpellChecker *sc, const char *word);
+    void spell_cache_clear(SpellChecker *sc);
+    char **spell_suggest(SpellChecker *sc, const char *word, int *n_suggestions);
+    void spell_free_suggestions(SpellChecker *sc, char **suggestions, int n_suggestions);
+    int spell_add_word(SpellChecker *sc, const char *word);
+    int spell_remove_word(SpellChecker *sc, const char *word);
+    const char *spell_get_encoding(SpellChecker *sc);
+    char **spell_list_dictionaries(const char *dir_path, int *n_dicts);
+    void spell_free_dictionaries(char **dicts, int n_dicts);
+    int spell_is_available(void);
 
-char **spell_list_dictionaries(const char *search_path, int *n_dicts);
-void spell_free_dictionaries(char **dicts, int n_dicts);
+    int spell_stem(SpellChecker *sc, const char *word, char ***out_list);
+    int spell_generate(SpellChecker *sc, const char *word, const char *example, char ***out_list);
+    void spell_free_list(SpellChecker *sc, char **list, int n);
 
-#endif /* SPELL_H */
+#ifdef __cplusplus
+}
+#endif
+
+#endif

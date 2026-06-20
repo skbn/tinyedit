@@ -174,6 +174,27 @@ int utf8_offset(const char *s, int charpos)
     return (int)(p - s); /* past end */
 }
 
+/* Byte offset -> char offset (inverse of utf8_offset) */
+int utf8_charcount(const char *s, int byte_len)
+{
+    int n = 0;
+    int i;
+
+    if (!s || byte_len <= 0)
+        return 0;
+
+    for (i = 0; i < byte_len; i++)
+    {
+        if (!s[i])
+            break;
+
+        if (((unsigned char)s[i] & 0xC0) != 0x80)
+            n++;
+    }
+
+    return n;
+}
+
 uint32_t utf8_next(const char **pp)
 {
     const unsigned char *s = (const unsigned char *)*pp;
