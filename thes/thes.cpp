@@ -418,7 +418,7 @@ extern "C"
                 size_t end = len - 4; /* before ".idx" */
 
                 /* Handle _v2 suffix */
-                if (end > 3 && strcmp(name + end - 3, "_v2") == 0)
+                if (end > start + 3 && memcmp(name + end - 3, "_v2", 3) == 0)
                     end -= 3;
 
                 if (end <= start)

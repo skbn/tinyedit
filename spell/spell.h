@@ -52,6 +52,9 @@ extern "C"
     int spell_generate(SpellChecker *sc, const char *word, const char *example, char ***out_list);
     void spell_free_list(SpellChecker *sc, char **list, int n);
 
+    int spell_load_custom(SpellChecker *sc, const char *path);
+    int spell_add_to_custom_dict(SpellChecker *sc, const char *word, const char *custom_dict_path);
+
 #ifdef __cplusplus
 }
 #endif

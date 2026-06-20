@@ -647,3 +647,94 @@ void spell_free_dictionaries(char **dicts, int n_dicts)
 
     free(dicts);
 }
+
+int spell_load_custom(SpellChecker *sc, const char *path)
+{
+#ifdef HAVE_HUNSPELL
+    FILE *fp;
+    char buf[512];
+    int loaded = 0;
+
+    if (!sc || !sc->handle || !path || !path[0])
+        return -1;
+
+    fp = fopen(path, "rb");
+
+    if (!fp)
+        return -1; /* not fatal -- caller treats as "no custom dict yet" */
+
+    while (fgets(buf, (int)sizeof(buf), fp))
+    {
+        char *p = buf;
+        size_t len;
+
+        /* Skip BOM on the very first line */
+        if (loaded == 0 && (unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF)
+            p += 3;
+
+        /* Strip trailing whitespace (LF, CR, spaces, tabs) */
+        len = strlen(p);
+
+        while (len > 0 && (p[len - 1] == '\n' || p[len - 1] == '\r' || p[len - 1] == ' ' || p[len - 1] == '\t'))
+            p[--len] = '\0';
+
+        /* Skip leading whitespace */
+        while (*p == ' ' || *p == '\t')
+            p++;
+
+        if (*p == '\0' || *p == '#')
+            continue;
+
+        if (Hunspell_add(sc->handle, p) == 0)
+            loaded++;
+    }
+
+    fclose(fp);
+
+    if (loaded > 0)
+        spell_cache_clear(sc);
+
+    return loaded;
+#else
+
+    return -1;
+#endif
+}
+
+int spell_add_to_custom_dict(SpellChecker *sc, const char *word, const char *custom_dict_path)
+{
+#ifdef HAVE_HUNSPELL
+    FILE *fp;
+    int file_ok = 0;
+    int mem_ok;
+
+    if (!sc || !sc->handle || !word || !word[0])
+        return -1;
+
+    if (custom_dict_path && custom_dict_path[0])
+    {
+        fp = fopen(custom_dict_path, "ab");
+
+        if (fp)
+        {
+            if (fprintf(fp, "%s\n", word) > 0)
+                file_ok = 1;
+
+            fclose(fp);
+        }
+    }
+    else
+    {
+        file_ok = 1;
+    }
+
+    mem_ok = (Hunspell_add(sc->handle, word) == 0);
+
+    spell_cache_clear(sc);
+
+    return (file_ok && mem_ok) ? 0 : -1;
+#else
+
+    return -1;
+#endif
+}

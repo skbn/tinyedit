@@ -26,11 +26,14 @@
 
 #ifdef HAVE_HUNSPELL
 #include "../spell/spell.h"
+#include "ui_spell.h"
 #ifdef HAVE_HYPHEN
 #include "../hyph_wrap/hyph_wrap.h"
+#include "ui_hyph.h"
 #endif
 #ifdef HAVE_MYTHES
 #include "../thes/thes.h"
+#include "ui_thes.h"
 #endif
 #endif /* HAVE_HUNSPELL */
 
@@ -769,7 +772,10 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (!dicts || n_dicts == 0)
         {
-            ui_popup_confirm("Error", "No dictionaries found");
+            char err[600];
+
+            snprintf(err, sizeof(err), "No Hunspell dictionaries (*.dic) found in:\n%s", dict_path);
+            ui_popup_confirm("No dictionaries", err);
             break;
         }
 
@@ -821,7 +827,10 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (!dicts || n_dicts == 0)
         {
-            ui_popup_confirm("Error", "No hyphen dictionaries found");
+            char err[600];
+
+            snprintf(err, sizeof(err), "No hyphen dictionaries (hyph_*.dic) found in:\n%s", hyph_path);
+            ui_popup_confirm("No dictionaries", err);
             break;
         }
 
@@ -874,7 +883,10 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (!dicts || n_dicts == 0)
         {
-            ui_popup_confirm("Error", "No thesaurus dictionaries found");
+            char err[600];
+
+            snprintf(err, sizeof(err), "No thesaurus dictionaries (th_*.idx) found in:\n%s", thes_path);
+            ui_popup_confirm("No dictionaries", err);
             break;
         }
 

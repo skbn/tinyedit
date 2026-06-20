@@ -17,6 +17,9 @@
 void ui_spell_draw_panel(TeApp *app);
 
 #ifdef HAVE_HUNSPELL
+
+#define UI_SPELL_ADD_TO_DICT (-2)
+
 void ui_spell_free_app_suggestions(TeApp *app);
 int ui_spell_suggest(TeApp *app, const char *word, char **suggestions, int count);
 int spell_load_from_config(TeApp *app);

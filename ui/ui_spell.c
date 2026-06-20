@@ -16,6 +16,7 @@
 #include <wctype.h>
 #include "te.h"
 #include "wm.h"
+#include "ui_spell.h"
 #include "../core/utf8.h"
 #include "../components/editor.h"
 
@@ -152,20 +153,33 @@ int ui_spell_check_word_simple(TeApp *app, const wchar_t *word, int word_len)
 /* Show spell correction suggestions popup */
 int ui_spell_suggest(TeApp *app, const char *word, char **suggestions, int count)
 {
+    const char **items;
+    char add_label[160];
+    int total;
     int selected;
     int i;
 
-    if (!suggestions || count == 0)
+    total = (count > 0 ? count : 0) + 1; /* always offer "Add" */
+    items = (const char **)malloc((size_t)total * sizeof(char *));
+
+    if (!items)
         return -1;
 
-    /* Show popup with suggestions */
-    selected = ui_popup_list("Spelling Suggestions", (const char **)suggestions, count, 0);
+    for (i = 0; i < count; i++)
+        items[i] = suggestions[i];
+
+    snprintf(add_label, sizeof(add_label), "[+ Add \"%s\" to dictionary]", word ? word : "");
+
+    items[total - 1] = add_label;
+
+    selected = ui_popup_list("Spelling Suggestions", items, total, 0);
+    free(items);
+
+    if (selected == total - 1)
+        return UI_SPELL_ADD_TO_DICT;
 
     if (selected >= 0 && selected < count)
-    {
-        /* User selected a suggestion - return it */
         return selected;
-    }
 
     return -1;
 }
@@ -220,6 +234,9 @@ int spell_load_from_config(TeApp *app)
         app->spell_enabled = 0;
         return 0;
     }
+
+    if (app->cfg.spell_custom_dict[0])
+        spell_load_custom(app->spell_handle, app->cfg.spell_custom_dict);
 
 #ifdef HAVE_MYTHES
     /* Reattach fresh speller to thesaurus so stem fallback resumes working */
@@ -334,19 +351,53 @@ int spell_check_word(TeApp *app)
 
     if (!suggestions || n_suggestions == 0)
     {
+        char prompt[256];
+
         if (suggestions)
             spell_free_suggestions(app->spell_handle, suggestions, n_suggestions);
 
-        te_status(app, "No suggestions for '%s'", word_buf);
+        app->spell_suggestions = NULL;
+        app->spell_suggestion_count = 0;
+
+        snprintf(prompt, sizeof(prompt), "Add \"%s\" to your custom dictionary?", word_buf);
+
+        if (ui_popup_confirm("Unknown word", prompt) == 1)
+        {
+            if (spell_add_to_custom_dict(app->spell_handle, word_buf, app->cfg.spell_custom_dict) == 0)
+            {
+                app->spell_word_status = 1;
+                te_status(app, "Added '%s' to dictionary", word_buf);
+            }
+            else
+            {
+                te_status(app, "Failed to add '%s'", word_buf);
+            }
+        }
+        else
+        {
+            te_status(app, "No suggestions for '%s'", word_buf);
+        }
 
         free(word_buf);
         return 0;
     }
 
-    /* Show suggestions popup */
+    /* Show suggestions popup (with implicit "Add to dictionary" entry) */
     selected = ui_spell_suggest(app, word_buf, suggestions, n_suggestions);
 
-    if (selected >= 0 && selected < n_suggestions)
+    if (selected == UI_SPELL_ADD_TO_DICT)
+    {
+        if (spell_add_to_custom_dict(app->spell_handle, word_buf, app->cfg.spell_custom_dict) == 0)
+        {
+            app->spell_word_status = 1; /* now considered correct */
+            te_status(app, "Added '%s' to dictionary", word_buf);
+        }
+        else
+        {
+            te_status(app, "Failed to add '%s'", word_buf);
+        }
+    }
+    else if (selected >= 0 && selected < n_suggestions)
     {
         /* Convert suggestion UTF-8 back to wchar_t */
         suggestion_wcs = utf8_to_wcs(suggestions[selected], &suggestion_len);
