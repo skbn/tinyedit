@@ -312,12 +312,30 @@ void te_cfg_defaults(TeConfig *cfg)
 
 #ifdef HAVE_HYPHEN
     cfg->hyph_enabled = 0;
+    /* Default hyphen dictionary path (platform-specific) */
+#if defined(PLATFORM_BSD)
+    strncpy(cfg->hyph_dict_path, "/usr/local/share/hyphen", sizeof(cfg->hyph_dict_path) - 1);
+#elif defined(PLATFORM_UNIX)
+    strncpy(cfg->hyph_dict_path, "/usr/share/hyphen", sizeof(cfg->hyph_dict_path) - 1);
+#else
+    cfg->hyph_dict_path[0] = '\0';
+#endif
+    cfg->hyph_dict_path[sizeof(cfg->hyph_dict_path) - 1] = '\0';
     cfg->hyph_dict_name[0] = '\0';
     cfg->hyph_wrap_enabled = 0;
 #endif
 
 #ifdef HAVE_MYTHES
     cfg->thes_enabled = 0;
+    /* Default thesaurus path (platform-specific) */
+#if defined(PLATFORM_BSD)
+    strncpy(cfg->thes_dict_path, "/usr/local/share/mythes", sizeof(cfg->thes_dict_path) - 1);
+#elif defined(PLATFORM_UNIX)
+    strncpy(cfg->thes_dict_path, "/usr/share/mythes", sizeof(cfg->thes_dict_path) - 1);
+#else
+    cfg->thes_dict_path[0] = '\0';
+#endif
+    cfg->thes_dict_path[sizeof(cfg->thes_dict_path) - 1] = '\0';
     cfg->thes_dict_name[0] = '\0';
 #endif
 
