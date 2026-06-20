@@ -30,7 +30,7 @@ endif
 CC ?= cc
 CXX ?= c++
 CFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
-CXXFLAGS += -std=c++14 -O2 -Wall -Wextra
+CXXFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -std=c++14 -O2 -Wall -Wextra
 AR = ar
 
 # Platform define
@@ -265,7 +265,7 @@ $(OBJDIR)/hyph_wrap.o: $(HERE)hyph_wrap/hyph_wrap.c $(HERE)hyph_wrap/hyph_wrap.h
 
 # Thesaurus backend (only if USE_MYTHES=1; C++)
 $(OBJDIR)/thes.o: $(HERE)thes/thes.cpp $(HERE)thes/thes.h | $(OBJDIR)
-	$(CXX) $(CFLAGS) $(CDEFS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(CDEFS) -c $< -o $@
 
 # Application
 TINYEDIT = $(HERE)tinyedit
