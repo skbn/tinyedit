@@ -907,17 +907,98 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
     case FT_CUSTOMDICT:
     {
         char *s = (char *)(base + fld->off);
-        char tmp[TE_CFG_STR_MAX];
+        const char *options[] = {"Select existing", "Create new"};
+        int selected;
 
-        strncpy(tmp, s, sizeof(tmp) - 1);
-        tmp[sizeof(tmp) - 1] = '\0';
+        selected = ui_popup_list("Custom Dictionary", options, 2, -1);
 
-        if (ui_files_pick_dir(fld->label, "", tmp, sizeof(tmp)) == 0)
+        if (selected == 0)
         {
-            strncpy(s, tmp, TE_CFG_STR_MAX - 1);
-            s[TE_CFG_STR_MAX - 1] = '\0';
-        }
+            /* Select existing */
+            char dicts_dir[TE_CFG_STR_MAX];
+            char parent_dir[TE_CFG_STR_MAX];
+            char selected_file[TE_CFG_STR_MAX];
 
+            /* Get custom dicts directory */
+            get_tinyedit_base_dir(parent_dir, sizeof(parent_dir));
+
+#if defined(PLATFORM_WIN32)
+            snprintf(dicts_dir, sizeof(dicts_dir), "%s\\dicts", parent_dir);
+#else
+            snprintf(dicts_dir, sizeof(dicts_dir), "%s/dicts", parent_dir);
+#endif
+
+            /* Create parent directory if it doesn't exist */
+            port_mkdir_one(parent_dir);
+            port_mkdir_one(dicts_dir);
+
+            /* Select file */
+            selected_file[0] = '\0';
+
+            if (ui_files_pick("Select custom dictionary", dicts_dir, selected_file, sizeof(selected_file)) == 0 && selected_file[0])
+            {
+                /* Check if selected file ends with .dic */
+                size_t len = strlen(selected_file);
+
+                if (len >= 4 && strcmp(selected_file + len - 4, ".dic") == 0)
+                {
+                    strncpy(s, selected_file, TE_CFG_STR_MAX - 1);
+                    s[TE_CFG_STR_MAX - 1] = '\0';
+                }
+            }
+        }
+        else if (selected == 1)
+        {
+            /* Create new */
+            char dicts_dir[TE_CFG_STR_MAX];
+            char parent_dir[TE_CFG_STR_MAX];
+            wchar_t dict_name[TE_CFG_STR_MAX];
+            char dict_path[TE_CFG_STR_MAX];
+
+            /* Get custom dicts directory */
+            get_tinyedit_base_dir(parent_dir, sizeof(parent_dir));
+
+#if defined(PLATFORM_WIN32)
+            snprintf(dicts_dir, sizeof(dicts_dir), "%s\\dicts", parent_dir);
+#else
+            snprintf(dicts_dir, sizeof(dicts_dir), "%s/dicts", parent_dir);
+#endif
+
+            /* Create parent directory if it doesn't exist */
+            port_mkdir_one(parent_dir);
+            port_mkdir_one(dicts_dir);
+
+            /* Ask for dictionary name */
+            dict_name[0] = L'\0';
+
+            if (ui_popup_input_wcs("Create custom dictionary", "Dictionary name (without .dic):", dict_name, TE_CFG_STR_MAX) == 0 && dict_name[0])
+            {
+                /* Convert wchar_t to UTF-8 for file path */
+                int wcs_len = (int)wcslen(dict_name);
+                char *utf8_name = wcs_to_utf8(dict_name, wcs_len);
+
+                if (utf8_name)
+                {
+                    /* Build full path */
+                    snprintf(dict_path, sizeof(dict_path), "%s/%s.dic", dicts_dir, utf8_name);
+
+                    /* Create empty file using portable function */
+                    if (port_file_create_empty(dict_path) == 0)
+                    {
+                        strncpy(s, dict_path, TE_CFG_STR_MAX - 1);
+                        s[TE_CFG_STR_MAX - 1] = '\0';
+                    }
+                    else
+                    {
+                        mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Cannot create dictionary", 30);
+                        refresh();
+                        wrapper_getch();
+                    }
+
+                    free(utf8_name);
+                }
+            }
+        }
         break;
     }
 #endif /* HAVE_HUNSPELL */

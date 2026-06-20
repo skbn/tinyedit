@@ -2071,6 +2071,13 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
 
         result = ui_files_open(app);
 
+        if (result != 0)
+        {
+            /* User cancelled or error - close the tab we just created */
+            te_app_close_tab(app, app->tab_count - 1);
+            return result;
+        }
+
         /* Re-apply configuration after loading file */
         ed_set_undo_levels(te_app_get_editor(app), app->cfg.undo_levels);
         ed_set_hard_wrap(te_app_get_editor(app), app->cfg.hard_wrap);

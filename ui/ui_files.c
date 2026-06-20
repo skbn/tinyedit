@@ -90,32 +90,102 @@ static void init_dir_from_start(const char *start_dir, char *dir_input, int dir_
     }
 }
 
-/* Convert char string to wchar_t */
+/* Convert char string (UTF-8) to wchar_t */
 static void char_to_wchar(const char *src, wchar_t *dst, int dst_sz)
 {
-    int i;
+    int i, j;
 
     for (i = 0; i < dst_sz; i++)
         dst[i] = L'\0';
 
-    for (i = 0; src[i] && i < dst_sz - 1; i++)
-        dst[i] = (wchar_t)(unsigned char)src[i];
+    for (i = 0, j = 0; src[i] && j < dst_sz - 1; i++)
+    {
+        unsigned char c = (unsigned char)src[i];
 
-    dst[i] = L'\0';
+        if (c < 0x80)
+        {
+            /* ASCII: 1 byte */
+            dst[j++] = (wchar_t)c;
+        }
+        else if ((c & 0xE0) == 0xC0)
+        {
+            /* 2-byte UTF-8 */
+            if (src[i + 1] && j < dst_sz - 1)
+            {
+                dst[j++] = (wchar_t)(((c & 0x1F) << 6) | (src[i + 1] & 0x3F));
+                i++;
+            }
+        }
+        else if ((c & 0xF0) == 0xE0)
+        {
+            /* 3-byte UTF-8 */
+            if (src[i + 1] && src[i + 2] && j < dst_sz - 1)
+            {
+                dst[j++] = (wchar_t)(((c & 0x0F) << 12) | ((src[i + 1] & 0x3F) << 6) | (src[i + 2] & 0x3F));
+                i += 2;
+            }
+        }
+        else if ((c & 0xF8) == 0xF0)
+        {
+            /* 4-byte UTF-8 */
+            if (src[i + 1] && src[i + 2] && src[i + 3] && j < dst_sz - 1)
+            {
+                dst[j++] = (wchar_t)(((c & 0x07) << 18) | ((src[i + 1] & 0x3F) << 12) | ((src[i + 2] & 0x3F) << 6) | (src[i + 3] & 0x3F));
+                i += 3;
+            }
+        }
+    }
+
+    dst[j] = L'\0';
 }
 
-/* Convert wchar_t string to char (ASCII only) */
+/* Convert wchar_t string to char (UTF-8) */
 static void wchar_to_char(const wchar_t *src, char *dst, int dst_sz)
 {
-    int i;
+    int i, j;
 
     for (i = 0; i < dst_sz; i++)
         dst[i] = '\0';
 
-    for (i = 0; src[i] && i < dst_sz - 1; i++)
-        dst[i] = (src[i] < 0x80) ? (char)src[i] : '?';
+    for (i = 0, j = 0; src[i] && j < dst_sz - 1; i++)
+    {
+        wchar_t wc = src[i];
 
-    dst[i] = '\0';
+        if (wc < 0x80)
+        {
+            /* ASCII: 1 byte */
+            dst[j++] = (char)wc;
+        }
+        else if (wc < 0x800)
+        {
+            /* 2-byte UTF-8 */
+            if (j + 2 >= dst_sz - 1)
+                break;
+            dst[j++] = (char)(0xC0 | (wc >> 6));
+            dst[j++] = (char)(0x80 | (wc & 0x3F));
+        }
+        else if (wc < 0x10000)
+        {
+            /* 3-byte UTF-8 */
+            if (j + 3 >= dst_sz - 1)
+                break;
+            dst[j++] = (char)(0xE0 | (wc >> 12));
+            dst[j++] = (char)(0x80 | ((wc >> 6) & 0x3F));
+            dst[j++] = (char)(0x80 | (wc & 0x3F));
+        }
+        else
+        {
+            /* 4-byte UTF-8 */
+            if (j + 4 >= dst_sz - 1)
+                break;
+            dst[j++] = (char)(0xF0 | (wc >> 18));
+            dst[j++] = (char)(0x80 | ((wc >> 12) & 0x3F));
+            dst[j++] = (char)(0x80 | ((wc >> 6) & 0x3F));
+            dst[j++] = (char)(0x80 | (wc & 0x3F));
+        }
+    }
+
+    dst[j] = '\0';
 }
 
 /* Draw file list with selection highlighting */

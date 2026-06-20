@@ -117,16 +117,20 @@ ifeq ($(USE_MYTHES),1)
 
   ifneq ($(MYTHES_PKG_CONFIG_LIBS),)
     CFLAGS += $(MYTHES_PKG_CONFIG_CFLAGS)
+    CXXFLAGS += $(MYTHES_PKG_CONFIG_CFLAGS)
     MYTHES_LIB = $(MYTHES_PKG_CONFIG_LIBS)
   else
     ifeq ($(OS),NetBSD)
       CFLAGS += -I/usr/pkg/include
+      CXXFLAGS += -I/usr/pkg/include
       MYTHES_LIB = -L/usr/pkg/lib -Wl,-rpath,/usr/pkg/lib -lmythes-1.2
     else ifeq ($(OS),FreeBSD)
       CFLAGS += -I/usr/local/include
+      CXXFLAGS += -I/usr/local/include
       MYTHES_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lmythes-1.2
     else ifeq ($(OS),OpenBSD)
       CFLAGS += -I/usr/local/include
+      CXXFLAGS += -I/usr/local/include
       MYTHES_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lmythes-1.2
     else
       MYTHES_LIB = -lmythes-1.2
