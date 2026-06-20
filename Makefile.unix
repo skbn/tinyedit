@@ -108,6 +108,7 @@ ifeq ($(USE_MYTHES),1)
     $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
   endif
   CFLAGS += -DHAVE_MYTHES -I$(HERE)thes
+  CDEFS += -DHAVE_MYTHES
 
   MYTHES_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags mythes 2>/dev/null)
   MYTHES_PKG_CONFIG_LIBS   := $(shell pkg-config --libs   mythes 2>/dev/null)

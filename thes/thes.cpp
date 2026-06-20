@@ -388,6 +388,7 @@ extern "C"
     char **thes_list_dictionaries(const char *dir_path, int *n_dicts)
     {
 #ifdef HAVE_MYTHES
+
         char **result = NULL;
         int count = 0;
         int capacity = 0;
@@ -412,7 +413,7 @@ extern "C"
             /* Look for *.idx files (any name ending in .idx) */
             if (len > 4 && strcmp(name + len - 4, ".idx") == 0)
             {
-                /* Extract dictionary name: th_es_ES_v2.idx -> th_es_ES_v2 */
+                /* Extract dictionary name */
                 char *dict_name;
                 size_t start = 0;     /* start from beginning */
                 size_t end = len - 4; /* before ".idx" */
