@@ -62,9 +62,9 @@ int ui_thes_load_from_config(UI_APP_T *app)
     if (!base_path[0] || !base_name[0])
         return 0;
 
-    /* Standard naming: th_<name>_v2.{idx,dat} */
-    snprintf(idx_path, sizeof(idx_path), "%.220s/th_%.40s_v2.idx", base_path, base_name);
-    snprintf(dat_path, sizeof(dat_path), "%.220s/th_%.40s_v2.dat", base_path, base_name);
+    /* Use dictionary name as-is (user may include th_ prefix and _v2 suffix) */
+    snprintf(idx_path, sizeof(idx_path), "%.220s/%.40s.idx", base_path, base_name);
+    snprintf(dat_path, sizeof(dat_path), "%.220s/%.40s.dat", base_path, base_name);
 
     UI_APP_THES_HANDLE(app) = thes_new(idx_path, dat_path);
 

@@ -37,8 +37,8 @@ int hyph_load_from_config(TeApp *app)
     if (!app->cfg.hyph_dict_path[0] || !app->cfg.hyph_dict_name[0])
         return 0;
 
-    /* Standard naming: hyph_<lang>.dic  (LibreOffice convention) */
-    snprintf(path, sizeof(path), "%.220s/hyph_%.40s.dic", app->cfg.hyph_dict_path, app->cfg.hyph_dict_name);
+    /* Use dictionary name as-is (user may include hyph_ prefix) */
+    snprintf(path, sizeof(path), "%.220s/%.40s.dic", app->cfg.hyph_dict_path, app->cfg.hyph_dict_name);
 
     h = hyph_new(path);
 

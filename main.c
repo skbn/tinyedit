@@ -26,7 +26,12 @@ const char __attribute__((used)) binkd_stack_size[] = "$STACK:65536";
 #include "core/portable.h"
 
 #ifdef PLATFORM_AMIGA
+#include <proto/exec.h>
 #include "ncursesw_amiga.h"
+#ifdef AMIGA_TTF_TE
+extern void amiga_clear_ttf_fallbacks(void);
+extern void amiga_add_ttf_fallback(const char *path, int size);
+#endif
 #elif defined(PLATFORM_WIN32)
 #include "ncursesw_win32.h"
 #else
@@ -57,6 +62,7 @@ static char *load_file(const char *path, TeApp *app)
     FILE *fp;
     long size;
     char *buf;
+    char *new_bytes;
     size_t r;
 
     fp = fopen(path, "rb");
@@ -74,7 +80,7 @@ static char *load_file(const char *path, TeApp *app)
         return NULL;
     }
 
-    if (size > SIZE_MAX - 1)
+    if ((size_t)size > SIZE_MAX - 1)
     {
         fclose(fp);
         return NULL;
@@ -95,7 +101,7 @@ static char *load_file(const char *path, TeApp *app)
     buf[r] = '\0';
 
     /* Keep raw bytes for live charset re-decode */
-    char *new_bytes = (char *)malloc(r + 1);
+    new_bytes = (char *)malloc(r + 1);
 
     if (new_bytes)
     {
@@ -154,7 +160,6 @@ int main(int argc, char **argv)
     const char *home;
     char dir_path[512];
     const char *last_sep;
-    int fi;
 
     setlocale(LC_ALL, "");
 
@@ -221,6 +226,8 @@ int main(int argc, char **argv)
 
 #ifdef AMIGA_TTF_TE
         /* Pass any TTF_FALLBACK<N> entries to the engine. Empty slots are skipped by amiga_add_ttf_fallback() */
+        int fi;
+
         amiga_clear_ttf_fallbacks();
 
         for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)

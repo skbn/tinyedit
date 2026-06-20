@@ -44,6 +44,7 @@ USE_HUNSPELL ?= 0
 
 ifeq ($(USE_HUNSPELL),1)
   CFLAGS += -DHAVE_HUNSPELL -I$(HERE)spell
+  CDEFS += -DHAVE_HUNSPELL
 
   # Use pkg-config if available (most reliable, especially for NetBSD)
   HUNSPELL_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags hunspell 2>/dev/null)
@@ -77,6 +78,7 @@ ifeq ($(USE_HYPHEN),1)
     $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
   endif
   CFLAGS += -DHAVE_HYPHEN -I$(HERE)hyph_wrap
+  CDEFS += -DHAVE_HYPHEN
 
   HYPHEN_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags hyphen 2>/dev/null)
   HYPHEN_PKG_CONFIG_LIBS   := $(shell pkg-config --libs   hyphen 2>/dev/null)
