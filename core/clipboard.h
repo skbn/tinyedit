@@ -20,7 +20,7 @@
 extern struct Library *IFFParseBase;
 #endif
 
-char *clipboard_paste();
+char *clipboard_paste(void);
 int clipboard_copy(const char *utf8);
 
 /* Returns 1 if external clipboard should be used, 0 for internal only */

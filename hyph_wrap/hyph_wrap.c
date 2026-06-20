@@ -369,12 +369,12 @@ char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
         const char *name = entry->d_name;
         size_t len = strlen(name);
 
-        /* Look for hyph_*.dic files */
-        if (len > 9 && strncmp(name, "hyph_", 5) == 0 && strcmp(name + len - 4, ".dic") == 0)
+        /* Look for *.dic files (any name ending in .dic) */
+        if (len > 4 && strcmp(name + len - 4, ".dic") == 0)
         {
             /* Extract dictionary name */
             char *dict_name;
-            size_t start = 5;     /* after "hyph_" */
+            size_t start = 0;     /* start from beginning */
             size_t end = len - 4; /* before ".dic" */
 
             if (end <= start)

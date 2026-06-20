@@ -114,7 +114,7 @@ struct Ed
 
 #define INIT_ALLOC 256
 
-Ed *ed_new();
+Ed *ed_new(void);
 void ed_free(Ed *ed);
 void ed_load(Ed *ed, const char *utf8_text);                /* UTF-8 in */
 char *ed_to_string(const Ed *ed);                           /* UTF-8 out (caller frees) */

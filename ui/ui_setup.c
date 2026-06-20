@@ -772,10 +772,7 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (!dicts || n_dicts == 0)
         {
-            char err[600];
-
-            snprintf(err, sizeof(err), "No Hunspell dictionaries (*.dic) found in:\n%s", dict_path);
-            ui_popup_confirm("No dictionaries", err);
+            ui_popup_confirm("No dictionaries", "No Hunspell dictionaries found");
             break;
         }
 
@@ -827,10 +824,7 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (!dicts || n_dicts == 0)
         {
-            char err[600];
-
-            snprintf(err, sizeof(err), "No hyphen dictionaries (hyph_*.dic) found in:\n%s", hyph_path);
-            ui_popup_confirm("No dictionaries", err);
+            ui_popup_confirm("No dictionaries", "No hyphen dictionaries found");
             break;
         }
 
@@ -883,10 +877,7 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
         if (!dicts || n_dicts == 0)
         {
-            char err[600];
-
-            snprintf(err, sizeof(err), "No thesaurus dictionaries (th_*.idx) found in:\n%s", thes_path);
-            ui_popup_confirm("No dictionaries", err);
+            ui_popup_confirm("No dictionaries", "No thesaurus dictionaries found");
             break;
         }
 

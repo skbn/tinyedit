@@ -409,17 +409,13 @@ extern "C"
             const char *name = entry->d_name;
             size_t len = strlen(name);
 
-            /* Look for th_*.idx files (MyThes convention) */
-            if (len > 8 && strncmp(name, "th_", 3) == 0 && strcmp(name + len - 4, ".idx") == 0)
+            /* Look for *.idx files (any name ending in .idx) */
+            if (len > 4 && strcmp(name + len - 4, ".idx") == 0)
             {
-                /* Extract dictionary name: th_es_ES_v2.idx -> es_ES */
+                /* Extract dictionary name: th_es_ES_v2.idx -> th_es_ES_v2 */
                 char *dict_name;
-                size_t start = 3;     /* after "th_" */
+                size_t start = 0;     /* start from beginning */
                 size_t end = len - 4; /* before ".idx" */
-
-                /* Handle _v2 suffix */
-                if (end > start + 3 && memcmp(name + end - 3, "_v2", 3) == 0)
-                    end -= 3;
 
                 if (end <= start)
                     continue;

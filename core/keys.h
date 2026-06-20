@@ -31,6 +31,6 @@
 int wrapper_read_key(wint_t *out_wch);
 
 /* Wrapper around wrapper_read_key returning int like getch() */
-int wrapper_getch();
+int wrapper_getch(void);
 
 #endif /* CORE_KEYS_H */
