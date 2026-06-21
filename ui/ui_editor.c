@@ -101,8 +101,12 @@ static const char *HELP_LINES[] =
         "    Alt+S            Toggle spell/translate panel",
         "    Alt+H            Toggle spell checker",
         "    Alt+P            Spell check word under cursor",
+#ifdef HAVE_MYTHES
         "    Alt+A            Thesaurus lookup for word under cursor",
+#endif
+#ifdef HAVE_HYPHEN
         "    Alt+E            Toggle hyphen wrap",
+#endif
         "",
         "  Other:",
         "    F4 / Alt+T       Setup / configuration",

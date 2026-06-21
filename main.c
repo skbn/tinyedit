@@ -308,6 +308,18 @@ int main(int argc, char **argv)
     define_key("\033A", KEY_ALT('A'));
     define_key("\033e", KEY_ALT('E'));
     define_key("\033E", KEY_ALT('E'));
+    define_key("\033i", KEY_ALT('I'));
+    define_key("\033I", KEY_ALT('I'));
+    define_key("\033j", KEY_ALT('J'));
+    define_key("\033J", KEY_ALT('J'));
+    define_key("\033k", KEY_ALT('K'));
+    define_key("\033K", KEY_ALT('K'));
+    define_key("\033l", KEY_ALT('L'));
+    define_key("\033L", KEY_ALT('L'));
+    define_key("\033w", KEY_ALT('W'));
+    define_key("\033W", KEY_ALT('W'));
+    define_key("\033u", KEY_ALT('U'));
+    define_key("\033U", KEY_ALT('U'));
 #endif
 
     curs_set(1);

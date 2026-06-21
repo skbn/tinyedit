@@ -20,6 +20,10 @@
 #include "../core/utf8.h"
 #include "../core/charset.h"
 
+#ifdef HAVE_HYPHEN
+#include "../hyph_wrap/hyph_wrap.h"
+#endif
+
 /* Convert entire line to wchar_t string (caller frees) */
 wchar_t *line_to_wcs(EdLine *ln)
 {
@@ -716,8 +720,13 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
                     if (uw)
                     {
                         int uw_bytes = (int)strlen(uw);
-                        int hp[16];
-                        int hn = 16;
+#ifdef HAVE_HYPHEN
+                        int hp[HYPH_MAX_BREAKS];
+                        int hn = HYPH_MAX_BREAKS;
+#else
+                        int hp[64];
+                        int hn = 64;
+#endif
 
                         if (hyph(hyph_data, uw, uw_bytes, hp, &hn) && hn > 0)
                         {
@@ -836,6 +845,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         if (!snapshot_after)
         {
             free(snapshot_before);
+            ed->undo_snapshot_mode = 0;
 
             return -1;
         }
@@ -847,6 +857,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         {
             free(snapshot_before);
             free(snapshot_after);
+            ed->undo_snapshot_mode = 0;
 
             return -1;
         }
@@ -855,6 +866,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         {
             free(snapshot_before);
             free(snapshot_after);
+            ed->undo_snapshot_mode = 0;
 
             return -1;
         }
@@ -874,6 +886,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
             {
                 free(snapshot_before);
                 free(snapshot_after);
+                ed->undo_snapshot_mode = 0;
 
                 return -1;
             }
