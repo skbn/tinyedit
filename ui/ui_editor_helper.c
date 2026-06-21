@@ -58,10 +58,6 @@ static int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *o
 
 /* Static variables that need to be accessible */
 static int s_soft_vtop = 0;
-static int s_soft_desired_vcol = -1;
-
-/* Forward declarations for static functions */
-static int ui_paste_char_width(wchar_t ch);
 
 /* Visual width in display columns: wide chars=2, narrow=1, control=1 */
 int wcs_vwidth(const wchar_t *s, int n)
@@ -251,8 +247,8 @@ int replace_current(TeApp *app)
     int nlen;
     int rlen;
     int i;
-    int *new_rows;
-    int *new_cols;
+    int *new_rows = NULL;
+    int *new_cols = NULL;
     int new_match_count;
 
     if (app->search.last_replace[0] != L'\0')
@@ -788,9 +784,9 @@ int charset_select(TeApp *app)
         /* If view charset changed and we have a file, reload from disk */
         if (view_changed && te_app_get_filename(app)[0])
         {
-            FILE *fp;
+            FILE *fp = NULL;
             long size;
-            char *buf;
+            char *buf = NULL;
             size_t r;
 
             fp = fopen(te_app_get_filename(app), "rb");

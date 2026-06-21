@@ -30,7 +30,7 @@
 
 TeApp *te_app_new(void)
 {
-    TeApp *app;
+    TeApp *app = NULL;
 
     app = (TeApp *)calloc(1, sizeof(TeApp));
 
@@ -247,7 +247,7 @@ void te_app_switch_tab(TeApp *app, int index)
 /* Set raw bytes in active tab */
 void te_app_set_raw_bytes(TeApp *app, char *ptr, int len)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_app_get_active_tab(app);
 
@@ -261,7 +261,7 @@ void te_app_set_raw_bytes(TeApp *app, char *ptr, int len)
 /* Helper functions to access active tab data */
 Ed *te_app_get_editor(TeApp *app)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_app_get_active_tab(app);
 
@@ -273,7 +273,7 @@ Ed *te_app_get_editor(TeApp *app)
 
 const char *te_app_get_filename(TeApp *app)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_app_get_active_tab(app);
 
@@ -285,7 +285,7 @@ const char *te_app_get_filename(TeApp *app)
 
 char *te_app_get_raw_bytes(TeApp *app)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_app_get_active_tab(app);
 
@@ -297,7 +297,7 @@ char *te_app_get_raw_bytes(TeApp *app)
 
 int te_app_get_raw_len(TeApp *app)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_app_get_active_tab(app);
 
@@ -309,7 +309,7 @@ int te_app_get_raw_len(TeApp *app)
 
 int te_app_get_show_line_numbers(TeApp *app)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_app_get_active_tab(app);
 
@@ -321,7 +321,7 @@ int te_app_get_show_line_numbers(TeApp *app)
 
 void te_app_set_filename(TeApp *app, const char *val)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_app_get_active_tab(app);
 
@@ -334,7 +334,7 @@ void te_app_set_filename(TeApp *app, const char *val)
 
 void te_app_clear_filename(TeApp *app)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_app_get_active_tab(app);
 
@@ -346,7 +346,7 @@ void te_app_clear_filename(TeApp *app)
 
 void te_app_set_show_line_numbers(TeApp *app, int val)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     app->show_line_numbers = val;
 
@@ -429,12 +429,12 @@ void te_draw_titlebar(TeApp *app)
     int x;
     char left[128], right[64];
     EdInfo info;
-    const char *fn;
+    const char *fn = NULL;
     int mod = 0;
     int prefix_len, suffix_len, max_fn_len, fn_len;
     char truncated[128];
     int avail;
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     attron(COLOR_PAIR(COL_TITLEBAR));
 
@@ -530,7 +530,7 @@ void te_draw_statusbar(TeApp *app)
     int msg_len, rzone_len, rzone_start, max_left;
     char hint[64];
     char charset_info[128];
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     y = LINES - 1;
     attron(COLOR_PAIR(COL_STATUS));
@@ -556,8 +556,8 @@ void te_draw_statusbar(TeApp *app)
 
         if (tab)
         {
-            const char *fn;
-            const char *last_slash;
+            const char *fn = NULL;
+            const char *last_slash = NULL;
 
             if (tab->filename[0])
             {
@@ -633,7 +633,7 @@ const char *te_wcs2u8(const wchar_t *wcs)
 {
     static char pool[8][512];
     static int slot = 0;
-    char *out;
+    char *out = NULL;
     int n, i;
 
     if (!wcs)

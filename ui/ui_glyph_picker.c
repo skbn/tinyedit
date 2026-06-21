@@ -220,6 +220,7 @@ static int ui_block_pick(int initial)
         sel = 0;
 
     ui_popup_center(want_h, want_w, &y, &x, &h, &w);
+
     visible = h - 4;
 
     if (visible < 1)
@@ -237,12 +238,13 @@ static int ui_block_pick(int initial)
             int row;
 
             standend();
+
             ui_draw_popup_frame(y, x, h, w, "Select Unicode Block");
 
             for (row = 0; row < visible; row++)
             {
                 int idx = top + row;
-                const char *label;
+                const char *label = NULL;
                 int j;
 
                 if (idx > NUM_BLOCKS)
@@ -397,18 +399,21 @@ long ui_glyph_pick(void)
             unsigned long sel_cp;
             int sel_block = 0;
             char info[160];
-            const char *filter_label;
+            const char *filter_label = NULL;
 
             standend();
+
             ui_draw_popup_frame(popup_y, popup_x, popup_h, popup_w, "Unicode Glyph Selector");
 
             attron(COLOR_PAIR(COL_POPUP));
+
             sel_cp = glyph_at(sel, &sel_block);
 
             if (hex_len > 0)
                 snprintf(info, sizeof(info), "Code: U+%s_   (type hex to jump)", hex_buf);
             else
                 snprintf(info, sizeof(info), "Code: U+%04lX   (type hex to jump)", sel_cp);
+
             mvaddnstr(popup_y + 1, popup_x + 2, info, popup_w - 4);
 
             filter_label = (s_filter < 0) ? "[All blocks]" : s_blocks[s_filter].name;
@@ -441,10 +446,12 @@ long ui_glyph_pick(void)
                         attron(COLOR_PAIR(COL_POPUP));
                         mvaddnstr(line_y, cell_x, "   ", CELL_W);
                         attroff(COLOR_PAIR(COL_POPUP));
+
                         continue;
                     }
 
                     cp = glyph_at(flat, NULL);
+
                     wcs[0] = (wchar_t)cp;
                     wcs[1] = L'\0';
 

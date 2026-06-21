@@ -30,7 +30,7 @@
 /* Draw spell/translate panel */
 void ui_spell_draw_panel(TeApp *app)
 {
-    TeWindow *win;
+    TeWindow *win = NULL;
     int x, y;
 
     if (!app)
@@ -65,7 +65,7 @@ void ui_spell_draw_panel(TeApp *app)
     {
         if (app->spell_current_word[0])
         {
-            const char *word_utf8;
+            const char *word_utf8 = NULL;
 
             mvaddnwstr(win->y + 1, win->x + 1, L"Current word: ", 14);
             attron(COLOR_PAIR(COL_SPELL_CURRENT));
@@ -129,7 +129,7 @@ void ui_spell_free_app_suggestions(TeApp *app)
 /* Simple word check for highlighting - returns 1 if incorrect, 0 if correct */
 int ui_spell_check_word_simple(TeApp *app, const wchar_t *word, int word_len)
 {
-    char *word_utf8;
+    char *word_utf8 = NULL;
     int result;
 
     if (!app || !app->spell_handle || !app->spell_active)
@@ -153,7 +153,7 @@ int ui_spell_check_word_simple(TeApp *app, const wchar_t *word, int word_len)
 /* Show spell correction suggestions popup */
 int ui_spell_suggest(TeApp *app, const char *word, char **suggestions, int count)
 {
-    const char **items;
+    const char **items = NULL;
     char add_label[160];
     int total;
     int selected;
@@ -252,19 +252,19 @@ int spell_load_from_config(TeApp *app)
 /* Check and correct word under cursor */
 int spell_check_word(TeApp *app)
 {
-    Ed *ed;
+    Ed *ed = NULL;
     EdInfo info;
-    const wchar_t *line;
+    const wchar_t *line = NULL;
     int line_len;
     int word_start, word_end;
     int i;
     wchar_t word_wbuf[256];
-    char *word_buf;
-    char **suggestions;
+    char *word_buf = NULL;
+    char **suggestions = NULL;
     int n_suggestions;
     int selected;
     int word_len;
-    wchar_t *suggestion_wcs;
+    wchar_t *suggestion_wcs = NULL;
     int suggestion_len;
 
     if (!app || !app->spell_active || !app->spell_handle)

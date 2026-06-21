@@ -72,7 +72,7 @@ int port_file_create_empty(const char *p)
 
     return -1;
 #else
-    FILE *f;
+    FILE *f = NULL;
 
     f = fopen(p, "w");
 

@@ -1508,8 +1508,8 @@ chtype mvwinch(WINDOW *w, int y, int x)
 /* UTF-8 aware string output: decode multibyte -> codepoint -> Latin-1 cell */
 int waddnstr(WINDOW *w, const char *s, int n)
 {
-    const char *p;
-    const char *end;
+    const char *p = NULL;
+    const char *end = NULL;
 
     if (!w || !s)
         return ERR;
@@ -1520,9 +1520,9 @@ int waddnstr(WINDOW *w, const char *s, int n)
     /* When TTF is active, use waddnwstr() which supports full Unicode */
     if (s_use_ttf)
     {
-        wchar_t *wcs;
+        wchar_t *wcs = NULL;
         int wcs_len;
-        char *temp_buf;
+        char *temp_buf = NULL;
 
         if (!w || !s)
             return ERR;
@@ -2062,7 +2062,7 @@ int amiga_set_ttf_encoding(int use_utf8)
 /* Switch font (call after toggling ANSI mode). use_ansi: 1=ANSI font, 0=regular font */
 int amiga_change_font(int use_ansi)
 {
-    struct TextFont *target_font;
+    struct TextFont *target_font = NULL;
 
     /* Track ANSI mode regardless of font backend */
     s_ansi_mode = use_ansi ? 1 : 0;
@@ -2161,7 +2161,7 @@ int amiga_reload_ttf(const char *font_path, int new_size)
     /* Resize the physical window to keep the same COLS x LINES with new font */
     if (ami_win)
     {
-        struct Screen *scr;
+        struct Screen *scr = NULL;
         int bw = ami_win->BorderLeft + ami_win->BorderRight;
         int bh = ami_win->BorderTop + ami_win->BorderBottom;
         int want_w = COLS * fw + bw;
@@ -2378,7 +2378,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
 int wgetch(WINDOW *w)
 {
-    struct IntuiMessage *imsg;
+    struct IntuiMessage *imsg = NULL;
     ULONG cls;
     UWORD code, qual;
     APTR iaddr;

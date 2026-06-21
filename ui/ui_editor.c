@@ -28,6 +28,7 @@
 #include "ui_editor_helper.h"
 #include "ui_setup.h"
 #include "ui_spell.h"
+#include "ui_glyph_picker.h"
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
 #include "ui_hyph.h"
@@ -247,7 +248,7 @@ static int line_subrow_of_col(const wchar_t *l, int len, int width, int col)
 void soft_reset_viewport_to_cursor(TeApp *app, int width)
 {
     EdInfo info;
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
 
     ed_get_info(te_app_get_editor(app), &info);
@@ -295,7 +296,7 @@ static void walk_vrows_forward(Ed *ed, int width, int from_line, int from_sub, i
         /* clamp to last line's last sub-row */
         if (info.line_count > 0)
         {
-            const wchar_t *l;
+            const wchar_t *l = NULL;
             int len, n;
 
             line = info.line_count - 1;
@@ -376,7 +377,7 @@ static void walk_vrows_backward(Ed *ed, int width, int from_line, int from_sub, 
 static int soft_cursor_vcol(Ed *ed, int width)
 {
     EdInfo info;
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
     int sub;
     int seg_start = 0, seg_end = 0;
@@ -409,7 +410,7 @@ static int soft_vrows_between(Ed *ed, int width, int a_line, int a_sub, int b_li
 {
     int i;
     int delta = 0;
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
     int n;
 
@@ -462,7 +463,7 @@ static int soft_cursor_screen_row(TeApp *app, int width)
     EdInfo info;
     Ed *ed = te_app_get_editor(app);
     int sub_cursor;
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
 
     ed_get_info(ed, &info);
@@ -481,7 +482,7 @@ static void soft_ensure_visible(TeApp *app, int width, int body_rows)
     Ed *ed = te_app_get_editor(app);
     int sub_cursor;
     int screen_row;
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
     const wchar_t *tl;
     int tlen;
@@ -542,7 +543,7 @@ static void soft_ensure_visible(TeApp *app, int width, int body_rows)
 /* Position the cursor on (line, sub) with desired visual column */
 static void soft_set_cursor_at(Ed *ed, int width, int line, int sub, int desired_vcol)
 {
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
     int seg_start = 0, seg_end = 0;
     int v, i, col;
@@ -594,7 +595,7 @@ static void soft_move_vrows(TeApp *app, int width, int delta)
 {
     EdInfo info;
     Ed *ed = te_app_get_editor(app);
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
     int sub_cursor;
     int new_line, new_sub;
@@ -640,7 +641,7 @@ static void soft_move_home_visual(TeApp *app, int width)
 {
     EdInfo info;
     Ed *ed = te_app_get_editor(app);
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
     int sub_cursor;
     int seg_start = 0, seg_end = 0;
@@ -661,7 +662,7 @@ static void soft_move_end_visual(TeApp *app, int width)
 {
     EdInfo info;
     Ed *ed = te_app_get_editor(app);
-    const wchar_t *l;
+    const wchar_t *l = NULL;
     int len;
     int sub_cursor;
     int seg_start = 0, seg_end = 0;
@@ -740,15 +741,15 @@ static int paste_char_width(wchar_t c)
 
 char *wrap_paste_text(TeApp *app, const char *utf8, int col)
 {
-    wchar_t *w;
+    wchar_t *w = NULL;
     int wlen = 0;
     int i;
     int line_start = 0;
     int last_space = -1;
     int col_pos = 0;
     int out_cap, out_len = 0;
-    wchar_t *out;
-    char *result;
+    wchar_t *out = NULL;
+    char *result = NULL;
     int use_hyphen = 0;
 
 #ifdef HAVE_HYPHEN
@@ -974,7 +975,7 @@ static int lineno_width(int line_count)
 static void draw_body(TeApp *app)
 {
     EdInfo info;
-    TeWindow *win;
+    TeWindow *win = NULL;
     int body_top = 1;
     int body_bot = LINES - 2;
     int body_rows;
@@ -986,7 +987,6 @@ static void draw_body(TeApp *app)
     int b_c1 = 0;
     int b_r2 = -1;
     int b_c2 = 0;
-    int screen_row;
     int ln_width = 0;
     int ln_offset = 0;
     int show_lnum = te_app_get_show_line_numbers(app);
@@ -1040,8 +1040,6 @@ static void draw_body(TeApp *app)
     }
 
     attron(COLOR_PAIR(COL_NORMAL));
-
-    screen_row = body_top;
 
     /* SOFT-WRAP: one logical line spans several screen rows */
     if (soft)
@@ -1259,7 +1257,7 @@ static void draw_body(TeApp *app)
         {
             int line_idx = info.top + i;
             int line_len;
-            const wchar_t *wl;
+            const wchar_t *wl = NULL;
 
             move(offset_y + i, offset_x);
             clrtoeol();
@@ -1359,7 +1357,7 @@ static void draw_body(TeApp *app)
             /* Block-selection overlay (logical-span) */
             if (b_r1 >= 0 && line_idx >= b_r1 && line_idx <= b_r2)
             {
-                const wchar_t *wcs;
+                const wchar_t *wcs = NULL;
                 int hs, he;
 
                 hs = (line_idx == b_r1) ? b_c1 : 0;
@@ -1397,8 +1395,7 @@ static void draw_body(TeApp *app)
 static void position_cursor(TeApp *app)
 {
     EdInfo info;
-    TeWindow *win;
-    int body_top = 1;
+    TeWindow *win = NULL;
     int body_rows = LINES - 2;
     int width = COLS;
     int offset_x = 0;
@@ -1412,7 +1409,6 @@ static void position_cursor(TeApp *app)
 
     if (win && win->visible)
     {
-        body_top = win->y;
         body_rows = win->h;
         width = win->w;
         offset_x = win->x;
@@ -1498,7 +1494,7 @@ static char *collect_bracketed_paste(void)
 {
     wchar_t *wbuf = NULL;
     int wlen = 0, wcap = 0;
-    char *out;
+    char *out = NULL;
 
     for (;;)
     {
@@ -1552,7 +1548,7 @@ static char *collect_rapid_paste(wint_t first_wch)
 {
     wchar_t *wbuf = NULL;
     int wlen = 0, wcap = 0;
-    char *out;
+    char *out = NULL;
     const int MAX_CHARS = 10; /* 10+ chars = paste, not typing */
 
     /* Check for more characters (rapid paste detection) */
@@ -1650,14 +1646,13 @@ static char *collect_rapid_paste(wint_t first_wch)
 /* Save file */
 static int do_save(TeApp *app)
 {
-    char *utf8;
-    FILE *fp;
+    char *utf8 = NULL;
+    FILE *fp = NULL;
     int r = 0;
-    char *text;
     char dir_input[1024];
     char name_input[1024];
     char filename_buf[TAB_FILENAME_MAX];
-    const char *last_slash;
+    const char *last_slash = NULL;
 
     /* Extract directory and name from current filename */
     if (te_app_get_filename(app)[0])
@@ -1757,7 +1752,7 @@ static int do_save(TeApp *app)
     if (app->charset_out[0] && strcasecmp(app->charset_out, "UTF-8") != 0 && strcasecmp(app->charset_out, "UTF8") != 0)
     {
         int srclen = (int)strlen(utf8);
-        char *new_bytes;
+        char *new_bytes = NULL;
 
         free(te_app_get_raw_bytes(app));
 
@@ -1838,7 +1833,6 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         {
             /* Normal setup functionality */
             char old_charset[TE_CFG_STR_MAX];
-            int old_hard_wrap = app->hard_wrap;
 
             strncpy(old_charset, app->cfg.charset, sizeof(old_charset) - 1);
             old_charset[sizeof(old_charset) - 1] = '\0';
@@ -2003,7 +1997,7 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     /* Alt+W : close current tab */
     if (ch == KEY_ALT('W'))
     {
-        TeTab *tab;
+        TeTab *tab = NULL;
         EdInfo info;
 
         tab = app->tabs[app->active_tab];
@@ -2062,7 +2056,7 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     /* Ctrl+L : open file (create new tab) */
     if (!is_key && ch == CTRL('L'))
     {
-        TeTab *new_tab;
+        TeTab *new_tab = NULL;
         int result;
 
         new_tab = te_tab_new();
@@ -2092,7 +2086,7 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     /* Ctrl+N : new file (create new tab) */
     if (!is_key && ch == CTRL('N'))
     {
-        TeTab *new_tab;
+        TeTab *new_tab = NULL;
 
         new_tab = te_tab_new();
 
@@ -2544,7 +2538,7 @@ void ui_editor_run(TeApp *app)
     {
         wint_t wch;
         int wrc, ch, is_key, preserve_desired;
-        TeWindow *win;
+        TeWindow *win = NULL;
 
         /* Get editor window for dimensions */
         win = wm_get_window_by_type(app->wm, WIN_EDITOR);

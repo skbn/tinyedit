@@ -310,8 +310,8 @@ int latin1_to_utf8(const char *src, int srclen, char *dst, int dstmax)
 
 int utf8_to_latin1(const char *src, int srclen, char *dst, int dstmax)
 {
-    const char *p;
-    const char *end;
+    const char *p = NULL;
+    const char *end = NULL;
     int di = 0;
 
     if (!src || !dst || dstmax <= 0)
@@ -509,8 +509,8 @@ static int cp_to_utf8(const uint16_t *map, const char *src, int sl, char *dst, i
 
 static int utf8_to_cp(const uint16_t *map, const char *src, int sl, char *dst, int dm)
 {
-    const char *p;
-    const char *end;
+    const char *p = NULL;
+    const char *end = NULL;
     int di = 0, i;
 
     if (!src || !dst || dm <= 0)
@@ -639,8 +639,8 @@ int utf8_to_charset(const char *cs, const char *src, int sl, char *dst, int dm)
 
 wchar_t *utf8_to_wcs(const char *utf8, int *out_len)
 {
-    const char *p;
-    wchar_t *wcs, *tmp;
+    const char *p = NULL;
+    wchar_t *wcs = NULL, *tmp = NULL;
     int cap, len;
     uint32_t cp;
 

@@ -199,7 +199,7 @@ static const SetupField st_fields[] =
 /* Get tinyedit base directory (platform-specific) */
 static void get_tinyedit_base_dir(char *buf, size_t bufsz)
 {
-    char *home;
+    char *home = NULL;
 
 #if defined(PLATFORM_WIN32)
     home = getenv("APPDATA");
@@ -916,13 +916,13 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
     case FT_CUSTOMDICT_EDIT:
     {
         char *s = (char *)(base + fld->off);
-        FILE *fp;
+        FILE *fp = NULL;
         long size;
-        char *buf;
+        char *buf = NULL;
         size_t r;
         char *content = NULL;
         char *new_bytes = NULL;
-        TeTab *tab;
+        TeTab *tab = NULL;
 
         if (s[0] != '\0')
         {

@@ -303,10 +303,10 @@ static FileEnt *load_dir(const char *dir, int *out_n)
     char pattern[UI_FILES_PATH_MAX];
 #elif defined(PLATFORM_AMIGA)
     BPTR lock;
-    struct FileInfoBlock *fib;
+    struct FileInfoBlock *fib = NULL;
 #else
-    DIR *dp;
-    struct dirent *e;
+    DIR *dp = NULL;
+    struct dirent *e = NULL;
     struct stat st;
     char full[UI_FILES_PATH_MAX];
 #endif
@@ -314,7 +314,6 @@ static FileEnt *load_dir(const char *dir, int *out_n)
     int n = 0, cap = 0;
     int i, j;
     int at_root;
-    const char *colon;
 
     *out_n = 0;
 
@@ -1516,9 +1515,9 @@ int ui_files_open(TeApp *app)
 {
     char path[UI_FILES_PATH_MAX];
     char start_dir_buf[UI_FILES_PATH_MAX];
-    FILE *fp;
+    FILE *fp = NULL;
     long size;
-    char *buf;
+    char *buf = NULL;
     size_t r;
     char *content = NULL;
     const char *start_dir = NULL;

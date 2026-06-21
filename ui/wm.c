@@ -23,7 +23,7 @@
 /* Create new window manager */
 TeWindowManager *wm_new(void)
 {
-    TeWindowManager *wm;
+    TeWindowManager *wm = NULL;
 
     wm = (TeWindowManager *)calloc(1, sizeof(TeWindowManager));
 
@@ -70,9 +70,9 @@ void wm_free(TeWindowManager *wm)
 /* Add new window to manager */
 TeWindow *wm_add_window(TeWindowManager *wm, WinType type, int x, int y, int w, int h)
 {
-    TeWindow *win;
+    TeWindow *win = NULL;
     int new_cap;
-    TeWindow *new_windows;
+    TeWindow *new_windows = NULL;
 
     if (!wm)
         return NULL;
@@ -231,7 +231,7 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
 
     for (i = 0; i < wm->win_count; i++)
     {
-        TeWindow *win;
+        TeWindow *win = NULL;
 
         win = &wm->windows[i];
 

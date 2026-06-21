@@ -76,7 +76,7 @@ void ui_tabs_draw_panel(TeApp *app)
     int x, y;
     int max_h;
     int scroll_offset;
-    TeWindow *win;
+    TeWindow *win = NULL;
 
     if (!app)
         return;
@@ -111,9 +111,9 @@ void ui_tabs_draw_panel(TeApp *app)
     for (i = 0; i < app->tab_count; i++)
     {
         int display_index;
-        const char *name;
+        const char *name = NULL;
         char buf[128];
-        TeTab *t;
+        TeTab *t = NULL;
 
         display_index = i - scroll_offset;
 

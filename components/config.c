@@ -394,10 +394,10 @@ void te_cfg_defaults(TeConfig *cfg)
 
 int te_cfg_load(TeConfig *cfg, const char *path)
 {
-    FILE *f;
+    FILE *f = NULL;
     char line[512];
     char word[64];
-    const char *rest;
+    const char *rest = NULL;
 
     te_cfg_defaults(cfg);
 
@@ -863,29 +863,6 @@ static const char *color_name(int c)
         return "brightwhite";
     default:
         return "white";
-    }
-}
-
-static const char *pair_name(int idx)
-{
-    switch (idx)
-    {
-    case COL_NORMAL:
-        return "NORMAL";
-    case COL_STATUS:
-        return "STATUS";
-    case COL_TITLEBAR:
-        return "TITLEBAR";
-    case COL_POPUP:
-        return "POPUP";
-    case COL_POPUP_SEL:
-        return "POPUPSEL";
-    case COL_BORDER:
-        return "BORDER";
-    case COL_SEARCH_MATCH:
-        return "SEARCHMATCH";
-    default:
-        return NULL;
     }
 }
 

@@ -12,6 +12,7 @@
 #include "ui_hyph.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 
@@ -24,7 +25,7 @@ int hyph_load_from_config(TeApp *app)
 {
 #ifdef HAVE_HYPHEN
     char path[512];
-    HyphDict *h;
+    HyphDict *h = NULL;
 
     if (!app)
         return 0;
@@ -99,7 +100,7 @@ static int char_width(wchar_t c)
 int hyph_find_break(TeApp *app, const wchar_t *word, int word_len, int col_limit)
 {
 #ifdef HAVE_HYPHEN
-    char *utf8_word;
+    char *utf8_word = NULL;
     int utf8_len;
     int hyph_pos[16];
     int hyph_count = 0;

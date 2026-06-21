@@ -230,6 +230,11 @@ int ed_wrap_count(const wchar_t *line, int len, int width);
 void ed_clamp(Ed *ed);
 void ed_redo_clear(Ed *ed);
 int ed_undo_open_group(Ed *ed);
+
+/* Helper functions from editor_helper.c */
+wchar_t *line_to_wcs(EdLine *ln);
+wchar_t *line_to_wcs_range(EdLine *ln, int start, int end);
+char *ed_block_to_string(Ed *ed, int r1, int c1, int r2, int c2);
 void ed_prefix_invalidate(Ed *ed);
 void ed_prefix_invalidate_from(Ed *ed, int from_line);
 int ed_undo_stack_make_room(UndoGroup **stack, int *top, int *cap, int max);

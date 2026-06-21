@@ -62,7 +62,7 @@ struct SpellChecker
 static char *ce_strdup(const char *s)
 {
     size_t n;
-    char *r;
+    char *r = NULL;
 
     if (!s)
         return NULL;
@@ -194,8 +194,9 @@ void spell_cache_clear(SpellChecker *sc)
 SpellChecker *spell_new(const char *aff_path, const char *dic_path)
 {
 #ifdef HAVE_HUNSPELL
-    SpellChecker *sc;
-    FILE *fp;
+    SpellChecker *sc = NULL;
+    FILE *fp = NULL;
+    const char *enc = NULL;
 
     if (!aff_path || !dic_path)
         return NULL;
@@ -228,14 +229,10 @@ SpellChecker *spell_new(const char *aff_path, const char *dic_path)
         return NULL;
     }
 
-    {
-        const char *enc;
+    enc = Hunspell_get_dic_encoding(sc->handle);
 
-        enc = Hunspell_get_dic_encoding(sc->handle);
-
-        if (enc)
-            sc->encoding = ce_strdup(enc);
-    }
+    if (enc)
+        sc->encoding = ce_strdup(enc);
 
     cache_init(sc);
 
@@ -450,7 +447,7 @@ static int ends_with_dic(const char *name)
 static char *extract_dict_name(const char *name)
 {
     size_t len;
-    char *base;
+    char *base = NULL;
 
     if (!name)
         return NULL;
@@ -482,10 +479,10 @@ char **spell_list_dictionaries(const char *dir_path, int *n_dicts)
     char pat[300];
 #elif defined(PLATFORM_AMIGA)
     BPTR lock;
-    struct FileInfoBlock *fib;
+    struct FileInfoBlock *fib = NULL;
 #else
-    DIR *d;
-    const struct dirent *de;
+    DIR *d = NULL;
+    const struct dirent *de = NULL;
 #endif
 
     if (n_dicts)
@@ -651,7 +648,7 @@ void spell_free_dictionaries(char **dicts, int n_dicts)
 int spell_load_custom(SpellChecker *sc, const char *path)
 {
 #ifdef HAVE_HUNSPELL
-    FILE *fp;
+    FILE *fp = NULL;
     char buf[512];
     int loaded = 0;
 
@@ -704,7 +701,7 @@ int spell_load_custom(SpellChecker *sc, const char *path)
 int spell_add_to_custom_dict(SpellChecker *sc, const char *word, const char *custom_dict_path)
 {
 #ifdef HAVE_HUNSPELL
-    FILE *fp;
+    FILE *fp = NULL;
     int file_ok = 0;
     int mem_ok;
 

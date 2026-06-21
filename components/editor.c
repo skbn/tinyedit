@@ -44,9 +44,6 @@ void ed_prefix_invalidate(Ed *ed);
 static int prefix_rebuild(Ed *ed, int width, int max_line);
 static int prefix_rebuild_from(Ed *ed, int from_line, int width);
 
-/* Soft-wrap helper: number of visual sub-rows a logical line occupies */
-static int wrap_count(const wchar_t *line, int len, int width);
-
 static EdLine *line_new(const wchar_t *src, int len)
 {
     EdLine *ln = (EdLine *)malloc(sizeof(EdLine));
@@ -72,7 +69,7 @@ static EdLine *line_new(const wchar_t *src, int len)
     return ln;
 }
 
-static EdLine *line_empty()
+static EdLine *line_empty(void)
 {
     return line_new(L"", 0);
 }
@@ -89,7 +86,7 @@ static void line_free(EdLine *ln)
 static int line_grow(EdLine *ln, int need)
 {
     int nc;
-    wchar_t *t;
+    wchar_t *t = NULL;
 
     if (ln->cap > need + 1)
         return 0;
@@ -332,7 +329,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
     int i;
     int range_size;
     int total;
-    int old_start, old_end, old_width, old_base;
+    int old_start, old_width;
     int need_capacity;
 
     if (!ed)
@@ -351,10 +348,11 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
 
     /* Ensure prefix array has enough capacity */
     need_capacity = range_size + 1;
+
     while (need_capacity > ed->prefix_alloc)
     {
         int na;
-        int *t;
+        int *t = NULL;
 
         na = ed->prefix_alloc > 0 ? ed->prefix_alloc * 2 : INIT_ALLOC;
 
@@ -371,9 +369,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
     }
 
     old_start = ed->prefix_start;
-    old_end = ed->prefix_end;
     old_width = ed->prefix_width;
-    old_base = ed->prefix_base;
 
     /* Cold cache or width change: compute base by iterating 0..start_line-1 */
     if (!ed->prefix_valid || old_width != width)
@@ -536,7 +532,7 @@ static int prefix_rebuild(Ed *ed, int width, int max_line)
     while (ed->count >= ed->prefix_alloc)
     {
         int na;
-        int *t;
+        int *t = NULL;
 
         na = ed->prefix_alloc > 0 ? ed->prefix_alloc * 2 : INIT_ALLOC;
         t = (int *)realloc(ed->prefix, (size_t)na * sizeof(int));
@@ -562,7 +558,7 @@ static int prefix_rebuild(Ed *ed, int width, int max_line)
     /* Calculate prefix sum from from_line to to_line */
     for (i = from_line; i < to_line; i++)
     {
-        const wchar_t *l;
+        const wchar_t *l = NULL;
         int len;
 
         l = ed_line_wcs(ed, i);
@@ -605,7 +601,7 @@ static int prefix_rebuild_from(Ed *ed, int from_line, int width)
     while (ed->count >= ed->prefix_alloc)
     {
         int na;
-        int *t;
+        int *t = NULL;
 
         na = ed->prefix_alloc > 0 ? ed->prefix_alloc * 2 : INIT_ALLOC;
         t = (int *)realloc(ed->prefix, (size_t)na * sizeof(int));
@@ -619,6 +615,7 @@ static int prefix_rebuild_from(Ed *ed, int from_line, int width)
 
     /* Calculate visual rows before from_line for absolute positioning */
     total = 0;
+
     for (i = 0; i < from_line; i++)
     {
         const wchar_t *l = ed_line_wcs(ed, i);
@@ -630,7 +627,7 @@ static int prefix_rebuild_from(Ed *ed, int from_line, int width)
     /* Recalculate from from_line to end */
     for (i = from_line; i < ed->count; i++)
     {
-        const wchar_t *l;
+        const wchar_t *l = NULL;
         int len;
 
         l = ed_line_wcs(ed, i);
@@ -840,11 +837,11 @@ void ed_load(Ed *ed, const char *utf8_text)
 
     while (*p)
     {
-        wchar_t *wcs;
+        wchar_t *wcs = NULL;
         int wlen;
-        char *line_utf8;
+        char *line_utf8 = NULL;
         int blen;
-        EdLine *ln;
+        EdLine *ln = NULL;
 
         start = p;
 
@@ -904,8 +901,8 @@ char *ed_to_string(const Ed *ed)
     char **parts;
     int i = 0;
     int total = 0;
-    char *out;
-    char *p;
+    char *out = NULL;
+    char *p = NULL;
 
     if (!ed || ed->count == 0)
         return NULL;
@@ -981,8 +978,8 @@ char *ed_range_to_string(const Ed *ed, int start, int end)
     int i;
     int n;
     int total = 0;
-    char *out;
-    char *p;
+    char *out = NULL;
+    char *p = NULL;
 
     if (!ed || start < 0 || end <= start || start >= ed->count)
         return NULL;
@@ -1283,7 +1280,7 @@ static int is_wordch(wchar_t ch)
 
 void ed_word_left(Ed *ed)
 {
-    wchar_t *w;
+    wchar_t *w = NULL;
 
     if (!ed)
         return;
@@ -1604,9 +1601,9 @@ int ed_delete_to_eol(Ed *ed)
 /* Delete from cursor backwards to start of previous word */
 int ed_delete_word_left(Ed *ed)
 {
-    EdLine *ln;
+    EdLine *ln = NULL;
     int target;
-    wchar_t *w;
+    wchar_t *w = NULL;
     wchar_t *deleted_text = NULL;
 
     if (!ed)
@@ -1857,7 +1854,7 @@ static wchar_t *block_extract_wcs(const Ed *ed, int *out_len)
     int i;
     size_t need = 0;
     size_t pos = 0;
-    wchar_t *buf;
+    wchar_t *buf = NULL;
 
     block_range(ed, &r1, &c1, &r2, &c2);
 
@@ -1931,7 +1928,7 @@ static wchar_t *block_extract_wcs(const Ed *ed, int *out_len)
 
 int ed_block_copy(Ed *ed)
 {
-    wchar_t *t;
+    wchar_t *t = NULL;
     int tlen;
 
     if (!ed || !ed->block.active)
@@ -1953,9 +1950,9 @@ int ed_block_copy(Ed *ed)
 
 char *ed_block_get_utf8(const Ed *ed)
 {
-    wchar_t *wcs;
+    wchar_t *wcs = NULL;
     int wcs_len;
-    char *utf8;
+    char *utf8 = NULL;
 
     if (!ed || !ed->block.active)
         return NULL;
@@ -2102,11 +2099,10 @@ int ed_block_delete(Ed *ed)
     int i;
     int old_count;
     int new_count;
-    char *snapshot_before;
-    char *snapshot_after;
+    char *snapshot_before = NULL;
+    char *snapshot_after = NULL;
     EdLine *first;
     EdLine *last;
-    UndoGroup *g;
 
     if (!ed || !ed->block.active)
         return -1;
@@ -2193,7 +2189,7 @@ int ed_block_delete(Ed *ed)
 
 int ed_block_paste(Ed *ed)
 {
-    char *utf8;
+    char *utf8 = NULL;
 
     if (!ed || !ed->killbuf || !ed->killlen)
         return -1;
@@ -2402,9 +2398,9 @@ static int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_bef
 /* Append a single wchar_t to the text of the last INSERT op */
 static int undo_coalesce_insert(Ed *ed, wchar_t ch)
 {
-    UndoGroup *g;
-    UndoOp *op;
-    wchar_t *t;
+    UndoGroup *g = NULL;
+    UndoOp *op = NULL;
+    wchar_t *t = NULL;
 
     if (ed->undo_top <= 0)
         return -1;
@@ -2433,9 +2429,9 @@ static int undo_coalesce_insert(Ed *ed, wchar_t ch)
 /* Prepend a single wchar_t to the text of the last DELETE op */
 static int undo_coalesce_delete_prepend(Ed *ed, wchar_t ch)
 {
-    UndoGroup *g;
-    UndoOp *op;
-    wchar_t *t;
+    UndoGroup *g = NULL;
+    UndoOp *op = NULL;
+    wchar_t *t = NULL;
 
     if (ed->undo_top <= 0)
         return -1;
@@ -2473,7 +2469,7 @@ static int undo_coalesce_delete_append(Ed *ed, wchar_t ch)
 {
     UndoGroup *g;
     UndoOp *op;
-    wchar_t *t;
+    wchar_t *t = NULL;
 
     if (ed->undo_top <= 0)
         return -1;
@@ -2652,50 +2648,10 @@ static void record_join(Ed *ed, int row, int join_col)
     ed->undo_last_col_end = 0;
 }
 
-/* Internal backspace without undo recording */
-static int ed_backspace_no_undo(Ed *ed)
-{
-    EdLine *ln;
-    EdLine *prev;
-
-    if (!ed)
-        return -1;
-
-    ln = ed->lines[ed->row];
-
-    if (ed->col > 0)
-    {
-        /* Delete character without recording */
-        line_delete(ln, ed->col - 1);
-
-        ed->col--;
-        ed->modified = 1;
-
-        ed_prefix_invalidate_from(ed, ed->row);
-    }
-    else if (ed->row > 0)
-    {
-        prev = ed->lines[ed->row - 1];
-        ed->col = prev->len;
-
-        /* Join lines without recording */
-        line_append(prev, ln->wcs, ln->len);
-        line_free(doc_remove_line(ed, ed->row));
-
-        ed->row--;
-        ed->modified = 1;
-
-        ed_prefix_invalidate_from(ed, ed->row);
-        ed_ensure_visible(ed);
-    }
-
-    return 0;
-}
-
 /* Replace line range with UTF-8 text for OP_SNAPSHOT_RANGE undo/redo */
 static int doc_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text)
 {
-    const char *p;
+    const char *p = NULL;
     int i;
     int inserted = 0;
     int at;
@@ -2732,10 +2688,10 @@ static int doc_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, c
     {
         const char *line_start = p;
         int blen;
-        char *line_utf8;
-        wchar_t *wcs;
+        char *line_utf8 = NULL;
+        wchar_t *wcs = NULL;
         int wlen;
-        EdLine *ln;
+        EdLine *ln = NULL;
 
         while (*p && *p != '\r' && *p != '\n')
             p++;
@@ -3355,7 +3311,7 @@ int ed_line_len(const Ed *ed, int line)
 
 int ed_line_utf8(const Ed *ed, int line, char *buf, int bufsz)
 {
-    const wchar_t *wcs;
+    const wchar_t *wcs = NULL;
     int wlen;
     int i;
     int n;
@@ -3408,7 +3364,7 @@ int ed_line_utf8(const Ed *ed, int line, char *buf, int bufsz)
 
 int ed_paste_text(Ed *ed, const char *utf8_text)
 {
-    const char *p;
+    const char *p = NULL;
     uint32_t cp;
 
     if (!ed || !utf8_text)

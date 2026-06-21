@@ -272,7 +272,7 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
             if (sel >= top + visible)
                 top = sel - visible + 1;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_PPAGE || wch == CTRL('U'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_PPAGE) || wch == CTRL('U'))
         {
             sel -= visible;
 
@@ -281,7 +281,7 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
 
             top = sel;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_NPAGE || wch == CTRL('D'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_NPAGE) || wch == CTRL('D'))
         {
             sel += visible;
 
@@ -291,12 +291,12 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
             if (sel >= top + visible)
                 top = sel - visible + 1;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_HOME || wch == CTRL('B'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_HOME) || wch == CTRL('B'))
         {
             sel = 0;
             top = 0;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_END || wch == CTRL('E'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_END) || wch == CTRL('E'))
         {
             sel = count - 1;
             top = sel - visible + 1;
@@ -838,7 +838,7 @@ int ui_popup_search_results(const char *title, const int *line_nums, const char 
             if (sel >= top + (h - 4))
                 top = sel - (h - 4) + 1;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_PPAGE || wch == CTRL('U'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_PPAGE) || wch == CTRL('U'))
         {
             sel -= h - 4;
 
@@ -847,7 +847,7 @@ int ui_popup_search_results(const char *title, const int *line_nums, const char 
 
             top = sel;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_NPAGE || wch == CTRL('D'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_NPAGE) || wch == CTRL('D'))
         {
             sel += h - 4;
 
@@ -857,12 +857,12 @@ int ui_popup_search_results(const char *title, const int *line_nums, const char 
             if (sel >= top + (h - 4))
                 top = sel - (h - 4) + 1;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_HOME || wch == CTRL('B'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_HOME) || wch == CTRL('B'))
         {
             sel = 0;
             top = 0;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_END || wch == CTRL('E'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_END) || wch == CTRL('E'))
         {
             sel = count - 1;
             top = sel - (h - 4) + 1;
@@ -961,13 +961,13 @@ void ui_popup_help(const char *title, const char *const *lines, int n)
             if (top + visible < n)
                 top++;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_PPAGE || wch == CTRL('U'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_PPAGE) || wch == CTRL('U'))
         {
             top -= visible;
             if (top < 0)
                 top = 0;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_NPAGE || wch == CTRL('D'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_NPAGE) || wch == CTRL('D'))
         {
             top += visible;
 
@@ -977,11 +977,11 @@ void ui_popup_help(const char *title, const char *const *lines, int n)
             if (top < 0)
                 top = 0;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_HOME || wch == CTRL('B'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_HOME) || wch == CTRL('B'))
         {
             top = 0;
         }
-        else if (rc == KEY_CODE_YES && wch == KEY_END || wch == CTRL('E'))
+        else if ((rc == KEY_CODE_YES && wch == KEY_END) || wch == CTRL('E'))
         {
             top = n - visible;
 

@@ -831,7 +831,7 @@ static void render_all(void)
     Cell *cell;
     int last_pair = -1;
     int last_attrs = -1;
-    char *text_buf;
+    char *text_buf = NULL;
     int cy_cell, cx_cell, prev_y, prev_x;
 
     if (!stdscr || !stdscr->cells || !hMemDC)

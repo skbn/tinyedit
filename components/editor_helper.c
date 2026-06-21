@@ -18,6 +18,7 @@
 #include <wctype.h>
 #include "editor.h"
 #include "../core/utf8.h"
+#include "../core/charset.h"
 
 /* Convert entire line to wchar_t string (caller frees) */
 wchar_t *line_to_wcs(EdLine *ln)
@@ -163,7 +164,7 @@ int ed_search_forward(Ed *ed, const wchar_t *needle)
     int col;
     int nlen;
     int i, found, k;
-    const wchar_t *line;
+    const wchar_t *line = NULL;
 
     if (!ed || !needle || !needle[0] || ed->count <= 0)
         return 0;
@@ -224,7 +225,7 @@ int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols)
     int count = 0;
     int i, j;
     int nlen;
-    const wchar_t *line;
+    const wchar_t *line = NULL;
     int line_len;
     int *rows = NULL;
     int *cols = NULL;
@@ -421,8 +422,8 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
                     /* Add match to results */
                     if (count >= capacity)
                     {
-                        int *new_rows;
-                        int *new_cols;
+                        int *new_rows = NULL;
+                        int *new_cols = NULL;
 
                         capacity *= 2;
                         new_rows = realloc(*out_rows, capacity * sizeof(int));
@@ -481,9 +482,9 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
 {
     int first, last, i;
     int prefix_len;
-    const wchar_t *line;
+    const wchar_t *line = NULL;
     wchar_t prefix[64];
-    wchar_t *joined;
+    wchar_t *joined = NULL;
     size_t cap, used;
 
     int avail = 0;
@@ -491,11 +492,11 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
     size_t out_cap = 0;
     size_t out_used = 0;
     wchar_t *outw = NULL;
-    char *outu;
+    char *outu = NULL;
     int k;
     char *snapshot_before = NULL;
     char *snapshot_after = NULL;
-    UndoGroup *g;
+    UndoGroup *g = NULL;
     int need_snapshot = 0;
     int cursor_row_before = 0;
     int cursor_col_before = 0;
@@ -687,7 +688,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
             if (!space_found && hyph)
             {
                 size_t ws, we;
-                char *uw;
+                char *uw = NULL;
 
                 /* Find word boundaries: ws back, we forward */
                 ws = pos + (size_t)line_len;
@@ -899,10 +900,10 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
 
 int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
 {
-    FILE *f;
+    FILE *f = NULL;
     long sz;
-    char *buf;
-    char *content_to_paste;
+    char *buf = NULL;
+    char *content_to_paste = NULL;
     size_t r;
     int needs_conv;
     int cursor_row_before, cursor_col_before;
@@ -1087,8 +1088,8 @@ int ed_export_block_to_file(Ed *ed, const char *path, const char *charset_out)
 {
     int r1, c1, r2, c2;
     int i;
-    FILE *f;
-    char *utf8;
+    FILE *f = NULL;
+    char *utf8 = NULL;
     int needs_conv;
     char conv[4096];
 

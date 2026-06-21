@@ -72,17 +72,6 @@ static int memmemstr(const char *hay, int n, const char *needle, int m)
     return -1;
 }
 
-static int contains(const char *hay, int n, const char *needle, int m, int csens)
-{
-    if (!hay || n <= 0 || !needle || m <= 0)
-        return 0;
-
-    if (csens)
-        return memmemstr(hay, n, needle, m) >= 0;
-
-    return memcasestr(hay, n, needle, m) >= 0;
-}
-
 SearchSession *search_new(const char *pattern, int case_sensitive, int max_hits)
 {
     SearchSession *s;
@@ -226,7 +215,7 @@ int search_text(SearchSession *s, const char **text_lines, int nlines, int previ
         int line_len;
         int pos;
         int preview_buf_size;
-        char *preview_buf;
+        char *preview_buf = NULL;
 
         /* Cancel check every 64 lines */
         if ((i & 63) == 0 && s->cancel)

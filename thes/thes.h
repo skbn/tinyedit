@@ -20,7 +20,10 @@ extern "C"
     typedef struct ThesHandle ThesHandle;
 
     /* Forward-declared from spell.h for stemming */
+#ifndef THES_SPELLCHECKER_TYPEDEF
+#define THES_SPELLCHECKER_TYPEDEF
     typedef struct SpellChecker SpellChecker;
+#endif
 
     /* Each meaning has a definition and synonym list. Owned until thes_free_meanings() */
     typedef struct

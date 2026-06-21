@@ -14,9 +14,9 @@
 #include "tabs.h"
 
 /* Create new empty tab with editor instance */
-TeTab *te_tab_new()
+TeTab *te_tab_new(void)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = (TeTab *)calloc(1, sizeof(TeTab));
 
@@ -45,7 +45,7 @@ TeTab *te_tab_new()
 /* Create new tab with filename, content and raw bytes */
 TeTab *te_tab_new_with_content(const char *filename, const char *content, const char *raw_bytes, int raw_len)
 {
-    TeTab *tab;
+    TeTab *tab = NULL;
 
     tab = te_tab_new();
 

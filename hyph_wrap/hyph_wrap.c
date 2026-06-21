@@ -176,7 +176,7 @@ void hyph_cache_clear(HyphDict *h)
 HyphDict *hyph_new(const char *dict_path)
 {
 #ifdef HAVE_HYPHEN
-    HyphDict *h;
+    HyphDict *h = NULL;
 
     if (!dict_path)
         return NULL;
@@ -351,8 +351,8 @@ char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
     char **result = NULL;
     int count = 0;
     int capacity = 0;
-    DIR *dir;
-    struct dirent *entry;
+    DIR *dir = NULL;
+    struct dirent *entry = NULL;
 
     if (!dir_path || !n_dicts)
         return NULL;
@@ -373,7 +373,7 @@ char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
         if (len > 4 && strcmp(name + len - 4, ".dic") == 0)
         {
             /* Extract dictionary name */
-            char *dict_name;
+            char *dict_name = NULL;
             size_t start = 0;     /* start from beginning */
             size_t end = len - 4; /* before ".dic" */
 

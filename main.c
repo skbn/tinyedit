@@ -59,10 +59,10 @@ extern void amiga_add_ttf_fallback(const char *path, int size);
 /* Read a whole file into a malloc'd UTF-8 buffer with charset conversion */
 static char *load_file(const char *path, TeApp *app)
 {
-    FILE *fp;
+    FILE *fp = NULL;
     long size;
-    char *buf;
-    char *new_bytes;
+    char *buf = NULL;
+    char *new_bytes = NULL;
     size_t r;
 
     fp = fopen(path, "rb");
@@ -151,15 +151,15 @@ static char *load_file(const char *path, TeApp *app)
 
 int main(int argc, char **argv)
 {
-    TeApp *app;
+    TeApp *app = NULL;
     TeConfig cfg;
     char *content = NULL;
     static char cfg_path_buf[512];
-    const char *cfg_path;
-    FILE *tty;
-    const char *home;
+    const char *cfg_path = NULL;
+    FILE *tty = NULL;
+    const char *home = NULL;
     char dir_path[512];
-    const char *last_sep;
+    const char *last_sep = NULL;
 
     setlocale(LC_ALL, "");
 
@@ -390,8 +390,8 @@ int main(int argc, char **argv)
     /* Load file if given */
     if (argc >= 2)
     {
-        TeTab *tab;
-        char *raw_bytes;
+        TeTab *tab = NULL;
+        char *raw_bytes = NULL;
         int raw_len;
 
         content = load_file(argv[1], app);

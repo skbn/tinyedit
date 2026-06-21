@@ -45,8 +45,8 @@ int ui_thes_load_from_config(UI_APP_T *app)
 {
     char idx_path[512];
     char dat_path[512];
-    const char *base_path;
-    const char *base_name;
+    const char *base_path = NULL;
+    const char *base_name = NULL;
 
     if (!app)
         return 0;
@@ -98,16 +98,16 @@ void ui_thes_unload(UI_APP_T *app)
 
 int ui_thes_lookup_word(UI_APP_T *app)
 {
-    Ed *ed;
+    Ed *ed = NULL;
     EdInfo info;
-    const wchar_t *line;
+    const wchar_t *line = NULL;
     int line_len, ws, we, i;
     wchar_t wbuf[128];
-    char *u8;
-    ThesMeaning *meanings;
+    char *u8 = NULL;
+    ThesMeaning *meanings = NULL;
     int nmeanings, total_items, idx, sel;
-    char **items;
-    int *item_to_syn; /* maps popup index -> (meaning, syn) pair */
+    char **items = NULL;
+    int *item_to_syn = NULL; /* maps popup index -> (meaning, syn) pair */
     int m, k;
     const char *thes_encoding = NULL;
     char utf8_buf[1024];
@@ -215,9 +215,9 @@ int ui_thes_lookup_word(UI_APP_T *app)
         {
             /* Format: "<syn>  (<defn>)" */
             size_t need;
-            const char *defn;
-            const char *syn_utf8;
-            const char *defn_utf8;
+            const char *defn = NULL;
+            const char *syn_utf8 = NULL;
+            const char *defn_utf8 = NULL;
 
             defn = meanings[m].def ? meanings[m].def : "";
 
@@ -274,8 +274,8 @@ int ui_thes_lookup_word(UI_APP_T *app)
         const char *chosen_orig = meanings[m].syns[k];
         const char *thes_encoding = thes_get_encoding(UI_APP_THES_HANDLE(app));
         char chosen_utf8[1024];
-        const char *chosen;
-        wchar_t *wsyn;
+        const char *chosen = NULL;
+        wchar_t *wsyn = NULL;
         int wlen;
 
         /* Convert chosen synonym from thesaurus encoding to UTF-8 */
