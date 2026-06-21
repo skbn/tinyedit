@@ -923,6 +923,8 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
     int key;
     int rc = -1;
     int should_exit = 0;
+    int dir_count_total;
+    int i;
 
     if (!out_path || out_path_sz < 2)
         return -2;
@@ -974,8 +976,7 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
         }
 
         /* Count directories first to adjust sel */
-        int dir_count_total = 0;
-        int i;
+        dir_count_total = 0;
 
         for (i = 0; i < nents; i++)
         {
@@ -990,6 +991,7 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
             sel = 0;
 
         ui_popup_center(20, 60, &y, &x, &h, &w);
+
         visible = h - 6;
 
         /* Ensure top is valid before rendering */
@@ -1518,6 +1520,7 @@ int ui_files_open(TeApp *app)
     FILE *fp = NULL;
     long size;
     char *buf = NULL;
+    char *new_bytes = NULL;
     size_t r;
     char *content = NULL;
     const char *start_dir = NULL;
@@ -1586,7 +1589,7 @@ int ui_files_open(TeApp *app)
     /* Keep raw bytes for live charset re-decode */
     free(te_app_get_raw_bytes(app));
 
-    char *new_bytes = (char *)malloc(r + 1);
+    new_bytes = (char *)malloc(r + 1);
 
     if (new_bytes)
     {

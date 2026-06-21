@@ -729,6 +729,8 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
         int pair_index = (fld->off - F_OFF(color_fg)) / sizeof(int);
         int *fg = (int *)(base + fld->off);
         int *bg = (int *)(base + F_OFF(color_bg) + pair_index * sizeof(int));
+        int fg_result;
+        int bg_result;
 
         /* Color names and their values */
         static const char *color_names[] =
@@ -738,13 +740,13 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
                 "bright blue", "bright magenta", "bright cyan", "bright white"};
 
         /* Select foreground color */
-        int fg_result = ui_popup_list("Select Foreground", color_names, 16, *fg);
+        fg_result = ui_popup_list("Select Foreground", color_names, 16, *fg);
 
         if (fg_result < 0)
             return; /* User canceled */
 
         /* Select background color */
-        int bg_result = ui_popup_list("Select Background", color_names, 16, *bg);
+        bg_result = ui_popup_list("Select Background", color_names, 16, *bg);
 
         if (bg_result < 0)
             return; /* User canceled */
@@ -864,7 +866,7 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
     case FT_THESLIST:
     {
         char *s = (char *)(base + fld->off);
-        char **dicts;
+        char **dicts = NULL;
         int n_dicts;
         int i;
         int current = -1;

@@ -93,7 +93,7 @@ static int line_grow(EdLine *ln, int need)
 
     nc = need + 64;
 
-    if (nc > SIZE_MAX / sizeof(wchar_t))
+    if ((size_t)nc > SIZE_MAX / sizeof(wchar_t))
         return -1;
 
     t = (wchar_t *)realloc(ln->wcs, (size_t)nc * sizeof(wchar_t));
@@ -1603,6 +1603,7 @@ int ed_delete_word_left(Ed *ed)
 {
     EdLine *ln = NULL;
     int target;
+    int del_len;
     wchar_t *w = NULL;
     wchar_t *deleted_text = NULL;
 
@@ -1633,7 +1634,7 @@ int ed_delete_word_left(Ed *ed)
         deleted_text = line_to_wcs_range(ln, target, ed->col);
 
     /* Capture length before loop (ed->col changes during deletion) */
-    int del_len = ed->col - target;
+    del_len = ed->col - target;
 
     while (ed->col > target)
     {
@@ -3112,8 +3113,9 @@ void ed_save_undo(Ed *ed)
 
 int ed_undo(Ed *ed)
 {
-    UndoGroup *src;
+    UndoGroup *src = NULL;
     UndoGroup tmp;
+    int min_row;
 
     if (!ed || ed->undo_top <= 0)
         return -1;
@@ -3143,7 +3145,7 @@ int ed_undo(Ed *ed)
     ed->undo_snapshot_mode = 1;
 
     /* Apply ops in reverse */
-    int min_row = apply_group_reverse(ed, &ed->redo_stack[ed->redo_top - 1]);
+    min_row = apply_group_reverse(ed, &ed->redo_stack[ed->redo_top - 1]);
 
     ed->undo_snapshot_mode = 0;
 
@@ -3163,6 +3165,7 @@ int ed_redo(Ed *ed)
 {
     UndoGroup *src;
     UndoGroup tmp;
+    int min_row;
 
     if (!ed || ed->redo_top <= 0)
         return -1;
@@ -3184,7 +3187,7 @@ int ed_redo(Ed *ed)
     ed->undo_snapshot_mode = 1;
 
     /* Apply ops forward */
-    int min_row = apply_group_forward(ed, &ed->undo_stack[ed->undo_top - 1]);
+    min_row = apply_group_forward(ed, &ed->undo_stack[ed->undo_top - 1]);
 
     ed->undo_snapshot_mode = 0;
 

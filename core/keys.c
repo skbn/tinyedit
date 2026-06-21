@@ -73,7 +73,7 @@ int wrapper_read_key(wint_t *out_wch)
     return wrc;
 }
 
-int wrapper_getch()
+int wrapper_getch(void)
 {
     wint_t wch;
     int wrc = wrapper_read_key(&wch);

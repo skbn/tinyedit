@@ -33,7 +33,10 @@ extern "C"
 #endif
 #endif
 
+#ifndef THES_SPELLCHECKER_TYPEDEF
+#define THES_SPELLCHECKER_TYPEDEF
     typedef struct SpellChecker SpellChecker;
+#endif
 
     SpellChecker *spell_new(const char *aff_path, const char *dic_path);
     void spell_free(SpellChecker *sc);

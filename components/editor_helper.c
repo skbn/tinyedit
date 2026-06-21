@@ -23,10 +23,12 @@
 /* Convert entire line to wchar_t string (caller frees) */
 wchar_t *line_to_wcs(EdLine *ln)
 {
+    wchar_t *result = NULL;
+
     if (!ln)
         return NULL;
 
-    wchar_t *result = (wchar_t *)malloc((ln->len + 1) * sizeof(wchar_t));
+    result = (wchar_t *)malloc((ln->len + 1) * sizeof(wchar_t));
 
     if (!result)
         return NULL;
@@ -42,11 +44,14 @@ wchar_t *line_to_wcs(EdLine *ln)
 /* Convert line range to wchar_t string (caller frees) */
 wchar_t *line_to_wcs_range(EdLine *ln, int start, int end)
 {
+    int len;
+    wchar_t *result = NULL;
+
     if (!ln || start < 0 || end > ln->len || start >= end)
         return NULL;
 
-    int len = end - start;
-    wchar_t *result = (wchar_t *)malloc((len + 1) * sizeof(wchar_t));
+    len = end - start;
+    result = (wchar_t *)malloc((len + 1) * sizeof(wchar_t));
 
     if (!result)
         return NULL;
@@ -485,8 +490,9 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
     const wchar_t *line = NULL;
     wchar_t prefix[64];
     wchar_t *joined = NULL;
+    wchar_t *tmp_joined = NULL;
+    wchar_t *tmp = NULL;
     size_t cap, used;
-
     int avail = 0;
     size_t pos = 0;
     size_t out_cap = 0;
@@ -502,6 +508,8 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
     int cursor_col_before = 0;
     int cursor_row_after = 0;
     int cursor_col_after = 0;
+    int old_count = 0;
+    int doc_count_before = 0;
 
     if (!ed || width < 20 || ed->count <= 0)
         return -1;
@@ -602,7 +610,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         if (used + (size_t)(ll - skip) + 2 >= cap)
         {
             cap = (used + (size_t)(ll - skip) + 64) * 2;
-            wchar_t *tmp_joined = (wchar_t *)realloc(joined, cap * sizeof(wchar_t));
+            tmp_joined = (wchar_t *)realloc(joined, cap * sizeof(wchar_t));
 
             if (!tmp_joined)
             {
@@ -646,7 +654,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         if (out_used + (size_t)prefix_len + (size_t)avail + 2 >= out_cap)
         {
             out_cap = (out_cap + (size_t)avail + 64) * 2;
-            wchar_t *tmp = (wchar_t *)realloc(outw, out_cap * sizeof(wchar_t));
+            tmp = (wchar_t *)realloc(outw, out_cap * sizeof(wchar_t));
 
             if (!tmp)
             {
@@ -768,8 +776,8 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
     free(joined);
 
     /* Save snapshot of affected paragraph only (not whole doc) for efficient undo */
-    int old_count = 0;
-    int doc_count_before = ed->count;
+    old_count = 0;
+    doc_count_before = ed->count;
 
     if (need_snapshot)
     {
@@ -909,7 +917,7 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
     int cursor_row_before, cursor_col_before;
     int cursor_row_after, cursor_col_after;
     EdInfo info;
-    UndoGroup *g;
+    UndoGroup *g = NULL;
 
     if (!ed || !path || !path[0])
         return -1;

@@ -1550,12 +1550,15 @@ static char *collect_rapid_paste(wint_t first_wch)
     int wlen = 0, wcap = 0;
     char *out = NULL;
     const int MAX_CHARS = 10; /* 10+ chars = paste, not typing */
+    wint_t next_wch;
+    wint_t third_wch;
+    int next_wrc;
+    int third_wrc;
 
     /* Check for more characters (rapid paste detection) */
     nodelay(stdscr, TRUE);
 
-    wint_t next_wch;
-    int next_wrc = get_wch(&next_wch);
+    next_wrc = get_wch(&next_wch);
 
     /* No more chars: not a paste, return NULL */
     if (next_wrc == ERR)
@@ -1572,8 +1575,7 @@ static char *collect_rapid_paste(wint_t first_wch)
     }
 
     /* One more char available - check for 2 more to confirm paste */
-    wint_t third_wch;
-    int third_wrc = get_wch(&third_wch);
+    third_wrc = get_wch(&third_wch);
 
     if (third_wrc == ERR || third_wrc == KEY_CODE_YES)
     {
@@ -2539,6 +2541,7 @@ void ui_editor_run(TeApp *app)
         wint_t wch;
         int wrc, ch, is_key, preserve_desired;
         TeWindow *win = NULL;
+        EdInfo info;
 
         /* Get editor window for dimensions */
         win = wm_get_window_by_type(app->wm, WIN_EDITOR);
@@ -2736,7 +2739,6 @@ void ui_editor_run(TeApp *app)
                 continue;
             }
 
-            EdInfo info;
             ed_get_info(te_app_get_editor(app), &info);
 
             if (info.modified)

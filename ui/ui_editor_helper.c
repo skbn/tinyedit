@@ -787,6 +787,7 @@ int charset_select(TeApp *app)
             FILE *fp = NULL;
             long size;
             char *buf = NULL;
+            char *new_bytes = NULL;
             size_t r;
 
             fp = fopen(te_app_get_filename(app), "rb");
@@ -808,7 +809,7 @@ int charset_select(TeApp *app)
                         /* Update raw_bytes */
                         free(te_app_get_raw_bytes(app));
 
-                        char *new_bytes = (char *)malloc(r + 1);
+                        new_bytes = (char *)malloc(r + 1);
 
                         if (new_bytes)
                         {

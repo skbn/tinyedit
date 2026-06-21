@@ -319,7 +319,7 @@ int clipboard_copy(const char *utf8)
     return 0;
 }
 
-char *clipboard_paste()
+char *clipboard_paste(void)
 {
     HGLOBAL hglb;
     char *lptstr = NULL;
@@ -417,7 +417,7 @@ static char *try_cmd(const char *cmd)
     return out;
 }
 
-char *clipboard_paste()
+char *clipboard_paste(void)
 {
     /* Try Wayland, X11 (xclip/xsel), MacOS in order, stderr suppressed */
     static const char *const cmds[] =
@@ -537,9 +537,6 @@ int clipboard_use_external(void)
 
 int clipboard_copy(const char *utf8)
 {
-    if (!utf8 || !utf8[0])
-        return -1;
-
     /* Try Wayland, X11 (xclip/xsel), MacOS in order, stderr suppressed */
     static const char *const cmds[] =
         {
@@ -550,6 +547,9 @@ int clipboard_copy(const char *utf8)
             NULL};
 
     int i;
+
+    if (!utf8 || !utf8[0])
+        return -1;
 
     for (i = 0; cmds[i]; i++)
     {
