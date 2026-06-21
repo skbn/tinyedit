@@ -153,15 +153,6 @@ void te_app_free(TeApp *app)
         app->search.cols = NULL;
     }
 
-#ifdef HAVE_HUNSPELL
-
-    if (app->spell_handle)
-    {
-        spell_free((SpellChecker *)app->spell_handle);
-        app->spell_handle = NULL;
-    }
-#endif
-
 #ifdef HAVE_MYTHES
     if (app->thes_handle)
     {
@@ -175,6 +166,14 @@ void te_app_free(TeApp *app)
     {
         hyph_free((HyphDict *)app->hyph_handle);
         app->hyph_handle = NULL;
+    }
+#endif
+
+#ifdef HAVE_HUNSPELL
+    if (app->spell_handle)
+    {
+        spell_free((SpellChecker *)app->spell_handle);
+        app->spell_handle = NULL;
     }
 #endif
 

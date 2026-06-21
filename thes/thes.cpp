@@ -82,7 +82,7 @@ extern "C"
     static char *te_strdup(const char *s)
     {
         size_t n;
-        char *r;
+        char *r = NULL;
 
         if (!s)
             return NULL;
@@ -187,9 +187,9 @@ extern "C"
     /* Reconstruct ThesMeaning array from cache */
     static int tcache_materialise(const ThesCacheEntry *e, ThesMeaning **out)
     {
-        ThesMeaning *meanings;
+        ThesMeaning *meanings = NULL;
         int m, i;
-        int *counts;
+        int *counts = NULL;
 
         *out = NULL;
 
@@ -284,7 +284,7 @@ extern "C"
         int total_syns;
         size_t wlen;
         int eff_meanings;
-        ThesCacheEntry *e;
+        ThesCacheEntry *e = NULL;
 
         wlen = strlen(word);
 
@@ -343,7 +343,7 @@ extern "C"
     {
         int idx;
         size_t wlen;
-        ThesCacheEntry *e;
+        ThesCacheEntry *e = NULL;
 
         wlen = strlen(word);
 
@@ -374,7 +374,7 @@ extern "C"
     ThesHandle *thes_new(const char *idx_path, const char *dat_path)
     {
 #ifdef HAVE_MYTHES
-        ThesHandle *t;
+        ThesHandle *t = NULL;
         FILE *fp;
 
         if (!idx_path || !dat_path)
@@ -444,9 +444,9 @@ extern "C"
     /* Direct MyThes lookup with deep copy. Returns count or -1 on OOM */
     static int thes_direct_lookup(ThesHandle *t, const char *word, ThesMeaning **out_meanings, const char *inflect_example)
     {
-        mentry *me;
+        mentry *me = NULL;
         int n, i, j;
-        ThesMeaning *out;
+        ThesMeaning *out = NULL;
 
         *out_meanings = NULL;
 
@@ -513,7 +513,7 @@ extern "C"
     /* Append meanings to accumulator. Returns 1 ok, 0 on OOM */
     static int thes_meanings_append(ThesMeaning **acc, int *accn, ThesMeaning *add, int addn)
     {
-        ThesMeaning *grown;
+        ThesMeaning *grown = NULL;
         int i;
 
         if (addn <= 0)
@@ -583,7 +583,7 @@ extern "C"
     {
 #ifdef HAVE_MYTHES
         int n;
-        ThesMeaning *acc;
+        ThesMeaning *acc = NULL;
         int acc_n;
         int cache_idx;
 
@@ -766,7 +766,7 @@ extern "C"
     static char *thes_extract_name(const char *name)
     {
         size_t len;
-        char *base;
+        char *base = NULL;
 
         if (!name)
             return NULL;
@@ -819,11 +819,11 @@ extern "C"
     char **thes_list_dictionaries(const char *dir_path, int *n_dicts)
     {
 #ifdef HAVE_MYTHES
-        char **dicts;
+        char **dicts = NULL;
         int capacity;
         int count;
-        char *name;
-        char **new_dicts;
+        char *name = NULL;
+        char **new_dicts = NULL;
 
 #ifdef PLATFORM_WIN32
         WIN32_FIND_DATAA fd;
@@ -831,10 +831,10 @@ extern "C"
         char pattern[300];
 #elif defined(PLATFORM_AMIGA)
         BPTR lock;
-        struct FileInfoBlock *fib;
+        struct FileInfoBlock *fib = NULL;
 #else
-        DIR *d;
-        struct dirent *e;
+        DIR *d = NULL;
+        struct dirent *e = NULL;
 #endif
 
         if (!n_dicts)
