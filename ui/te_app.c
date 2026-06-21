@@ -26,6 +26,15 @@
 
 #ifdef HAVE_HUNSPELL
 #include "../spell/spell.h"
+#include "ui_spell.h"
+#endif
+
+#ifdef HAVE_MYTHES
+#include "../thes/thes.h"
+#endif
+
+#ifdef HAVE_HYPHEN
+#include "../hyph_wrap/hyph_wrap.h"
 #endif
 
 TeApp *te_app_new(void)
@@ -94,7 +103,12 @@ TeApp *te_app_new(void)
     app->spell_scroll_offset = 0;
 
 #ifdef HAVE_HYPHEN
+    app->hyph_handle = NULL;
     app->hyph_wrap_enabled = 0; /* Will be set from config after loading */
+#endif
+
+#ifdef HAVE_MYTHES
+    app->thes_handle = NULL;
 #endif
 #endif
 
@@ -140,10 +154,28 @@ void te_app_free(TeApp *app)
     }
 
 #ifdef HAVE_HUNSPELL
+    ui_spell_free_app_suggestions(app);
+
     if (app->spell_handle)
     {
         spell_free((SpellChecker *)app->spell_handle);
         app->spell_handle = NULL;
+    }
+#endif
+
+#ifdef HAVE_MYTHES
+    if (app->thes_handle)
+    {
+        thes_free((ThesHandle *)app->thes_handle);
+        app->thes_handle = NULL;
+    }
+#endif
+
+#ifdef HAVE_HYPHEN
+    if (app->hyph_handle)
+    {
+        hyph_free((HyphDict *)app->hyph_handle);
+        app->hyph_handle = NULL;
     }
 #endif
 

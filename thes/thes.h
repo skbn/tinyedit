@@ -17,6 +17,34 @@ extern "C"
 {
 #endif
 
+#if defined(PLATFORM_AMIGA)
+#ifndef THES_CACHE_N
+#define THES_CACHE_N 32
+#endif
+#ifndef THES_CACHE_KEY_MAX
+#define THES_CACHE_KEY_MAX 64
+#endif
+#ifndef THES_CACHE_SYNS_MAX
+#define THES_CACHE_SYNS_MAX 48
+#endif
+#ifndef THES_CACHE_TXT_MAX
+#define THES_CACHE_TXT_MAX 96
+#endif
+#else
+#ifndef THES_CACHE_N
+#define THES_CACHE_N 256
+#endif
+#ifndef THES_CACHE_KEY_MAX
+#define THES_CACHE_KEY_MAX 96
+#endif
+#ifndef THES_CACHE_SYNS_MAX
+#define THES_CACHE_SYNS_MAX 96
+#endif
+#ifndef THES_CACHE_TXT_MAX
+#define THES_CACHE_TXT_MAX 128
+#endif
+#endif
+
     typedef struct ThesHandle ThesHandle;
 
     /* Forward-declared from spell.h for stemming */
@@ -48,6 +76,9 @@ extern "C"
 
     /* Encoding of the loaded thesaurus (e.g. "ISO8859-1"). */
     const char *thes_get_encoding(ThesHandle *t);
+
+    /* Wipe the lookup cache (free its backing arrays) */
+    void thes_cache_clear(ThesHandle *t);
 
     /* List available dictionaries in directory. Returns malloc'd array or NULL. Free with thes_free_dictionaries() */
     char **thes_list_dictionaries(const char *dir_path, int *n_dicts);
