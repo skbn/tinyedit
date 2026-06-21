@@ -1205,6 +1205,8 @@ static void draw_body(TeApp *app)
                     }
 #endif /* HAVE_HUNSPELL */
 
+                    standend();
+
                     /* Block-selection overlay */
                     if (b_r1 >= 0 && li >= b_r1 && li <= b_r2 && l)
                     {
@@ -1351,6 +1353,8 @@ static void draw_body(TeApp *app)
                 }
             }
 #endif /* HAVE_HUNSPELL */
+
+            standend();
 
             /* Block-selection overlay (logical-span) */
             if (b_r1 >= 0 && line_idx >= b_r1 && line_idx <= b_r2)

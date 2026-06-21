@@ -78,8 +78,9 @@ typedef enum
     FT_COLORPAIR /* color pair configuration (fg/bg) */
 #ifdef HAVE_HUNSPELL
     ,
-    FT_DICTLIST,  /* cycle through available Hunspell dictionaries */
-    FT_CUSTOMDICT /* select or create custom dictionary */
+    FT_DICTLIST,       /* cycle through available Hunspell dictionaries */
+    FT_CUSTOMDICT,     /* select or create custom dictionary */
+    FT_CUSTOMDICT_EDIT /* edit custom dictionary in new tab */
 #ifdef HAVE_HYPHEN
     ,
     FT_HYPHLIST /* cycle through available Hyphen dictionaries */
@@ -177,6 +178,7 @@ static const SetupField st_fields[] =
         {TAB_DICT, "Dict Path", FT_STR, F_OFF(spell_dict_path), TE_CFG_STR_MAX},
         {TAB_DICT, "Dictionary", FT_DICTLIST, F_OFF(spell_dict_name), 0},
         {TAB_DICT, "Custom Dict", FT_CUSTOMDICT, F_OFF(spell_custom_dict), 0},
+        {TAB_DICT, "Edit Custom Dict", FT_CUSTOMDICT_EDIT, F_OFF(spell_custom_dict), 0},
 #ifdef HAVE_HYPHEN
         {TAB_DICT, "Hyphen Enabled", FT_BOOL, F_OFF(hyph_enabled), 0},
         {TAB_DICT, "Hyphen Dict Path", FT_STR, F_OFF(hyph_dict_path), TE_CFG_STR_MAX},
@@ -297,6 +299,13 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
         const char *s = (const char *)(base + fld->off);
 
         snprintf(buf, bufsz, "%s", s[0] ? s : "(none)");
+        break;
+    }
+    case FT_CUSTOMDICT_EDIT:
+    {
+        const char *s = (const char *)(base + fld->off);
+
+        snprintf(buf, bufsz, "%s", s[0] ? "[Edit]" : "(none)");
         break;
     }
 #ifdef HAVE_HYPHEN
@@ -439,7 +448,7 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
 }
 
 /* Edit one field in place on the working copy */
-static void st_edit_field(TeConfig *w, const SetupField *fld)
+static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
 {
     char *base = (char *)w;
 
@@ -904,6 +913,100 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
         break;
     }
 #endif /* HAVE_MYTHES */
+    case FT_CUSTOMDICT_EDIT:
+    {
+        char *s = (char *)(base + fld->off);
+        FILE *fp;
+        long size;
+        char *buf;
+        size_t r;
+        char *content = NULL;
+        char *new_bytes = NULL;
+        TeTab *tab;
+
+        if (s[0] != '\0')
+        {
+            /* Read file */
+            fp = fopen(s, "rb");
+
+            if (!fp)
+            {
+                mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Cannot open dictionary", 30);
+                refresh();
+                wrapper_getch();
+                break;
+            }
+
+            fseek(fp, 0, SEEK_END);
+            size = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+
+            if (size < 0)
+            {
+                fclose(fp);
+                mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Cannot read dictionary", 30);
+                refresh();
+                wrapper_getch();
+                break;
+            }
+
+            buf = (char *)malloc((size_t)size + 1);
+
+            if (!buf)
+            {
+                fclose(fp);
+                mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Memory error", 30);
+                refresh();
+                wrapper_getch();
+                break;
+            }
+
+            r = fread(buf, 1, (size_t)size, fp);
+            fclose(fp);
+
+            buf[r] = '\0';
+
+            /* Keep raw bytes for live charset re-decode */
+            free(te_app_get_raw_bytes(app));
+
+            new_bytes = (char *)malloc(r + 1);
+
+            if (new_bytes)
+            {
+                memcpy(new_bytes, buf, r + 1);
+                te_app_set_raw_bytes(app, new_bytes, (int)r);
+            }
+
+            /* Use raw buffer as content (UTF-8) */
+            content = buf;
+
+            tab = te_tab_new_with_content(s, content, te_app_get_raw_bytes(app), te_app_get_raw_len(app));
+
+            if (tab)
+            {
+                tab->show_line_numbers = w->show_line_numbers;
+
+                te_app_add_tab(app, tab);
+                te_app_switch_tab(app, app->tab_count - 1);
+            }
+            else
+            {
+                mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: Cannot open dictionary", 30);
+                refresh();
+                wrapper_getch();
+            }
+
+            free(buf);
+        }
+        else
+        {
+            mvaddnwstr(LINES / 2, (COLS - 40) / 2, L"Error: No custom dict selected", 30);
+            refresh();
+            wrapper_getch();
+        }
+
+        break;
+    }
     case FT_CUSTOMDICT:
     {
         char *s = (char *)(base + fld->off);
@@ -979,8 +1082,15 @@ static void st_edit_field(TeConfig *w, const SetupField *fld)
 
                 if (utf8_name)
                 {
+                    /* Sanitize filename for AmigaOS (convert UTF-8 to ASCII) */
+#ifdef PLATFORM_AMIGA
+                    const char *sanitized_name = port_sanitize_filename(utf8_name);
+#else
+                    const char *sanitized_name = utf8_name;
+#endif
+
                     /* Build full path */
-                    snprintf(dict_path, sizeof(dict_path), "%s/%s.dic", dicts_dir, utf8_name);
+                    snprintf(dict_path, sizeof(dict_path), "%s/%s.dic", dicts_dir, sanitized_name);
 
                     /* Create empty file using portable function */
                     if (port_file_create_empty(dict_path) == 0)
@@ -1263,7 +1373,7 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 
             /* Reload Hunspell dictionary when spell settings changed */
 #ifdef HAVE_HUNSPELL
-            if (cfg->spell_enabled != work.spell_enabled || strcmp(cfg->spell_dict_path, work.spell_dict_path) != 0 || strcmp(cfg->spell_dict_name, work.spell_dict_name) != 0)
+            if (cfg->spell_enabled != work.spell_enabled || strcmp(cfg->spell_dict_path, work.spell_dict_path) != 0 || strcmp(cfg->spell_dict_name, work.spell_dict_name) != 0 || strcmp(cfg->spell_custom_dict, work.spell_custom_dict) != 0)
             {
                 *cfg = work;
                 spell_load_from_config(app);
@@ -1387,7 +1497,7 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 
             if (gi >= 0)
             {
-                st_edit_field(&work, &st_fields[gi]);
+                st_edit_field(app, &work, &st_fields[gi]);
                 dirty = 1;
             }
 

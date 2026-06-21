@@ -16,4 +16,9 @@ int port_mkdir_one(const char *path);
 /* Portable empty file creation function */
 int port_file_create_empty(const char *path);
 
+#ifdef PLATFORM_AMIGA
+/* Sanitize UTF-8 filename to ASCII for AmigaOS filesystem */
+char *port_sanitize_filename(const char *utf8_name);
+#endif
+
 #endif
