@@ -17,6 +17,8 @@ extern "C"
 {
 #endif
 
+#include "../spellchecker/spell.h"
+
 #if defined(PLATFORM_AMIGA)
 #ifndef THES_CACHE_N
 #define THES_CACHE_N 32
@@ -46,12 +48,6 @@ extern "C"
 #endif
 
     typedef struct ThesHandle ThesHandle;
-
-    /* Forward-declared from spell.h for stemming */
-#ifndef THES_SPELLCHECKER_TYPEDEF
-#define THES_SPELLCHECKER_TYPEDEF
-    typedef struct SpellChecker SpellChecker;
-#endif
 
     /* Each meaning has a definition and synonym list. Owned until thes_free_meanings() */
     typedef struct
