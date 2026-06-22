@@ -288,9 +288,23 @@ int main(int argc, char **argv)
     /* Register Ctrl+arrow key sequences for word navigation */
     define_key("\033[1;5D", KEY_CLEFT);
     define_key("\033[1;5C", KEY_CRIGHT);
-    define_key("\033y", KEY_ALT('Y'));
+    define_key("\033[1;5A", KEY_CUP);
+    define_key("\033[1;5B", KEY_CDOWN);
+
+    /* Register Ctrl+Shift+arrow key sequences for word selection */
+    define_key("\033[1;6D", KEY_CSLEFT);
+    define_key("\033[1;6C", KEY_CSRIGHT);
+    define_key("\033[1;6A", KEY_CSUP);
+    define_key("\033[1;6B", KEY_CSDOWN);
+
+    /* Register Shift+arrow key sequences for character/line selection */
+    define_key("\033[1;2D", KEY_SLEFT);
+    define_key("\033[1;2C", KEY_SRIGHT);
+    define_key("\033[1;2A", KEY_SUP);
+    define_key("\033[1;2B", KEY_SDOWN);
 
     /* Register Alt+key sequences for editor functions */
+    define_key("\033y", KEY_ALT('Y'));
     define_key("\033g", KEY_ALT('G'));
     define_key("\033G", KEY_ALT('G'));
     define_key("\033d", KEY_ALT('D'));

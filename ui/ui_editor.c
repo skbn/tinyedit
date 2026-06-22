@@ -2341,6 +2341,70 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         ed_word_right(te_app_get_editor(app));
         return 1;
 
+    case KEY_CUP:
+        ed_move_up(te_app_get_editor(app));
+        return 1;
+
+    case KEY_CDOWN:
+        ed_move_down(te_app_get_editor(app));
+        return 1;
+
+    case KEY_CSLEFT:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_word_left(te_app_get_editor(app));
+        return 1;
+
+    case KEY_CSRIGHT:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_word_right(te_app_get_editor(app));
+        return 1;
+
+    case KEY_CSUP:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_up(te_app_get_editor(app));
+        return 1;
+
+    case KEY_CSDOWN:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_down(te_app_get_editor(app));
+        return 1;
+
+    case KEY_SLEFT:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_left(te_app_get_editor(app));
+        return 1;
+
+    case KEY_SRIGHT:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_right(te_app_get_editor(app));
+        return 1;
+
+    case KEY_SUP:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_up(te_app_get_editor(app));
+        return 1;
+
+    case KEY_SDOWN:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_down(te_app_get_editor(app));
+        return 1;
+
     case KEY_ALT('Z'):
         ed_redo(te_app_get_editor(app));
         app->hard_wrap = ed_get_hard_wrap(te_app_get_editor(app));
