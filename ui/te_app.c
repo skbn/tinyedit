@@ -25,16 +25,28 @@
 #include "../wrapper.h"
 
 #ifdef HAVE_HUNSPELL
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/spell.h"
+#else
 #include "../spell/spell.h"
+#endif
 #include "ui_spell.h"
 #endif
 
 #ifdef HAVE_MYTHES
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/thes.h"
+#else
 #include "../thes/thes.h"
+#endif
 #endif
 
 #ifdef HAVE_HYPHEN
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/hyph.h"
+#else
 #include "../hyph_wrap/hyph_wrap.h"
+#endif
 #endif
 
 TeApp *te_app_new(void)

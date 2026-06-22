@@ -25,14 +25,26 @@
 #include "../core/utf8.h"
 
 #ifdef HAVE_HUNSPELL
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/spell.h"
+#else
 #include "../spell/spell.h"
+#endif
 #include "ui_spell.h"
 #ifdef HAVE_HYPHEN
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/hyph.h"
+#else
 #include "../hyph_wrap/hyph_wrap.h"
+#endif
 #include "ui_hyph.h"
 #endif
 #ifdef HAVE_MYTHES
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/thes.h"
+#else
 #include "../thes/thes.h"
+#endif
 #include "ui_thes.h"
 #endif
 #endif /* HAVE_HUNSPELL */

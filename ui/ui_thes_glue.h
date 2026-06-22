@@ -13,7 +13,11 @@
 #define UI_THES_GLUE_H
 
 #include "te.h"
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/spell.h" /* SpellChecker typedef */
+#else
 #include "../spell/spell.h" /* SpellChecker typedef */
+#endif
 
 void te_status(TeApp *app, const char *fmt, ...);
 

@@ -8,9 +8,9 @@ A lightweight text editor for AmigaOS, Linux, and Windows using ncurses
 - Multiple charset support: UTF-8, LATIN-1/2, CP437, CP850, CP865, CP866, CP1252
 - TTF rendering with full Unicode support (including emojis) on AmigaOS
 - Tab system for editing multiple files simultaneously
-- Spell checker panel with Hunspell integration (optional)
-- Hyphenation support with libhyphen (optional)
-- Thesaurus support with libmythes (optional)
+- Spell checker with native C implementation (AmigaOS) or Hunspell integration (Linux/Windows)
+- Hyphenation with native C implementation (AmigaOS) or libhyphen (Linux/Windows)
+- Thesaurus with native C implementation (AmigaOS) or libmythes (Linux/Windows)
 - Translator panel (placeholder for future implementation)
 - Configurable colors and fonts
 - Auto-wrap and hard-wrap modes
@@ -98,58 +98,15 @@ make -f Makefile.amiga.te unprep
 make -f Makefile.amiga.te prep
 make -f Makefile.amiga.te clean all
 
-To compile with Hunspell spell checker:
-Hunspell source: https://github.com/hunspell/hunspell
-
-Experimental:
-Hypehn source: https://github.com/hunspell/hyphen.git
-Mythes source: https://github.com/hunspell/mythes.git
-
-make -f Makefile.amiga prep
-make -f Makefile.amiga USE_HUNSPELL=1 all
-
-To compile without Hunspell (default):
+Native spell checker, hyphenation, and thesaurus (default):
 make -f Makefile.amiga all
 
-For Makefile.amiga.te (with FreeType):
-make -f Makefile.amiga.te prep-hunspell
-make -f Makefile.amiga.te USE_HUNSPELL=1 all
+The AmigaOS version includes native C implementations for:
+- Spell checker (compatible with hunspell .aff/.dic files)
+- Hyphenation (compatible with hyph_*.dic files, implements Liang algorithm)
+- Thesaurus (compatible with mythes th_*.idx/dat files)
 
-Note: The prep-hunspell target applies patches to Hunspell source code to fix endianness issues on m68k (big-endian architecture)
-These patches are necessary because:
-
-Version 1.7.3:
-
-**w_char.hxx (line 58):**
-- Original: #if defined(_WIN32) || (defined(__BYTE_ORDER__) && (__BYTE_ORDER__==__ORDER_LITTLE_ENDIAN__)) || defined(__LITTLE_ENDIAN__)
-
-- Patched: #if defined(_WIN32) || (defined(__BYTE_ORDER__) && (__BYTE_ORDER__==__ORDER_LITTLE_ENDIAN__)) || defined(__LITTLE_ENDIAN__) || defined(PLATFORM_AMIGA)
-
-- Reason: Adds `PLATFORM_AMIGA` to little-endian detection so Hunspell uses memcpy conversion instead of manual shift
-
-**csutil.cxx (u8_u16 function, lines 228-229):**
-- Original:
-  ```cpp
-  out->h = static_cast<unsigned char>(cp >> 8);
-  out->l = static_cast<unsigned char>(cp);
-  ```
-- Patched:
-  ```cpp
-  #ifdef PLATFORM_AMIGA
-      out->l = static_cast<unsigned char>(cp >> 8);
-  #else
-      out->h = static_cast<unsigned char>(cp >> 8);
-  #endif
-  #ifdef PLATFORM_AMIGA
-      out->h = static_cast<unsigned char>(cp);
-  #else
-      out->l = static_cast<unsigned char>(cp);
-  #endif
-  ```
-- Reason: Inverts byte order for m68k big-endian compatibility (h/l swapped)
-
-These patches are applied automatically by the Makefile and only need to be run once
-If Hunspell is updated to a new version, these patches may need to be reapplied or adjusted
+These are pure C implementations designed for AmigaOS with LRU cache, no C++ dependencies.
 
 Freetype fonts tested:
 
@@ -196,7 +153,7 @@ make -f Makefile.win32 USE_HUNSPELL=1
 
 ## Hyphenation and Thesaurus Support
 
-tinyedit supports hyphenation and thesaurus functionality through optional libraries.
+tinyedit supports hyphenation and thesaurus functionality through optional libraries on Linux/Windows, and native C implementations on AmigaOS.
 
 ### Package Installation by Distribution
 

@@ -304,6 +304,7 @@ static FileEnt *load_dir(const char *dir, int *out_n)
 #elif defined(PLATFORM_AMIGA)
     BPTR lock;
     struct FileInfoBlock *fib = NULL;
+    const char *colon = NULL;
 #else
     DIR *dp = NULL;
     struct dirent *e = NULL;
@@ -473,7 +474,7 @@ static FileEnt *load_dir(const char *dir, int *out_n)
         }
 
         ents[n].is_dir = (fib->fib_DirEntryType > 0) ? 1 : 0;
-        ents[n].name = strdup(fib->fib_FileName);
+        ents[n].name = strdup((const char *)fib->fib_FileName);
 
         if (!ents[n].name)
             break;

@@ -10,7 +10,7 @@
  */
 
 #ifdef PLATFORM_AMIGA
-const char __attribute__((used)) binkd_stack_size[] = "$STACK:65536";
+const char __attribute__((used)) tinyedit_stack_size[] = "$STACK:131072";
 #endif
 
 #ifndef _XOPEN_SOURCE_EXTENDED

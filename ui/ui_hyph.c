@@ -17,7 +17,11 @@
 #include <wchar.h>
 
 #ifdef HAVE_HYPHEN
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/hyph.h"
+#else
 #include "../hyph_wrap/hyph_wrap.h"
+#endif
 #include "../core/utf8.h"
 #endif
 

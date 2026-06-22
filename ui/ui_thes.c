@@ -19,7 +19,11 @@
 #include <wctype.h>
 
 #ifdef HAVE_MYTHES
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/thes.h"
+#else
 #include "../thes/thes.h"
+#endif
 #endif
 
 #include "../core/utf8.h"

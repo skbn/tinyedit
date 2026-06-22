@@ -51,6 +51,9 @@ int utf8_to_charset(const char *cs, const char *src, int srclen, char *dst, int 
 wchar_t *utf8_to_wcs(const char *utf8, int *out_len);
 char *wcs_to_utf8(const wchar_t *wcs, int len);
 
+/* Convert UTF-8 string to lowercase in-place using Unicode case folding */
+int utf8_tolower(char *str);
+
 /* Single-byte charset to Unicode (0x00-0x7F pass-through). NOT for UTF-8 */
 uint32_t charset_byte_to_unicode(const char *charset, unsigned char byte);
 

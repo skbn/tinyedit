@@ -21,9 +21,17 @@
 #include "../components/editor.h"
 
 #ifdef HAVE_HUNSPELL
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/spell.h"
+#else
 #include "../spell/spell.h"
+#endif
 #ifdef HAVE_MYTHES
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/thes.h"
+#else
 #include "../thes/thes.h"
+#endif
 #endif
 #endif
 
