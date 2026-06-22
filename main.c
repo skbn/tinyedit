@@ -266,6 +266,13 @@ int main(int argc, char **argv)
     keypad(stdscr, TRUE);
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
+    mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, NULL);
+    mouseinterval(0);
+
+    /* Button event tracking: motion while button held */
+    printf("\033[?1002h");
+    fflush(stdout);
+
     set_escdelay(25);
 #endif
 
@@ -458,6 +465,12 @@ int main(int argc, char **argv)
         fclose(tty);
     }
 
+#endif
+
+#if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
+    /* Disable button event tracking */
+    printf("\033[?1002l");
+    fflush(stdout);
 #endif
 
     endwin();

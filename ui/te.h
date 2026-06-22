@@ -178,6 +178,9 @@ void te_app_set_raw_bytes(TeApp *app, char *ptr, int len);
 /* ui_editor.c */
 void ui_editor_run(TeApp *app);
 
+/* Mouse helper: reverse mapping screen -> logical buffer position */
+int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_x, int *out_line, int *out_col);
+
 /* ui_popup.c */
 void ui_popup_help(const char *title, const char *const *lines, int n);
 int ui_popup_confirm(const char *title, const char *msg);

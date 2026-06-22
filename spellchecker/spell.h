@@ -13,6 +13,7 @@
 #define SPELL_H
 
 #include <stddef.h>
+#include <wchar.h>
 
 #ifndef SPELL_CACHE_N
 #define SPELL_CACHE_N 64
@@ -27,8 +28,13 @@
 #endif
 
 #ifndef SPELL_STEP_CUSTOM
-#define SPELL_STEP_CUSTOM 32768
+#define SPELL_STEP_CUSTOM 16
 #endif
+
+#define MS_NGRAM_LONGER_WORSE 1
+#define MS_NGRAM_ANY_MISMATCH 2
+#define MS_NGRAM_WEIGHTED 4
+#define MS_MAX_ROOTS 10
 
 /* opaque: internal structure in spell.c */
 struct spell;
@@ -82,13 +88,14 @@ void spell_clear_ignored(struct spell *s);
 /* return 1 if spell checker is available (compiled) */
 int spell_is_available(void);
 
+/* Unicode word-char classifier. Use instead of iswalnum() for word boundaries */
+int te_is_word_char(wint_t wc);
+
 /* list available dictionaries in directory, returns base names (without .dic) */
 char **spell_list_dictionaries(const char *dir_path, int *n_dicts);
 void spell_free_dictionaries(char **dicts, int n_dicts);
 
 /* stubs not supported by current engine, return error (-1/0) */
-int spell_add_word(struct spell *s, const char *word);
-int spell_remove_word(struct spell *s, const char *word);
 int spell_stem(struct spell *s, const char *word, char ***out_list);
 int spell_generate(struct spell *s, const char *word, const char *example, char ***out_list);
 void spell_free_list(struct spell *s, char **list, int n);

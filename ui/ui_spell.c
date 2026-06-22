@@ -23,10 +23,8 @@
 #ifdef HAVE_HUNSPELL
 #if defined(PLATFORM_AMIGA)
 #include "../spellchecker/spell.h"
-#include "../spellchecker/te_wordchar.h"
 #else
 #include "../spell/spell.h"
-#include "../spellchecker/te_wordchar.h"
 #endif
 #ifdef HAVE_MYTHES
 #if defined(PLATFORM_AMIGA)

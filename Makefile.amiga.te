@@ -38,7 +38,13 @@ SPELL_DIR = $(HERE)spellchecker
 
 ifeq ($(USE_HUNSPELL),1)
   CFLAGS += -DHAVE_HUNSPELL -I$(SPELL_DIR)
-  SPELL_OBJS = $(OBJDIR)/spellchecker_spell.o
+  SPELL_OBJS = $(OBJDIR)/spellchecker_utils.o \
+               $(OBJDIR)/spellchecker_htab.o \
+               $(OBJDIR)/spellchecker_affix.o \
+               $(OBJDIR)/spellchecker_core.o \
+               $(OBJDIR)/spellchecker_suggest.o \
+               $(OBJDIR)/spellchecker_stem.o \
+               $(OBJDIR)/spellchecker_custom.o
 endif
 
 # Hyphen support (new C-only engine in spellchecker/)
@@ -91,7 +97,7 @@ CORE_OBJS  = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
 COMP_OBJS  = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS    = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o \
              $(OBJDIR)/ui_popup.o $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
+             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o
 			 
 ifeq ($(USE_HUNSPELL),1)
 UI_OBJS    += $(OBJDIR)/ui_spell.o
@@ -463,6 +469,9 @@ $(OBJDIR)/wm.o: $(UIDIR)/wm.c | $(OBJDIR)
 $(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
+$(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
 ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
@@ -484,8 +493,28 @@ $(OBJDIR)/spellchecker_thes.o: $(SPELL_DIR)/thes.c $(SPELL_DIR)/thes.h | $(OBJDI
 	$(CC) $(TEFLAGS) -c $< -o $@
 endif
 
-# Spell checker object (only if USE_HUNSPELL=1)
-$(OBJDIR)/spellchecker_spell.o: $(SPELL_DIR)/spell.c $(SPELL_DIR)/spell.h | $(OBJDIR)
+# Spell checker objects (only if USE_HUNSPELL=1)
+SPELL_PRIV = $(SPELL_DIR)/spell_priv.h $(SPELL_DIR)/spell.h
+
+$(OBJDIR)/spellchecker_utils.o: $(SPELL_DIR)/spell_utils.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_htab.o: $(SPELL_DIR)/spell_htab.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_affix.o: $(SPELL_DIR)/spell_affix.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_core.o: $(SPELL_DIR)/spell_core.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_suggest.o: $(SPELL_DIR)/spell_suggest.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_stem.o: $(SPELL_DIR)/spell_stem.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_custom.o: $(SPELL_DIR)/spell_custom.c $(SPELL_PRIV) | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 clean:

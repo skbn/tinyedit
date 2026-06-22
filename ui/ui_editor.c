@@ -29,6 +29,7 @@
 #include "ui_setup.h"
 #include "ui_spell.h"
 #include "ui_glyph_picker.h"
+#include "ui_mouse.h"
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
 #include "ui_hyph.h"
@@ -459,6 +460,96 @@ static int soft_vrows_between(Ed *ed, int width, int a_line, int a_sub, int b_li
     delta += a_sub;
 
     return -delta;
+}
+
+/* Convert screen coordinates (y, x) to buffer position (line, col) Used for mouse clicks. Works in both wrap modes */
+int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_x, int *out_line, int *out_col)
+{
+    Ed *ed = NULL;
+    EdInfo info;
+    int line;
+    int sub;
+    int remaining;
+    int last;
+    int ll;
+
+    if (!app || !out_line || !out_col)
+        return -1;
+
+    ed = te_app_get_editor(app);
+
+    if (!ed)
+        return -1;
+
+    ed_get_info(ed, &info);
+
+    if (info.line_count <= 0)
+    {
+        *out_line = 0;
+        *out_col = 0;
+        return 0;
+    }
+
+    if (width < 1)
+        width = 1;
+
+    if (screen_y < 0)
+        screen_y = 0;
+
+    if (screen_x < 0)
+        screen_x = 0;
+
+    /* Walk forward through logical lines, consuming sub-rows */
+    line = s_soft_top_line;
+    sub = s_soft_top_sub;
+    remaining = screen_y;
+
+    while (line < info.line_count)
+    {
+        const wchar_t *l = ed_line_wcs(ed, line);
+        int ll = ed_line_len(ed, line);
+        int n_sub = wrap_count(l ? l : L"", l ? ll : 0, width);
+        int sub_left_in_line = n_sub - sub;
+
+        if (remaining < sub_left_in_line)
+        {
+            /* Target sub-row is in this logical line at sub + remaining */
+            int target_sub = sub + remaining;
+            int seg_start = 0;
+            int seg_end = 0;
+            int j;
+            int acc_w = 0;
+
+            line_subrow_range(l ? l : L"", l ? ll : 0, width, target_sub, &seg_start, &seg_end);
+
+            /* Walk char by char, summing visual width until we exceed screen_x */
+            for (j = seg_start; j < seg_end; j++)
+            {
+                int cw = wcs_vwidth(&l[j], 1);
+
+                if (acc_w + cw > screen_x)
+                    break;
+
+                acc_w += cw;
+            }
+
+            *out_line = line;
+            *out_col = j; /* may equal seg_end (click past end of segment) */
+            return 0;
+        }
+
+        remaining -= sub_left_in_line;
+        line++;
+        sub = 0;
+    }
+
+    /* y is past last line -> clamp to end of document */
+    last = info.line_count - 1;
+    ll = ed_line_len(ed, last);
+    *out_line = last;
+    *out_col = ll;
+
+    return 0;
 }
 
 /* Return cursor screen row. O(|info.row - s_soft_top_line|) */
@@ -2662,6 +2753,67 @@ void ui_editor_run(TeApp *app)
                         ch == KEY_HOME || ch == KEY_END || ch == KEY_PPAGE || ch == KEY_NPAGE ||
                         ch == KEY_BACKSPACE || ch == KEY_DC || ch == KEY_ENTER))
             is_key = 1;
+
+        if (is_key && ch == KEY_MOUSE)
+        {
+#ifdef PLATFORM_AMIGA
+            unsigned long m = getmouse();
+            int my;
+            int mx;
+            int mtype;
+
+            /* Decode: low 8 bits = type, next 12 = x, next 12 = y */
+            mtype = m & 0xFF;
+            mx = (m >> 8) & 0xFFF;
+            my = (m >> 20) & 0xFFF;
+#else
+            static int s_mouse_button_down = 0;
+            MEVENT ev;
+            int my;
+            int mx;
+            int mtype;
+
+            if (getmouse(&ev) != OK)
+                continue;
+
+            mx = ev.x;
+            my = ev.y;
+
+            /* Map ncurses bstate to UiMouseEventType */
+            if (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))
+            {
+                s_mouse_button_down = 1;
+                mtype = UI_MOUSE_PRESS_LEFT;
+            }
+            else if (ev.bstate & BUTTON1_RELEASED)
+            {
+                s_mouse_button_down = 0;
+                mtype = UI_MOUSE_RELEASE_LEFT;
+            }
+            else if (ev.bstate & BUTTON4_PRESSED)
+                mtype = UI_MOUSE_WHEEL_UP;
+            else if (ev.bstate & BUTTON5_PRESSED)
+                mtype = UI_MOUSE_WHEEL_DOWN;
+            else if (s_mouse_button_down && (ev.bstate & REPORT_MOUSE_POSITION))
+                mtype = UI_MOUSE_DRAG_LEFT;
+            else
+                continue; /* Unknown event */
+#endif
+
+            /* Adjust mouse coordinates for editor frame offset */
+            win = wm_get_window_by_type(app->wm, WIN_EDITOR);
+
+            if (win && win->visible)
+            {
+                my -= win->y;
+                mx -= win->x;
+            }
+
+            if (ui_mouse_dispatch(app, mtype, my, mx))
+                screen_dirty = 1;
+
+            continue;
+        }
 
         preserve_desired = 0;
 

@@ -30,12 +30,39 @@ LFLAGS =
 # Platform-specific defines
 CDEFS = -DPLATFORM_WIN32 -DNO_TYPEDEF_BOOL -D_WINDOWS
 
-# Hunspell support (uses system library on Windows)
-USE_HUNSPELL ?= 0
+# Spellchecker support (same as Amiga: spellchecker/ C-only engine)
+USE_HUNSPELL ?= 1
+SPELL_DIR = $(HERE)spellchecker
+
 ifeq ($(USE_HUNSPELL),1)
-  CFLAGS += -DHAVE_HUNSPELL -I$(HERE)spell
-  SPELL_OBJS = $(OBJDIR)/spell.o
-  HUNSPELL_LIB = -lhunspell
+  CFLAGS += -DHAVE_HUNSPELL -I$(SPELL_DIR)
+  SPELL_OBJS = $(OBJDIR)/spellchecker_utils.o \
+               $(OBJDIR)/spellchecker_htab.o \
+               $(OBJDIR)/spellchecker_affix.o \
+               $(OBJDIR)/spellchecker_core.o \
+               $(OBJDIR)/spellchecker_suggest.o \
+               $(OBJDIR)/spellchecker_stem.o \
+               $(OBJDIR)/spellchecker_custom.o
+endif
+
+# Hyphen support (same as Amiga: spellchecker/ C-only engine)
+USE_HYPHEN ?= 0
+ifeq ($(USE_HYPHEN),1)
+  ifeq ($(USE_HUNSPELL),0)
+    $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
+  endif
+  CFLAGS += -DHAVE_HYPHEN -I$(SPELL_DIR)
+  HYPHWRAP_OBJS = $(OBJDIR)/spellchecker_hyph.o
+endif
+
+# Thesaurus support (same as Amiga: spellchecker/ C-only engine)
+USE_MYTHES ?= 0
+ifeq ($(USE_MYTHES),1)
+  ifeq ($(USE_HUNSPELL),0)
+    $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
+  endif
+  CFLAGS += -DHAVE_MYTHES -I$(SPELL_DIR)
+  THES_OBJS = $(OBJDIR)/spellchecker_thes.o
 endif
 
 # Architecture (default: win64 for 64-bit Windows)
@@ -67,12 +94,12 @@ CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
 COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o
-			
+            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o
+
 ifeq ($(USE_HUNSPELL),1)
 UI_OBJS   += $(OBJDIR)/ui_spell.o
 endif
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS)
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS)
 
 all: $(TARGET) tinyedit
 
@@ -146,14 +173,49 @@ $(OBJDIR)/wm.o: $(UIDIR)/wm.c $(UIDIR)/wm.h | $(OBJDIR)
 $(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 
-# Spell checker object (only if USE_HUNSPELL=1)
-$(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
+# Spell checker objects (same as Amiga: spellchecker/ C-only engine)
+SPELL_PRIV = $(SPELL_DIR)/spell_priv.h $(SPELL_DIR)/spell.h
+
+ifeq ($(USE_HUNSPELL),1)
+$(OBJDIR)/spellchecker_utils.o: $(SPELL_DIR)/spell_utils.c $(SPELL_PRIV) | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_htab.o: $(SPELL_DIR)/spell_htab.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_affix.o: $(SPELL_DIR)/spell_affix.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_core.o: $(SPELL_DIR)/spell_core.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_suggest.o: $(SPELL_DIR)/spell_suggest.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_stem.o: $(SPELL_DIR)/spell_stem.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_custom.o: $(SPELL_DIR)/spell_custom.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
+
+ifeq ($(USE_HYPHEN),1)
+$(OBJDIR)/spellchecker_hyph.o: $(SPELL_DIR)/hyph.c $(SPELL_DIR)/hyph.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
+
+ifeq ($(USE_MYTHES),1)
+$(OBJDIR)/spellchecker_thes.o: $(SPELL_DIR)/thes.c $(SPELL_DIR)/thes.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
 
 # Application
 TINYEDIT = $(HERE)tinyedit-$(ARCH_SUFFIX).exe
@@ -165,8 +227,8 @@ $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) -c $< -o $@
 
 $(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
-	$(CXX) $(CFLAGS) $(LFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
-	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32 $(HUNSPELL_LIB)
+	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
+	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
@@ -176,13 +238,4 @@ endif
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)
 
-# prep target - placeholder for Hunspell (not used on Windows, uses system library)
-prep:
-	@echo ">>> Prep not needed on Windows (uses system Hunspell library)"
-	@echo ">>> Install Hunspell development package and use: make -f Makefile.win32 USE_HUNSPELL=1 all"
-
-# unprep target - placeholder for Hunspell (not used on Windows, uses system library)
-unprep:
-	@echo ">>> Unprep not needed on Windows (uses system Hunspell library)"
-
-.PHONY: all clean prep unprep
+.PHONY: all clean

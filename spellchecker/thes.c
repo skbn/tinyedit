@@ -10,10 +10,13 @@
  */
 
 #include "thes.h"
+#include "spell.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+
+#include "../core/utf8.h"
 
 #ifdef PLATFORM_AMIGA
 #include <exec/types.h>
@@ -21,6 +24,40 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #endif
+
+/* Lowercase a string in-place; UTF-8 aware when enc is UTF-8, else byte tolower */
+static void mt_tolower_enc(char *s, const char *enc)
+{
+    unsigned char *p = (unsigned char *)s;
+
+    if (strcasecmp(enc, "UTF-8") == 0 || strcasecmp(enc, "UTF8") == 0)
+    {
+        utf8_tolower(s);
+        return;
+    }
+
+    while (*p)
+    {
+        *p = (unsigned char)tolower(*p);
+        p++;
+    }
+}
+
+/* Convert UTF-8 word to thesaurus encoding; returns src if already UTF-8 or on error */
+static const char *mt_to_enc(const char *enc, const char *word, char *buf, size_t bufsz)
+{
+    int r;
+
+    if (strcasecmp(enc, "UTF-8") == 0 || strcasecmp(enc, "UTF8") == 0)
+        return word;
+
+    r = utf8_to_charset(enc, word, (int)strlen(word), buf, (int)bufsz);
+
+    if (r > 0)
+        return buf;
+
+    return word;
+}
 
 static char *mt_strdup(const char *s)
 {
@@ -41,7 +78,7 @@ static char *mt_strdup(const char *s)
     return r;
 }
 
-/* read line from fp into buf (size sz), removes \r and \n, returns length or -1 on EOF */
+/* Read line from fp into buf (size sz), removes \r and \n, returns length or -1 on EOF */
 static int mt_readline(FILE *fp, char *buf, size_t sz)
 {
     int c;
@@ -92,7 +129,7 @@ static void cache_init(struct thes *t)
     }
 }
 
-/* free synonyms allocated in cache entry */
+/* Free synonyms allocated in cache entry */
 static void cache_entry_free_strings(struct thes_cache_entry *e)
 {
     int m;
@@ -162,7 +199,7 @@ static int cache_find(struct thes *t, const char *word)
     return -1;
 }
 
-/* obtiene un slot libre (o el LRU si todos llenos) */
+/* Obtiene un slot libre (o el LRU si todos llenos) */
 static int cache_acquire(struct thes *t)
 {
     int i;
@@ -179,8 +216,11 @@ static int cache_acquire(struct thes *t)
         }
     }
 
-    /* all occupied, evict tail (LRU) */
+    /* All occupied, evict tail (LRU) */
     i = t->tail;
+
+    if (i == -1)
+        return 0;
 
     cache_unlink(t, i);
     cache_entry_free_strings(&t->cache[i]);
@@ -211,7 +251,7 @@ void thes_cache_clear(struct thes *t)
     t->count = 0;
 }
 
-/* parse "word|N" into *word_out and *n_out */
+/* Parse "word|N" into *word_out and *n_out */
 static int parse_header(const char *line, char *word_out, int *n_out)
 {
     const char *bar = strchr(line, '|');
@@ -233,12 +273,15 @@ static int parse_header(const char *line, char *word_out, int *n_out)
     return 0;
 }
 
-/* parse meaning line "count|meaning|syn1|syn2|..." */
+/* Parse meaning line "count|meaning|syn1|syn2|..." */
 static void parse_meaning(const char *line, struct thes_meaning *m)
 {
     const char *p = line;
     const char *bar = NULL;
     size_t len;
+    size_t pos_len;
+    size_t syn_len;
+    char *s = NULL;
     int field = 0;
 
     m->n_syns = 0;
@@ -251,7 +294,7 @@ static void parse_meaning(const char *line, struct thes_meaning *m)
 
         if (field == 0)
         {
-            /* first field: POS (part of speech), e.g. "-" */
+            /* First field: POS (part of speech), e.g. "-" */
             if (len >= sizeof(m->pos))
                 len = sizeof(m->pos) - 1;
 
@@ -260,19 +303,20 @@ static void parse_meaning(const char *line, struct thes_meaning *m)
         }
         else if (field == 1)
         {
-            /* second field: first synonym, combine with POS for definition */
-            size_t pos_len = strlen(m->pos);
-            size_t syn_len = len;
+            /* Second field: first synonym, combine with POS for definition */
+            pos_len = strlen(m->pos);
+            syn_len = len;
 
             if (pos_len + 1 + syn_len < sizeof(m->pos))
             {
                 m->pos[pos_len] = ' ';
+
                 memcpy(m->pos + pos_len + 1, p, syn_len);
                 m->pos[pos_len + 1 + syn_len] = '\0';
             }
 
-            /* also save as synonym */
-            char *s = (char *)malloc(len + 1);
+            /* Also save as synonym */
+            s = (char *)malloc(len + 1);
 
             if (!s)
                 break;
@@ -284,8 +328,8 @@ static void parse_meaning(const char *line, struct thes_meaning *m)
         }
         else
         {
-            /* following fields: synonyms */
-            char *s = (char *)malloc(len + 1);
+            /* Following fields: synonyms */
+            s = (char *)malloc(len + 1);
 
             if (!s)
                 break;
@@ -305,7 +349,7 @@ static void parse_meaning(const char *line, struct thes_meaning *m)
     }
 }
 
-/* read entry from .dat at offset and fill result */
+/* Read entry from .dat at offset and fill result */
 static int read_entry(struct thes *t, long off, struct thes_result *r)
 {
     char line[2048];
@@ -346,9 +390,14 @@ static int read_entry(struct thes *t, long off, struct thes_result *r)
 static int idx_bsearch(struct thes *t, const char *word, long *off_out)
 {
     int lo = 0;
-    int hi = t->n_entries - 1;
+    int hi;
     int mid;
     int cmp;
+
+    if (t->n_entries == 0)
+        return 0;
+
+    hi = t->n_entries - 1;
 
     while (lo <= hi)
     {
@@ -394,7 +443,7 @@ struct thes *thes_open(const char *idx_path, const char *dat_path)
         return NULL;
     }
 
-    /* line 1: encoding */
+    /* Line 1: encoding */
     if (mt_readline(fidx, line, sizeof(line)) < 0)
     {
         fclose(fidx);
@@ -405,7 +454,7 @@ struct thes *thes_open(const char *idx_path, const char *dat_path)
     strncpy(t->enc_idx, line, sizeof(t->enc_idx) - 1);
     t->enc_idx[sizeof(t->enc_idx) - 1] = '\0';
 
-    /* line 2: number of entries */
+    /* Line 2: number of entries */
     if (mt_readline(fidx, line, sizeof(line)) < 0)
     {
         fclose(fidx);
@@ -415,7 +464,16 @@ struct thes *thes_open(const char *idx_path, const char *dat_path)
 
     count = atoi(line);
 
-    if (count <= 0 || count > 10000000)
+    /* Validate count - must be positive and reasonable to avoid OOM */
+    if (count <= 0)
+    {
+        fclose(fidx);
+        free(t);
+        return NULL;
+    }
+
+    /* Limit to ~6 million entries (~100MB) to avoid OOM */
+    if (count > 6000000)
     {
         fclose(fidx);
         free(t);
@@ -423,18 +481,17 @@ struct thes *thes_open(const char *idx_path, const char *dat_path)
     }
 
     t->n_entries = count;
-
     t->idx_words = (char **)calloc((size_t)count, sizeof(char *));
     t->idx_offs = (long *)calloc((size_t)count, sizeof(long));
 
     if (!t->idx_words || !t->idx_offs)
     {
         fclose(fidx);
-        free(t);
+        thes_close(t);
         return NULL;
     }
 
-    /* parse all entries "word|offset" */
+    /* Parse all entries "word|offset" */
     for (i = 0; i < count; i++)
     {
         char *bar = NULL;
@@ -469,7 +526,7 @@ struct thes *thes_open(const char *idx_path, const char *dat_path)
     fclose(fidx);
     fidx = NULL;
 
-    /* open .dat and read its encoding */
+    /* Open .dat and read its encoding */
     t->dat = fopen(dat_path, "rb");
 
     if (!t->dat)
@@ -525,6 +582,7 @@ int thes_lookup_raw(struct thes *t, const char *word, struct thes_result **out)
     int idx;
     long off;
     size_t wlen;
+    int was_free;
 
     if (out)
         *out = NULL;
@@ -537,7 +595,7 @@ int thes_lookup_raw(struct thes *t, const char *word, struct thes_result **out)
     if (wlen == 0 || wlen >= THES_MAX_WORD)
         return 0;
 
-    /* cache hit? */
+    /* Cache hit? */
     idx = cache_find(t, word);
 
     if (idx != -1)
@@ -548,11 +606,14 @@ int thes_lookup_raw(struct thes *t, const char *word, struct thes_result **out)
         return 1;
     }
 
-    /* search in idx */
+    /* Search in idx */
     if (!idx_bsearch(t, word, &off))
         return 0;
 
-    /* read entry from .dat and put in cache */
+    /* Read entry from .dat and put in cache */
+
+    was_free = (t->count < THES_CACHE_N);
+
     idx = cache_acquire(t);
 
     strncpy(t->cache[idx].key, word, THES_MAX_WORD - 1);
@@ -561,7 +622,10 @@ int thes_lookup_raw(struct thes *t, const char *word, struct thes_result **out)
     if (read_entry(t, off, &t->cache[idx].result) != 0)
     {
         t->cache[idx].key[0] = '\0';
-        t->count--;
+
+        if (was_free)
+            t->count--;
+
         return -1;
     }
 
@@ -588,40 +652,26 @@ void thes_free(ThesHandle *t)
 
 void thes_set_speller(ThesHandle *t, SpellChecker *sc)
 {
-    /* this engine does not use stem fallback */
+    if (t)
+        t->sc = sc;
 }
 
-int thes_lookup(ThesHandle *t, const char *word, ThesMeaning **out_meanings)
+/* Helper: materialise thes_result into a ThesMeaning array */
+static ThesMeaning *thes_build_meanings(struct thes_result *res, int *n_out)
 {
-    struct thes_result *res = NULL;
     ThesMeaning *m = NULL;
-    int n;
+    int n = res->n_meanings;
     int i;
     int j;
-
-    if (out_meanings)
-        *out_meanings = NULL;
-
-    if (!t || !word || !out_meanings)
-        return -1;
-
-    if (thes_lookup_raw(t, word, &res) != 1 || !res)
-        return 0;
-
-    n = res->n_meanings;
-
-    if (n <= 0)
-        return 0;
 
     m = (ThesMeaning *)calloc((size_t)n, sizeof(*m));
 
     if (!m)
-        return -1;
+        return NULL;
 
     for (i = 0; i < n; i++)
     {
         struct thes_meaning *src = &res->meanings[i];
-
         m[i].def = mt_strdup(src->pos);
 
         if (!m[i].def)
@@ -657,6 +707,117 @@ int thes_lookup(ThesHandle *t, const char *word, ThesMeaning **out_meanings)
                 }
             }
         }
+    }
+
+    *n_out = n;
+    return m;
+}
+
+/* Lookup with automatic encoding conversion and case fallback */
+static int thes_lookup_norm(ThesHandle *t, const char *word_enc, ThesMeaning **out, int *n_out)
+{
+    struct thes_result *res = NULL;
+    char lower[THES_MAX_WORD];
+    size_t wlen;
+
+    if (thes_lookup_raw(t, word_enc, &res) == 1 && res && res->n_meanings > 0)
+    {
+        *out = thes_build_meanings(res, n_out);
+        return *out ? *n_out : -1;
+    }
+
+    /* Try lowercase fallback (encoding-aware) */
+    wlen = strlen(word_enc);
+
+    if (wlen >= sizeof(lower))
+    {
+        *out = NULL;
+        *n_out = 0;
+        return 0;
+    }
+
+    strncpy(lower, word_enc, sizeof(lower) - 1);
+    lower[sizeof(lower) - 1] = '\0';
+
+    mt_tolower_enc(lower, t->enc_idx);
+
+    if (strcmp(lower, word_enc) != 0)
+    {
+        if (thes_lookup_raw(t, lower, &res) == 1 && res && res->n_meanings > 0)
+        {
+            *out = thes_build_meanings(res, n_out);
+            return *out ? *n_out : -1;
+        }
+    }
+
+    *out = NULL;
+    *n_out = 0;
+
+    return 0;
+}
+
+int thes_lookup(ThesHandle *t, const char *word, ThesMeaning **out_meanings)
+{
+    ThesMeaning *m = NULL;
+    int n = 0;
+    char enc_buf[THES_MAX_WORD];
+    const char *word_enc;
+
+    if (out_meanings)
+        *out_meanings = NULL;
+
+    if (!t || !word || !out_meanings)
+        return -1;
+
+    /* Convert input (always UTF-8 from UI) to thesaurus encoding */
+    word_enc = mt_to_enc(t->enc_idx, word, enc_buf, sizeof(enc_buf));
+
+    if (thes_lookup_norm(t, word_enc, &m, &n) > 0)
+    {
+        *out_meanings = m;
+        return n;
+    }
+
+    /* Stem fallback: spell_stem returns roots in spell encoding (same as thes) */
+    if (t->sc)
+    {
+        char **stems = NULL;
+        int ns = spell_stem(t->sc, word_enc, &stems);
+        int si;
+
+        for (si = 0; si < ns; si++)
+        {
+            ThesMeaning *more = NULL;
+            int nm = 0;
+            ThesMeaning *grow;
+
+            if (!stems[si] || !stems[si][0])
+                continue;
+
+            if (strcmp(stems[si], word_enc) == 0)
+                continue;
+
+            if (thes_lookup_norm(t, stems[si], &more, &nm) <= 0 || !more)
+                continue;
+
+            grow = (ThesMeaning *)realloc(m, (size_t)(n + nm) * sizeof(*m));
+
+            if (!grow)
+            {
+                thes_free_meanings(t, more, nm);
+                spell_free_list(t->sc, stems, ns);
+                thes_free_meanings(t, m, n);
+                return -1;
+            }
+
+            m = grow;
+            memcpy(m + n, more, (size_t)nm * sizeof(*m));
+            free(more);
+            n += nm;
+        }
+
+        if (stems)
+            spell_free_list(t->sc, stems, ns > 0 ? ns : 0);
     }
 
     *out_meanings = m;
@@ -736,6 +897,11 @@ char **thes_list_dictionaries(const char *dir_path, int *n_dicts)
     int cap;
     int count;
 
+#ifdef PLATFORM_AMIGA
+    BPTR lock;
+    struct FileInfoBlock *fib = NULL;
+#endif
+
     if (n_dicts)
         *n_dicts = 0;
 
@@ -750,53 +916,47 @@ char **thes_list_dictionaries(const char *dir_path, int *n_dicts)
         return NULL;
 
 #ifdef PLATFORM_AMIGA
+    lock = Lock((CONST_STRPTR)dir_path, ACCESS_READ);
+
+    if (lock)
     {
-        BPTR lock;
-        struct FileInfoBlock *fib = NULL;
+        fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
 
-        lock = Lock((CONST_STRPTR)dir_path, ACCESS_READ);
-
-        if (lock)
+        if (fib && Examine(lock, fib))
         {
-            fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
-
-            if (fib && Examine(lock, fib))
+            while (ExNext(lock, fib))
             {
-                while (ExNext(lock, fib))
+                if (fib->fib_DirEntryType < 0 && ends_with_idx(fib->fib_FileName))
                 {
-                    if (fib->fib_DirEntryType < 0 && ends_with_idx(fib->fib_FileName))
+                    char *base = extract_thes_name(fib->fib_FileName);
+
+                    if (base)
                     {
-                        char *base = extract_thes_name(fib->fib_FileName);
-
-                        if (base)
+                        if (count >= cap)
                         {
-                            if (count >= cap)
+                            int new_cap = cap * 2;
+                            char **g = (char **)realloc(list, (size_t)new_cap * sizeof(char *));
+
+                            if (!g)
                             {
-                                char **g;
-
-                                cap *= 2;
-                                g = (char **)realloc(list, (size_t)cap * sizeof(char *));
-
-                                if (!g)
-                                {
-                                    free(base);
-                                    continue;
-                                }
-
-                                list = g;
+                                free(base);
+                                continue;
                             }
 
-                            list[count++] = base;
+                            list = g;
+                            cap = new_cap;
                         }
+
+                        list[count++] = base;
                     }
                 }
             }
-
-            if (fib)
-                FreeDosObject(DOS_FIB, fib);
-
-            UnLock(lock);
         }
+
+        if (fib)
+            FreeDosObject(DOS_FIB, fib);
+
+        UnLock(lock);
     }
 #endif
 

@@ -54,6 +54,8 @@ struct thes_cache_entry
     short prev, next; /* doubly linked list */
 };
 
+struct spell;
+
 struct thes
 {
     FILE *dat;        /* open .dat file */
@@ -69,14 +71,9 @@ struct thes
     struct thes_cache_entry cache[THES_CACHE_N];
     short head, tail;
     short count;
-};
 
-/* public API (internal structures) */
-struct thes *thes_open(const char *idx_path, const char *dat_path);
-void thes_close(struct thes *t);
-int thes_lookup_raw(struct thes *t, const char *word, struct thes_result **out);
-void thes_cache_clear(struct thes *t);
-const char *thes_get_encoding(struct thes *t);
+    struct spell *sc; /* optional speller for stem fallback */
+};
 
 #ifndef THES_SPELLCHECKER_TYPEDEF
 #define THES_SPELLCHECKER_TYPEDEF
@@ -93,6 +90,13 @@ typedef struct
     int nsyns;
     char **syns; /* nsyns entries */
 } ThesMeaning;
+
+/* public API (internal structures) */
+struct thes *thes_open(const char *idx_path, const char *dat_path);
+void thes_close(struct thes *t);
+int thes_lookup_raw(struct thes *t, const char *word, struct thes_result **out);
+void thes_cache_clear(struct thes *t);
+const char *thes_get_encoding(struct thes *t);
 
 /* open idx + dat (e.g. /path/th_es_ES_v2.idx, .dat), returns NULL on error */
 ThesHandle *thes_new(const char *idx_path, const char *dat_path);

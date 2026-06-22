@@ -25,23 +25,6 @@
 
 #include "../core/utf8.h"
 
-static char *mh_strdup(const char *s)
-{
-    size_t n;
-    char *r = NULL;
-
-    if (!s)
-        return NULL;
-
-    n = strlen(s) + 1;
-    r = (char *)malloc(n);
-
-    if (r)
-        memcpy(r, s, n);
-
-    return r;
-}
-
 static int mh_readline(FILE *fp, char *buf, size_t sz)
 {
     int c = 0;
@@ -77,7 +60,7 @@ static int mh_readline(FILE *fp, char *buf, size_t sz)
     return n;
 }
 
-/* trim trailing spaces */
+/* Trim trailing spaces */
 static void mh_rstrip(char *s)
 {
     int n = (int)strlen(s);
@@ -167,6 +150,10 @@ static int cache_acquire(struct hyph *h)
     }
 
     i = h->tail;
+
+    if (i == -1)
+        return 0;
+
     cache_unlink(h, i);
 
     return i;
@@ -178,7 +165,7 @@ void hyph_cache_clear(struct hyph *h)
         cache_init(h);
 }
 
-/* parse pattern like "2b1c" into letters and levels */
+/* Parse pattern like "2b1c" into letters and levels */
 static int parse_pattern(const char *src, struct hyph_pattern *p)
 {
     size_t n = strlen(src);
@@ -210,7 +197,7 @@ static int parse_pattern(const char *src, struct hyph_pattern *p)
 
         if (c >= '0' && c <= '9')
         {
-            /* digit: priority before next letter */
+            /* Digit: priority before next letter */
             levels[lvn] = (unsigned char)(c - '0');
         }
         else
@@ -220,9 +207,6 @@ static int parse_pattern(const char *src, struct hyph_pattern *p)
         }
     }
 
-    /* extra level for end */
-    lvn = ln + 1;
-
     p->letters = letters;
     p->levels = levels;
     p->llen = (unsigned short)ln;
@@ -230,7 +214,7 @@ static int parse_pattern(const char *src, struct hyph_pattern *p)
     return 0;
 }
 
-/* qsort comparator */
+/* Qsort comparator */
 static int pattern_cmp(const void *a, const void *b)
 {
     const struct hyph_pattern *pa = (const struct hyph_pattern *)a;
@@ -253,7 +237,6 @@ struct hyph *hyph_new(const char *path)
     char line[1024];
     int cap = 8192;
     int n = 0;
-    int c;
     int i;
     int first_byte;
 
@@ -276,7 +259,7 @@ struct hyph *hyph_new(const char *path)
     h->lhmin = 2;
     h->rhmin = 2;
 
-    /* line 1: encoding */
+    /* Line 1: encoding */
     if (mh_readline(fp, line, sizeof(line)) < 0)
     {
         fclose(fp);
@@ -303,7 +286,7 @@ struct hyph *hyph_new(const char *path)
         if (line[0] == '\0' || line[0] == '%')
             continue;
 
-        /* directives */
+        /* Directives */
         if (strncmp(line, "LEFTHYPHENMIN ", 14) == 0)
         {
             h->lhmin = atoi(line + 14);
@@ -328,14 +311,11 @@ struct hyph *hyph_new(const char *path)
             break;
         }
 
-        /* it's a pattern */
+        /* It's a pattern */
         if (n == cap)
         {
-            struct hyph_pattern *ng = NULL;
-
-            cap *= 2;
-
-            ng = (struct hyph_pattern *)realloc(h->pats, (size_t)cap * sizeof(*h->pats));
+            int new_cap = cap * 2;
+            struct hyph_pattern *ng = (struct hyph_pattern *)realloc(h->pats, (size_t)new_cap * sizeof(*h->pats));
 
             if (!ng)
             {
@@ -345,6 +325,7 @@ struct hyph *hyph_new(const char *path)
             }
 
             h->pats = ng;
+            cap = new_cap;
         }
 
         if (parse_pattern(line, &h->pats[n]) == 0)
@@ -355,7 +336,7 @@ struct hyph *hyph_new(const char *path)
 
     h->n_pats = n;
 
-    /* sort and build index by first byte */
+    /* Sort and build index by first byte */
     qsort(h->pats, (size_t)n, sizeof(struct hyph_pattern), pattern_cmp);
 
     for (i = 0; i < 257; i++)
@@ -367,7 +348,7 @@ struct hyph *hyph_new(const char *path)
         h->idx_first[first_byte] = i;
     }
 
-    /* backward propagation for index */
+    /* Backward propagation for index */
     for (i = 255; i >= 0; i--)
     {
         if (h->idx_first[i] == n)
@@ -415,7 +396,7 @@ void hyph_set_minimums(HyphDict *h, int lhmin, int rhmin)
     if (rhmin > 0)
         h->rhmin = rhmin;
 
-    /* cache holds previously computed results with old minimums */
+    /* Cache holds previously computed results with old minimums */
     hyph_cache_clear(h);
 }
 
@@ -431,7 +412,7 @@ void hyph_get_minimums(HyphDict *h, int *lhmin, int *rhmin)
         *rhmin = h->rhmin;
 }
 
-/* check if pattern matches at position */
+/* Check if pattern matches at position */
 static int pattern_matches(const struct hyph_pattern *p, const unsigned char *nw, int nw_len, int pos)
 {
     if (pos + p->llen > nw_len)
@@ -440,7 +421,7 @@ static int pattern_matches(const struct hyph_pattern *p, const unsigned char *nw
     return memcmp(p->letters, nw + pos, p->llen) == 0;
 }
 
-/* apply all patterns at position */
+/* Apply all patterns at position */
 static void apply_patterns_at(struct hyph *h, const unsigned char *nw, int nw_len, int pos, unsigned char *lev)
 {
     int first_byte = nw[pos];
@@ -455,7 +436,7 @@ static void apply_patterns_at(struct hyph *h, const unsigned char *nw, int nw_le
         if (!pattern_matches(p, nw, nw_len, pos))
             continue;
 
-        /* apply levels accumulating max */
+        /* Apply levels accumulating max */
         for (k = 0; k <= p->llen; k++)
         {
             if (p->levels[k] > lev[pos + k])
@@ -464,7 +445,7 @@ static void apply_patterns_at(struct hyph *h, const unsigned char *nw, int nw_le
     }
 }
 
-/* check if byte position is UTF-8 char start */
+/* Check if byte position is UTF-8 char start */
 static int is_char_start(const unsigned char *nw, int pos)
 {
     unsigned char c = nw[pos];
@@ -501,7 +482,7 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
         return -1;
     }
 
-    /* check cache */
+    /* Check cache */
     cache_idx = cache_find(h, word);
 
     if (cache_idx != -1)
@@ -519,7 +500,7 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
         return written;
     }
 
-    /* build nw = "." + lowercase(word) + "." */
+    /* Build nw = "." + lowercase(word) + "." */
     nw[0] = '.';
 
     memcpy(nw + 1, word, wlen);
@@ -531,18 +512,18 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
 
     utf8_tolower((char *)nw); /* Unicode-aware case folding */
 
-    /* apply all patterns */
+    /* Apply all patterns */
     memset(lev, 0, sizeof(lev));
 
     for (pos = 0; pos < nw_len; pos++)
         apply_patterns_at(h, nw, nw_len, pos, lev);
 
-    /* build output with hyphens */
+    /* Build output with hyphens */
     total_chars = 0;
 
     for (i = 1; i < nw_len - 1; i++)
     {
-        /* without the '.' */
+        /* Without the '.' */
         if (is_char_start(nw, i))
             total_chars++;
     }
@@ -552,12 +533,12 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
 
     for (i = 1; i < nw_len - 1; i++)
     {
-        /* without the '.' of nw from original (preserves case) */
+        /* Without the '.' of nw from original (preserves case) */
         unsigned char c = (unsigned char)word[i - 1];
 
         if (is_char_start(nw, i))
         {
-            /* insert hyphen before char */
+            /* Insert hyphen before char */
             if (char_index > 0 && lev[i] & 1 && char_index >= h->lhmin && (total_chars - char_index) >= h->rhmin)
             {
                 if ((size_t)(written + 1) >= outsz)
@@ -577,7 +558,7 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
 
     out[written] = '\0';
 
-    /* store in cache */
+    /* Store in cache */
     cache_idx = cache_acquire(h);
 
     strncpy(h->cache[cache_idx].key, word, HYPH_MAX_WORD - 1);
@@ -591,7 +572,7 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
     return written;
 }
 
-/* hyph_new and hyph_free are public names */
+/* Hyph_new and hyph_free are public names */
 int hyph_breakpoints(HyphDict *h, const char *word, int word_len, int *out_pos, int *out_count)
 {
     char hyph_buf[HYPH_MAX_WORD * 2];
@@ -619,7 +600,7 @@ int hyph_breakpoints(HyphDict *h, const char *word, int word_len, int *out_pos, 
 
         if (i > 0 && hyph_buf[i - 1] == '=')
         {
-            /* break point before character */
+            /* Break point before character */
             out_pos[n] = i - n - 1;
             n++;
         }
@@ -715,10 +696,8 @@ char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
                     {
                         if (count >= cap)
                         {
-                            char **g = NULL;
-
-                            cap *= 2;
-                            g = (char **)realloc(list, (size_t)cap * sizeof(char *));
+                            int new_cap = cap * 2;
+                            char **g = (char **)realloc(list, (size_t)new_cap * sizeof(char *));
 
                             if (!g)
                             {
@@ -727,6 +706,7 @@ char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
                             }
 
                             list = g;
+                            cap = new_cap;
                         }
 
                         list[count++] = base;
