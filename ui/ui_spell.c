@@ -18,6 +18,7 @@
 #include "wm.h"
 #include "ui_spell.h"
 #include "../core/utf8.h"
+#include "../spellchecker/spell.h"
 #include "../components/editor.h"
 
 #ifdef HAVE_HUNSPELL

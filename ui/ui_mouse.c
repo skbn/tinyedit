@@ -14,6 +14,7 @@
 #include "../components/editor.h"
 #include "../spellchecker/spell.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <wctype.h>
 #include <time.h>

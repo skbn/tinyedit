@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <wchar.h>
+#include <wctype.h>
 
 #ifdef PLATFORM_AMIGA
 #include <exec/types.h>

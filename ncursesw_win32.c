@@ -24,6 +24,7 @@
 #include "wrapper.h"
 #include "ncursesw_win32.h"
 #include "core/utf8.h"
+#include "ui/ui_mouse.h"
 
 /* Sentinel value for trailing cells of wide glyphs (same as amiga_te) */
 #define WIN32_CELL_WIDE_TRAILING 0x0000FFFEUL
@@ -93,6 +94,17 @@ static int s_cur_fg_idx = COLOR_WHITE, s_cur_bg_idx = COLOR_BLACK;
 /* Key input buffer */
 static int s_key_buf[16];
 static int s_key_count = 0;
+
+/* Mouse state */
+static int s_left_button_held = 0;
+static unsigned long s_mouse_event = 0;
+static int s_mouse_event_pending = 0;
+
+/* Pack mouse event: type (8 bits) | x (12 bits) | y (12 bits) */
+static unsigned long pack_mouse(UiMouseEventType type, int x, int y)
+{
+    return ((unsigned long)type & 0xFF) | (((unsigned long)x & 0xFFF) << 8) | (((unsigned long)y & 0xFFF) << 20);
+}
 
 /* RGB color map for 16 ncurses colors */
 static COLORREF s_rgb_map[16] =
@@ -598,6 +610,69 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         return 0;
 
+    case WM_LBUTTONDOWN:
+    {
+        int mouse_x = LOWORD(lParam) / fw;
+        int mouse_y = HIWORD(lParam) / fh;
+
+        s_left_button_held = 1;
+
+        ui_mouse_set_event_time_ms((unsigned long)GetTickCount());
+
+        s_mouse_event = pack_mouse(UI_MOUSE_PRESS_LEFT, mouse_x, mouse_y);
+        s_mouse_event_pending = 1;
+
+        if (s_key_count < 16)
+            s_key_buf[s_key_count++] = KEY_MOUSE;
+
+        return 0;
+    }
+    case WM_LBUTTONUP:
+    {
+        int mouse_x = LOWORD(lParam) / fw;
+        int mouse_y = HIWORD(lParam) / fh;
+
+        s_left_button_held = 0;
+
+        s_mouse_event = pack_mouse(UI_MOUSE_RELEASE_LEFT, mouse_x, mouse_y);
+        s_mouse_event_pending = 1;
+
+        if (s_key_count < 16)
+            s_key_buf[s_key_count++] = KEY_MOUSE;
+
+        return 0;
+    }
+    case WM_MOUSEMOVE:
+    {
+        if (s_left_button_held)
+        {
+            int mouse_x = LOWORD(lParam) / fw;
+            int mouse_y = HIWORD(lParam) / fh;
+
+            s_mouse_event = pack_mouse(UI_MOUSE_DRAG_LEFT, mouse_x, mouse_y);
+            s_mouse_event_pending = 1;
+
+            if (s_key_count < 16)
+                s_key_buf[s_key_count++] = KEY_MOUSE;
+        }
+
+        return 0;
+    }
+    case WM_MOUSEWHEEL:
+    {
+        int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        int mouse_x = LOWORD(lParam) / fw;
+        int mouse_y = HIWORD(lParam) / fh;
+        UiMouseEventType mtype = (delta > 0) ? UI_MOUSE_WHEEL_UP : UI_MOUSE_WHEEL_DOWN;
+
+        s_mouse_event = pack_mouse(mtype, mouse_x, mouse_y);
+        s_mouse_event_pending = 1;
+
+        if (s_key_count < 16)
+            s_key_buf[s_key_count++] = KEY_MOUSE;
+
+        return 0;
+    }
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -2301,6 +2376,13 @@ int wgetch(WINDOW *win)
         return ch;
     }
 
+    /* Mouse event pending */
+    if (s_mouse_event_pending)
+    {
+        s_mouse_event_pending = 0;
+        return KEY_MOUSE;
+    }
+
     /* wait for a key */
     while (s_key_count == 0)
     {
@@ -2380,6 +2462,11 @@ int ungetch(int ch)
     s_ungetch = ch;
 
     return OK;
+}
+
+unsigned long getmouse(void)
+{
+    return s_mouse_event;
 }
 
 int flushinp(void)
