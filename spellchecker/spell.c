@@ -99,6 +99,20 @@ struct spell
     /* returned suggestions buffer (owned by spell) */
     char *sugg_buf[SPELL_MAX_SUGGS];
     int sugg_n;
+
+    /* custom user dictionary open addressing separate from main htab for removal stored sorted for easy save */
+    char **custom_words;
+    int custom_n;
+    int custom_cap;
+
+    /* session-only ignore list sorted array */
+    char **ignored_words;
+    int ignored_n;
+    int ignored_cap;
+
+    /* buffer for prefix search results pointers into htab/custom reused between calls valid until next call */
+    const char **prefix_buf;
+    int prefix_cap;
 };
 
 static char *ms_strdup(const char *s)
@@ -1461,6 +1475,33 @@ void spell_free(struct spell *s)
 
     free(s->maps);
     free(s->try_chars);
+
+    /* free custom dictionary */
+    if (s->custom_words)
+    {
+        int ci;
+
+        for (ci = 0; ci < s->custom_n; ci++)
+            free(s->custom_words[ci]);
+
+        free(s->custom_words);
+    }
+
+    /* free ignore list */
+    if (s->ignored_words)
+    {
+        int ci;
+
+        for (ci = 0; ci < s->ignored_n; ci++)
+            free(s->ignored_words[ci]);
+
+        free(s->ignored_words);
+    }
+
+    /* free prefix buffer */
+    if (s->prefix_buf)
+        free(s->prefix_buf);
+
     free(s);
 }
 
@@ -1502,6 +1543,20 @@ int spell_check(struct spell *s, const char *word)
         check_cache_push_front(s, idx);
 
         return s->cache[idx].result ? 1 : 0;
+    }
+
+    /* custom user dictionary first */
+    if (spell_is_custom_word(s, word_to_check))
+    {
+        check_cache_put(s, word_to_check, 1);
+        return 1;
+    }
+
+    /* session ignore list */
+    if (spell_is_ignored(s, word_to_check))
+    {
+        check_cache_put(s, word_to_check, 1);
+        return 1;
     }
 
     /* lookup directo */
@@ -1554,6 +1609,109 @@ int spell_check(struct spell *s, const char *word)
     check_cache_put(s, word_to_check, 0);
 
     return 0;
+}
+
+/* Decode word UTF-8 to codepoints array returns length in chars max max_chars */
+static int word_to_cps(const char *word, ms_cp *out, int max_chars)
+{
+    int n = 0;
+    const char *p = word;
+
+    while (*p && n < max_chars)
+    {
+        ms_cp cp;
+        int adv = utf8_decode(p, &cp);
+        out[n++] = cp;
+        p += adv;
+    }
+
+    return n;
+}
+
+/* Levenshtein distance in codepoints SPELL_MAX_WORD limits cost */
+static int levenshtein_cp(const ms_cp *a, int la, const ms_cp *b, int lb)
+{
+    int prev[SPELL_MAX_WORD + 1];
+    int curr[SPELL_MAX_WORD + 1];
+    int i;
+    int j;
+
+    if (la > SPELL_MAX_WORD)
+        la = SPELL_MAX_WORD;
+
+    if (lb > SPELL_MAX_WORD)
+        lb = SPELL_MAX_WORD;
+
+    for (j = 0; j <= lb; j++)
+        prev[j] = j;
+
+    for (i = 1; i <= la; i++)
+    {
+        curr[0] = i;
+
+        for (j = 1; j <= lb; j++)
+        {
+            int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+            int del = prev[j] + 1;
+            int ins = curr[j - 1] + 1;
+            int sub = prev[j - 1] + cost;
+            int m = del < ins ? del : ins;
+
+            if (sub < m)
+                m = sub;
+
+            curr[j] = m;
+        }
+
+        /* copy curr -> prev */
+        for (j = 0; j <= lb; j++)
+            prev[j] = curr[j];
+    }
+
+    return prev[lb];
+}
+
+/* Sort suggestions by distance to word uses insertion sort n <= SPELL_MAX_SUGGS */
+static void sugg_sort_by_distance(struct spell *s, const char *word)
+{
+    ms_cp word_cps[SPELL_MAX_WORD];
+    int word_n;
+    int dist[SPELL_MAX_SUGGS];
+    int i;
+    int j;
+
+    if (s->sugg_n <= 1)
+        return;
+
+    word_n = word_to_cps(word, word_cps, SPELL_MAX_WORD);
+
+    /* calculate distance of each suggestion */
+    for (i = 0; i < s->sugg_n; i++)
+    {
+        ms_cp sug_cps[SPELL_MAX_WORD];
+        int sug_n = word_to_cps(s->sugg_buf[i], sug_cps, SPELL_MAX_WORD);
+
+        dist[i] = levenshtein_cp(word_cps, word_n, sug_cps, sug_n);
+    }
+
+    /* insertion sort by dist[] carrying sugg_buf[] in parallel */
+    for (i = 1; i < s->sugg_n; i++)
+    {
+        int d_i = dist[i];
+        char *w_i = s->sugg_buf[i];
+
+        j = i - 1;
+
+        while (j >= 0 && dist[j] > d_i)
+        {
+            dist[j + 1] = dist[j];
+            s->sugg_buf[j + 1] = s->sugg_buf[j];
+            j--;
+        }
+
+        dist[j + 1] = d_i;
+        s->sugg_buf[j + 1] = w_i;
+    }
 }
 
 static void sugg_clear(struct spell *s)
@@ -1849,6 +2007,72 @@ static void gen_replace(struct spell *s, const char *word)
     }
 }
 
+/* mapchars for each char in word if belongs to MAP group try substitute with each equivalent char useful for accents */
+static void gen_map(struct spell *s, const char *word)
+{
+    char cand[SPELL_MAX_WORD];
+    int chars;
+    int i;
+    int gi;
+    int mi;
+
+    if (!s->maps || s->n_maps == 0)
+        return;
+
+    chars = utf8_chars(word);
+
+    for (i = 0; i < chars && s->sugg_n < SPELL_MAX_SUGGS; i++)
+    {
+        int b = char_to_byte(word, i);
+        int cl = char_len_at(word, b);
+
+        /* identify if char at position i belongs to any MAP group */
+        for (gi = 0; gi < s->n_maps && s->sugg_n < SPELL_MAX_SUGGS; gi++)
+        {
+            char **group = s->maps[gi];
+            int matched = 0;
+
+            if (!group)
+                continue;
+
+            /* current char in this group */
+            for (mi = 0; group[mi]; mi++)
+            {
+                if ((int)strlen(group[mi]) == cl && memcmp(group[mi], word + b, (size_t)cl) == 0)
+                {
+                    matched = 1;
+                    break;
+                }
+            }
+
+            if (!matched)
+                continue;
+
+            /* try all alternatives of the group */
+            for (mi = 0; group[mi] && s->sugg_n < SPELL_MAX_SUGGS; mi++)
+            {
+                int alt_len = (int)strlen(group[mi]);
+                size_t total = strlen(word);
+
+                /* skip same letter no change */
+                if (alt_len == cl && memcmp(group[mi], word + b, (size_t)cl) == 0)
+                    continue;
+
+                if ((size_t)b + alt_len + total - (size_t)(b + cl) + 1 > sizeof(cand))
+                    continue;
+
+                memcpy(cand, word, (size_t)b);
+                memcpy(cand + b, group[mi], (size_t)alt_len);
+                memcpy(cand + b + alt_len, word + b + cl, total - (size_t)(b + cl) + 1);
+
+                sugg_try(s, cand);
+            }
+
+            break; /* un char solo puede estar en un grupo */
+        }
+    }
+}
+
 char **spell_suggest(struct spell *s, const char *word, int *n_suggestions)
 {
     char utf8_word[SPELL_MAX_WORD];
@@ -1871,6 +2095,7 @@ char **spell_suggest(struct spell *s, const char *word, int *n_suggestions)
 
     /* apply strategies in quality order */
     gen_rep(s, word_to_suggest);
+    gen_map(s, word_to_suggest);
     gen_swap(s, word_to_suggest);
     gen_delete(s, word_to_suggest);
     gen_replace(s, word_to_suggest);
@@ -1888,6 +2113,9 @@ char **spell_suggest(struct spell *s, const char *word, int *n_suggestions)
                 strcpy(s->sugg_buf[i], encoded);
         }
     }
+
+    /* sort by Levenshtein distance more similar first */
+    sugg_sort_by_distance(s, word_to_suggest);
 
     *n_suggestions = s->sugg_n;
     return s->sugg_buf;
@@ -1952,6 +2180,10 @@ char **spell_list_dictionaries(const char *dir_path, int *n_dicts)
     char **list = NULL;
     int cap;
     int count;
+#ifdef PLATFORM_AMIGA
+    BPTR lock;
+    struct FileInfoBlock *fib = NULL;
+#endif
 
     if (n_dicts)
         *n_dicts = 0;
@@ -1967,53 +2199,48 @@ char **spell_list_dictionaries(const char *dir_path, int *n_dicts)
         return NULL;
 
 #ifdef PLATFORM_AMIGA
+    lock = Lock((CONST_STRPTR)dir_path, ACCESS_READ);
+
+    if (lock)
     {
-        BPTR lock;
-        struct FileInfoBlock *fib = NULL;
+        fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
 
-        lock = Lock((CONST_STRPTR)dir_path, ACCESS_READ);
-
-        if (lock)
+        if (fib && Examine(lock, fib))
         {
-            fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
-
-            if (fib && Examine(lock, fib))
+            while (ExNext(lock, fib))
             {
-                while (ExNext(lock, fib))
+                if (fib->fib_DirEntryType < 0 && ends_with_dic(fib->fib_FileName))
                 {
-                    if (fib->fib_DirEntryType < 0 && ends_with_dic(fib->fib_FileName))
+                    char *base = extract_dict_name(fib->fib_FileName);
+
+                    if (base)
                     {
-                        char *base = extract_dict_name(fib->fib_FileName);
-
-                        if (base)
+                        if (count >= cap)
                         {
-                            if (count >= cap)
+                            char **g;
+
+                            cap *= 2;
+                            g = (char **)realloc(list, (size_t)cap * sizeof(char *));
+
+                            if (!g)
                             {
-                                char **g;
-
-                                cap *= 2;
-                                g = (char **)realloc(list, (size_t)cap * sizeof(char *));
-
-                                if (!g)
-                                {
-                                    free(base);
-                                    continue;
-                                }
-
-                                list = g;
+                                free(base);
+                                continue;
                             }
 
-                            list[count++] = base;
+                            list = g;
                         }
+
+                        list[count++] = base;
                     }
                 }
             }
-
-            if (fib)
-                FreeDosObject(DOS_FIB, fib);
-
-            UnLock(lock);
         }
+
+        if (fib)
+            FreeDosObject(DOS_FIB, fib);
+
+        UnLock(lock);
     }
 #endif
 
@@ -2041,16 +2268,6 @@ void spell_free_dictionaries(char **dicts, int n_dicts)
     free(dicts);
 }
 
-int spell_add_word(struct spell *s, const char *word)
-{
-    return -1;
-}
-
-int spell_remove_word(struct spell *s, const char *word)
-{
-    return -1;
-}
-
 int spell_stem(struct spell *s, const char *word, char ***out_list)
 {
     if (out_list)
@@ -2073,12 +2290,449 @@ void spell_free_list(struct spell *s, char **list, int n)
         free(list);
 }
 
+/* Binary search in sorted custom_words returns index or insertion point negative-encoded */
+static int custom_bsearch(struct spell *s, const char *word, int *found)
+{
+    int lo = 0, hi = s->custom_n - 1, mid, cmp;
+
+    *found = 0;
+
+    while (lo <= hi)
+    {
+        mid = (lo + hi) >> 1;
+        cmp = strcmp(s->custom_words[mid], word);
+
+        if (cmp == 0)
+        {
+            *found = 1;
+            return mid;
+        }
+
+        if (cmp < 0)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+
+    return lo; /* insertion point */
+}
+
+int spell_is_custom_word(struct spell *s, const char *word)
+{
+    int found;
+
+    if (!s || !word || s->custom_n == 0)
+        return 0;
+
+    custom_bsearch(s, word, &found);
+    return found;
+}
+
+int spell_add_word(struct spell *s, const char *word)
+{
+    int pos;
+    int found;
+    char *copy;
+    int i;
+    int ci;
+
+    if (!s || !word || !*word)
+        return -1;
+
+    if (strlen(word) >= SPELL_MAX_WORD)
+        return -1;
+
+    pos = custom_bsearch(s, word, &found);
+
+    if (found)
+        return 0; /* already there */
+
+    /* grow if needed */
+    if (s->custom_n == s->custom_cap)
+    {
+        int new_cap = s->custom_cap ? s->custom_cap * 2 : SPELL_STEP_CUSTOM;
+        char **ng = (char **)realloc(s->custom_words, (size_t)new_cap * sizeof(char *));
+
+        if (!ng)
+            return -1;
+
+        s->custom_words = ng;
+        s->custom_cap = new_cap;
+    }
+
+    copy = ms_strdup(word);
+
+    if (!copy)
+        return -1;
+
+    /* shift right and insert at pos */
+    for (i = s->custom_n; i > pos; i--)
+        s->custom_words[i] = s->custom_words[i - 1];
+
+    s->custom_words[pos] = copy;
+    s->custom_n++;
+
+    /* invalidate any cached negative result for this word */
+    ci = check_cache_find(s, word);
+
+    if (ci != -1)
+    {
+        check_cache_unlink(s, ci);
+        s->cache[ci].key[0] = '\0';
+        s->cache_count--;
+    }
+
+    return 0;
+}
+
+int spell_remove_word(struct spell *s, const char *word)
+{
+    int pos;
+    int found;
+    int i;
+    int ci;
+
+    if (!s || !word)
+        return 0;
+
+    pos = custom_bsearch(s, word, &found);
+
+    if (!found)
+        return 0;
+
+    free(s->custom_words[pos]);
+
+    for (i = pos; i < s->custom_n - 1; i++)
+        s->custom_words[i] = s->custom_words[i + 1];
+
+    s->custom_n--;
+
+    /* invalidate cached positive result */
+
+    ci = check_cache_find(s, word);
+
+    if (ci != -1)
+    {
+        check_cache_unlink(s, ci);
+
+        s->cache[ci].key[0] = '\0';
+        s->cache_count--;
+    }
+
+    return 1;
+}
+
+const char *const *spell_custom_words(struct spell *s, int *n_out)
+{
+    if (n_out)
+        *n_out = s ? s->custom_n : 0;
+
+    return s ? (const char *const *)s->custom_words : NULL;
+}
+
+void spell_clear_custom_dict(struct spell *s)
+{
+    int i;
+
+    if (!s)
+        return;
+
+    for (i = 0; i < s->custom_n; i++)
+        free(s->custom_words[i]);
+
+    free(s->custom_words);
+
+    s->custom_words = NULL;
+    s->custom_n = 0;
+    s->custom_cap = 0;
+
+    /* nuke the cache: positive results from custom no longer hold */
+    check_cache_init(s);
+}
+
+int spell_load_custom_dict(struct spell *s, const char *path)
+{
+    FILE *fp = NULL;
+    char line[SPELL_MAX_WORD + 8];
+    int loaded = 0;
+
+    if (!s || !path)
+        return -1;
+
+    fp = fopen(path, "rb");
+
+    if (!fp)
+        return -1;
+
+    while (ms_readline(fp, line, sizeof(line)) >= 0)
+    {
+        /* trim trailing whitespace */
+        int n = (int)strlen(line);
+
+        while (n > 0 && (line[n - 1] == ' ' || line[n - 1] == '\t'))
+            line[--n] = '\0';
+
+        if (line[0] == '\0' || line[0] == '#')
+            continue;
+
+        if (spell_add_word(s, line) == 0)
+            loaded++;
+    }
+
+    fclose(fp);
+    return loaded;
+}
+
+int spell_save_custom_dict(struct spell *s, const char *path)
+{
+    FILE *fp = NULL;
+    int i;
+
+    if (!s || !path)
+        return -1;
+
+    fp = fopen(path, "wb");
+
+    if (!fp)
+        return -1;
+
+    fprintf(fp, "# tinyedit custom dictionary -- one word per line\n");
+
+    for (i = 0; i < s->custom_n; i++)
+        fprintf(fp, "%s\n", s->custom_words[i]);
+
+    fclose(fp);
+    return 0;
+}
+
 int spell_load_custom(struct spell *s, const char *path)
 {
-    return -1;
+    int r = spell_load_custom_dict(s, path);
+
+    /* legacy returned -1 on error, 0 otherwise -- preserve that */
+    return (r < 0) ? -1 : 0;
 }
 
 int spell_add_to_custom_dict(struct spell *s, const char *word, const char *custom_dict_path)
 {
-    return -1;
+    if (spell_add_word(s, word) != 0)
+        return -1;
+
+    /* persist immediately if a path was supplied */
+    if (custom_dict_path && *custom_dict_path)
+        return spell_save_custom_dict(s, custom_dict_path);
+
+    return 0;
+}
+
+static int ignored_bsearch(struct spell *s, const char *word, int *found)
+{
+    int lo = 0;
+    int hi = s->ignored_n - 1;
+    int mid;
+    int cmp;
+
+    *found = 0;
+
+    while (lo <= hi)
+    {
+        mid = (lo + hi) >> 1;
+        cmp = strcmp(s->ignored_words[mid], word);
+
+        if (cmp == 0)
+        {
+            *found = 1;
+            return mid;
+        }
+
+        if (cmp < 0)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+
+    return lo;
+}
+
+int spell_is_ignored(struct spell *s, const char *word)
+{
+    int found;
+
+    if (!s || !word || s->ignored_n == 0)
+        return 0;
+
+    ignored_bsearch(s, word, &found);
+
+    return found;
+}
+
+int spell_ignore_word(struct spell *s, const char *word)
+{
+    int pos;
+    int found;
+    int i;
+    char *copy;
+    int ci;
+
+    if (!s || !word || !*word)
+        return -1;
+
+    if (strlen(word) >= SPELL_MAX_WORD)
+        return -1;
+
+    pos = ignored_bsearch(s, word, &found);
+
+    if (found)
+        return 0;
+
+    if (s->ignored_n == s->ignored_cap)
+    {
+        int new_cap = s->ignored_cap ? s->ignored_cap * 2 : SPELL_STEP_CUSTOM;
+        char **ng = (char **)realloc(s->ignored_words, (size_t)new_cap * sizeof(char *));
+
+        if (!ng)
+            return -1;
+
+        s->ignored_words = ng;
+        s->ignored_cap = new_cap;
+    }
+
+    copy = ms_strdup(word);
+
+    if (!copy)
+        return -1;
+
+    for (i = s->ignored_n; i > pos; i--)
+        s->ignored_words[i] = s->ignored_words[i - 1];
+
+    s->ignored_words[pos] = copy;
+    s->ignored_n++;
+
+    /* invalidate cached negative result */
+
+    ci = check_cache_find(s, word);
+
+    if (ci != -1)
+    {
+        check_cache_unlink(s, ci);
+
+        s->cache[ci].key[0] = '\0';
+        s->cache_count--;
+    }
+
+    return 0;
+}
+
+void spell_clear_ignored(struct spell *s)
+{
+    int i;
+
+    if (!s)
+        return;
+
+    for (i = 0; i < s->ignored_n; i++)
+        free(s->ignored_words[i]);
+
+    free(s->ignored_words);
+
+    s->ignored_words = NULL;
+    s->ignored_n = 0;
+    s->ignored_cap = 0;
+
+    check_cache_init(s);
+}
+
+/* qsort comparator for const char ** */
+static int prefix_cmp_strs(const void *a, const void *b)
+{
+    const char *sa = *(const char *const *)a;
+    const char *sb = *(const char *const *)b;
+
+    return strcmp(sa, sb);
+}
+
+int spell_prefix_search(struct spell *s, const char *prefix, const char **out, int out_cap)
+{
+    size_t plen;
+    int n = 0;
+    int i;
+    int custom_end;
+    int lo = 0;
+    int hi = 0;
+    int mid;
+    int cmp;
+    int start = 0;
+
+    if (!s || !prefix || !out || out_cap <= 0)
+        return 0;
+
+    plen = strlen(prefix);
+
+    if (plen == 0)
+        return 0;
+
+    /* custom dictionary first (sorted -- binary search lower bound) */
+    hi = s->custom_n - 1;
+    start = s->custom_n; /* default: nothing matches */
+
+    while (lo <= hi)
+    {
+        mid = (lo + hi) >> 1;
+        cmp = strncmp(s->custom_words[mid], prefix, plen);
+
+        if (cmp >= 0)
+        {
+            if (cmp == 0)
+                start = mid;
+
+            hi = mid - 1;
+        }
+        else
+            lo = mid + 1;
+    }
+
+    for (i = start; i < s->custom_n && n < out_cap; i++)
+    {
+        if (strncmp(s->custom_words[i], prefix, plen) != 0)
+            break;
+
+        out[n++] = s->custom_words[i];
+    }
+
+    custom_end = n;
+
+    /* main dictionary (htab - linear scan, but only matching prefix) */
+    for (i = 0; i < s->htab_size && n < out_cap; i++)
+    {
+        const char *w = s->htab[i].word;
+        int j;
+        int dup = 0;
+
+        if (!w)
+            continue;
+
+        if (strncmp(w, prefix, plen) != 0)
+            continue;
+
+        /* avoid dup with custom */
+        for (j = 0; j < custom_end; j++)
+        {
+            if (strcmp(out[j], w) == 0)
+            {
+                dup = 1;
+                break;
+            }
+        }
+
+        if (dup)
+            continue;
+
+        out[n++] = w;
+    }
+
+    /* sort the main-dict slice alphabetically (custom stays at front) */
+    if (n > custom_end + 1)
+        qsort((void *)(out + custom_end), (size_t)(n - custom_end), sizeof(const char *), prefix_cmp_strs);
+
+    return n;
 }

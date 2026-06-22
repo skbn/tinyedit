@@ -23,8 +23,10 @@
 #ifdef HAVE_HUNSPELL
 #if defined(PLATFORM_AMIGA)
 #include "../spellchecker/spell.h"
+#include "../spellchecker/te_wordchar.h"
 #else
 #include "../spell/spell.h"
+#include "../spellchecker/te_wordchar.h"
 #endif
 #ifdef HAVE_MYTHES
 #if defined(PLATFORM_AMIGA)
@@ -295,12 +297,12 @@ int spell_check_word(TeApp *app)
     /* Find word boundaries */
     word_start = info.col;
 
-    while (word_start > 0 && iswalnum(line[word_start - 1]))
+    while (word_start > 0 && te_is_word_char(line[word_start - 1]))
         word_start--;
 
     word_end = info.col;
 
-    while (word_end < line_len && iswalnum(line[word_end]))
+    while (word_end < line_len && te_is_word_char(line[word_end]))
         word_end++;
 
     if (word_start == word_end)

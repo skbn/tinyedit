@@ -73,6 +73,12 @@ void hyph_free(HyphDict *h);
 /* return break points (byte offsets) in out_pos[], count in *out_count */
 int hyph_breakpoints(HyphDict *h, const char *word, int word_len, int *out_pos, int *out_count);
 
+/* Override LEFTHYPHENMIN/RIGHTHYPHENMIN from .dic 1/1 narrow 3/3 typography 0 restore call before hyphenating */
+void hyph_set_minimums(HyphDict *h, int lhmin, int rhmin);
+
+/* Get currently active LEFTHYPHENMIN/RIGHTHYPHENMIN from .dic or hyph_set_minimums */
+void hyph_get_minimums(HyphDict *h, int *lhmin, int *rhmin);
+
 /* list available dictionaries in directory, returns base names (without .dic) */
 char **hyph_list_dictionaries(const char *dir_path, int *n_dicts);
 void hyph_free_dictionaries(char **dicts, int n_dicts);

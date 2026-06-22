@@ -1096,15 +1096,8 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
 
                 if (utf8_name)
                 {
-                    /* Sanitize filename for AmigaOS (convert UTF-8 to ASCII) */
-#ifdef PLATFORM_AMIGA
-                    const char *sanitized_name = port_sanitize_filename(utf8_name);
-#else
-                    const char *sanitized_name = utf8_name;
-#endif
-
                     /* Build full path */
-                    snprintf(dict_path, sizeof(dict_path), "%s/%s.dic", dicts_dir, sanitized_name);
+                    snprintf(dict_path, sizeof(dict_path), "%s/%s.dic", dicts_dir, utf8_name);
 
                     /* Create empty file using portable function */
                     if (port_file_create_empty(dict_path) == 0)

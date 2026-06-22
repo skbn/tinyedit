@@ -404,6 +404,33 @@ const char *hyph_get_encoding(struct hyph *h)
     return h ? h->enc : NULL;
 }
 
+void hyph_set_minimums(HyphDict *h, int lhmin, int rhmin)
+{
+    if (!h)
+        return;
+
+    if (lhmin > 0)
+        h->lhmin = lhmin;
+
+    if (rhmin > 0)
+        h->rhmin = rhmin;
+
+    /* cache holds previously computed results with old minimums */
+    hyph_cache_clear(h);
+}
+
+void hyph_get_minimums(HyphDict *h, int *lhmin, int *rhmin)
+{
+    if (!h)
+        return;
+
+    if (lhmin)
+        *lhmin = h->lhmin;
+
+    if (rhmin)
+        *rhmin = h->rhmin;
+}
+
 /* check if pattern matches at position */
 static int pattern_matches(const struct hyph_pattern *p, const unsigned char *nw, int nw_len, int pos)
 {
@@ -651,6 +678,11 @@ char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
     int cap;
     int count;
 
+#ifdef PLATFORM_AMIGA
+    BPTR lock;
+    struct FileInfoBlock *fib = NULL;
+#endif
+
     if (n_dicts)
         *n_dicts = 0;
 
@@ -665,53 +697,48 @@ char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
         return NULL;
 
 #ifdef PLATFORM_AMIGA
+    lock = Lock((CONST_STRPTR)dir_path, ACCESS_READ);
+
+    if (lock)
     {
-        BPTR lock;
-        struct FileInfoBlock *fib = NULL;
+        fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
 
-        lock = Lock((CONST_STRPTR)dir_path, ACCESS_READ);
-
-        if (lock)
+        if (fib && Examine(lock, fib))
         {
-            fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
-
-            if (fib && Examine(lock, fib))
+            while (ExNext(lock, fib))
             {
-                while (ExNext(lock, fib))
+                if (fib->fib_DirEntryType < 0 && ends_with_dic(fib->fib_FileName))
                 {
-                    if (fib->fib_DirEntryType < 0 && ends_with_dic(fib->fib_FileName))
+                    char *base = extract_dict_name(fib->fib_FileName);
+
+                    if (base)
                     {
-                        char *base = extract_dict_name(fib->fib_FileName);
-
-                        if (base)
+                        if (count >= cap)
                         {
-                            if (count >= cap)
+                            char **g = NULL;
+
+                            cap *= 2;
+                            g = (char **)realloc(list, (size_t)cap * sizeof(char *));
+
+                            if (!g)
                             {
-                                char **g = NULL;
-
-                                cap *= 2;
-                                g = (char **)realloc(list, (size_t)cap * sizeof(char *));
-
-                                if (!g)
-                                {
-                                    free(base);
-                                    continue;
-                                }
-
-                                list = g;
+                                free(base);
+                                continue;
                             }
 
-                            list[count++] = base;
+                            list = g;
                         }
+
+                        list[count++] = base;
                     }
                 }
             }
-
-            if (fib)
-                FreeDosObject(DOS_FIB, fib);
-
-            UnLock(lock);
         }
+
+        if (fib)
+            FreeDosObject(DOS_FIB, fib);
+
+        UnLock(lock);
     }
 #endif
 

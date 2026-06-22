@@ -514,6 +514,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
     int cursor_col_after = 0;
     int old_count = 0;
     int doc_count_before = 0;
+    int prev_was_wrap_hyphen = 0;
 
     if (!ed || width < 20 || ed->count <= 0)
         return -1;
@@ -607,9 +608,28 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         const wchar_t *l = ed->lines[i]->wcs;
         int ll = ed->lines[i]->len;
         int skip = prefix_len;
+        int strip_hyphen = 0;
+        int copy_len;
 
         if (skip > ll)
             skip = ll;
+
+        /* Detect wrap hyphen at end of line glued to letter next line starts with letter no space remove before rejoining otherwise accumulates */
+        if (i < last && ll - skip >= 2 && l[ll - 1] == L'-')
+        {
+            wchar_t before_hyphen = l[ll - 2];
+            const wchar_t *next_l = ed->lines[i + 1]->wcs;
+            int next_skip = prefix_len;
+            wchar_t next_first;
+
+            if (next_skip > ed->lines[i + 1]->len)
+                next_skip = ed->lines[i + 1]->len;
+
+            next_first = next_l ? next_l[next_skip] : L'\0';
+
+            if (before_hyphen != L' ' && before_hyphen != L'\t' && next_first != L' ' && next_first != L'\t' && next_first != L'\0' && next_first != L'-')
+                strip_hyphen = 1;
+        }
 
         if (used + (size_t)(ll - skip) + 2 >= cap)
         {
@@ -625,11 +645,22 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
             joined = tmp_joined;
         }
 
-        if (used > 0 && joined[used - 1] != L' ')
+        /* Insert space between lines except when joining second half of word split by hyphen both halves must stick together */
+        if (used > 0 && joined[used - 1] != L' ' && !prev_was_wrap_hyphen)
             joined[used++] = L' ';
 
-        wmemcpy(&joined[used], l + skip, (size_t)(ll - skip));
-        used += (size_t)(ll - skip);
+        copy_len = ll - skip;
+
+        if (strip_hyphen)
+            copy_len--; /* drop trailing '-' */
+
+        if (copy_len > 0)
+        {
+            wmemcpy(&joined[used], l + skip, (size_t)copy_len);
+            used += (size_t)copy_len;
+        }
+
+        prev_was_wrap_hyphen = strip_hyphen;
     }
 
     joined[used] = L'\0';

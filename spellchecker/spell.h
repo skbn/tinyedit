@@ -26,6 +26,10 @@
 #define SPELL_MAX_SUGGS 32
 #endif
 
+#ifndef SPELL_STEP_CUSTOM
+#define SPELL_STEP_CUSTOM 32768
+#endif
+
 /* opaque: internal structure in spell.c */
 struct spell;
 typedef struct spell SpellChecker;
@@ -45,6 +49,35 @@ void spell_free_suggestions(struct spell *s, char **suggestions, int n_suggestio
 
 void spell_cache_clear(struct spell *s);
 const char *spell_get_encoding(struct spell *s);
+
+/* Add word to in-memory custom dictionary returns 0 on success -1 on error duplicates ignored */
+int spell_add_word(struct spell *s, const char *word);
+
+/* Remove word previously added returns 1 if removed 0 if not present cannot remove from main .dic only custom */
+int spell_remove_word(struct spell *s, const char *word);
+
+/* Check if word is in user dictionary returns 1 yes 0 no */
+int spell_is_custom_word(struct spell *s, const char *word);
+
+/* Iterate custom dictionary returns NULL-terminated array owned by spell do not free n_out gets count */
+const char *const *spell_custom_words(struct spell *s, int *n_out);
+
+/* Load custom dictionary from UTF-8 text file one word per line comments start with # returns words loaded or -1 on error */
+int spell_load_custom_dict(struct spell *s, const char *path);
+
+/* Save custom dictionary to UTF-8 text file one word per line sorted returns 0 on success -1 on error */
+int spell_save_custom_dict(struct spell *s, const char *path);
+
+/* Clear in-memory custom dictionary does not touch file */
+void spell_clear_custom_dict(struct spell *s);
+
+/* Prefix search autocomplete find words in main and custom dict starting with prefix out buffer owned by spell valid until next call or spell_free */
+int spell_prefix_search(struct spell *s, const char *prefix, const char **out, int out_cap);
+
+/* Ignore list session-only not persisted words spell_check treats as correct this session cleared on spell_free or spell_clear_ignored */
+int spell_ignore_word(struct spell *s, const char *word);
+int spell_is_ignored(struct spell *s, const char *word);
+void spell_clear_ignored(struct spell *s);
 
 /* return 1 if spell checker is available (compiled) */
 int spell_is_available(void);

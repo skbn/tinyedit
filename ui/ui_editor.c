@@ -2402,6 +2402,61 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
                             space_available = eff_wrap - word_start;
 
 #ifdef HAVE_HYPHEN
+                            /* If line ends with wrap-hyphen and user edits within word merge next line delete */
+                            if (app->hyph_wrap_enabled && app->hyph_handle && word_len >= 2 && line[wi.col - 1] != L'-' && wi.row + 1 < wi.line_count)
+                            {
+                                int hpos = -1;
+
+                                /* Wrap-hyphen is just before typed char not any hyphen in middle of word */
+                                if (wi.col - 2 >= word_start && line[wi.col - 2] == L'-' && wi.col - 3 >= word_start && line[wi.col - 3] != L' ' && line[wi.col - 3] != L'\t' && line[wi.col - 3] != L'-')
+                                    hpos = wi.col - 2;
+
+                                if (hpos >= 0)
+                                {
+                                    const wchar_t *next_l = ed_line_wcs(te_app_get_editor(app), wi.row + 1);
+
+                                    if (next_l && next_l[0] && next_l[0] != L' ' && next_l[0] != L'\t' && next_l[0] != L'-')
+                                    {
+                                        /* delete the orphan '-' */
+                                        ed_set_pos(te_app_get_editor(app), wi.row, hpos);
+                                        ed_delete(te_app_get_editor(app));
+
+                                        /* go to end of current line and join with next */
+                                        ed_get_info(te_app_get_editor(app), &wi);
+
+                                        linelen = ed_line_len(te_app_get_editor(app), wi.row);
+
+                                        ed_set_pos(te_app_get_editor(app), wi.row, linelen);
+                                        ed_delete(te_app_get_editor(app));
+
+                                        /* re-read state and place cursor at end so the hyphen logic below re-runs on the joined word */
+                                        ed_get_info(te_app_get_editor(app), &wi);
+
+                                        line = ed_line_wcs(te_app_get_editor(app), wi.row);
+                                        linelen = ed_line_len(te_app_get_editor(app), wi.row);
+
+                                        word_start = 0;
+
+                                        for (k = linelen; k > 0; k--)
+                                        {
+                                            if (line[k - 1] == L' ' || line[k - 1] == L'\n' || line[k - 1] == L'\t')
+                                            {
+                                                word_start = k;
+                                                break;
+                                            }
+                                        }
+
+                                        ed_set_pos(te_app_get_editor(app), wi.row, linelen);
+                                        ed_get_info(te_app_get_editor(app), &wi);
+
+                                        word_len = wi.col - word_start;
+                                        space_available = eff_wrap - word_start;
+
+                                        clear_search_highlights(app);
+                                    }
+                                }
+                            }
+
                             /* If word doesn't fit in available space, try hyphen */
                             if (word_len > space_available && space_available >= 0 && app->hyph_wrap_enabled && app->hyph_handle)
                             {
