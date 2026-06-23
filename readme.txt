@@ -31,7 +31,7 @@ Press ESC or F10. If you have unsaved changes, it will ask for confirmation.
 
 Copy and paste
 1. Go to the start of the text you want to copy
-2. Press F6 or Alt+B (marks the start of the block)
+2. Mark the block using the editor's block selection
 3. Go to the end of the text with the arrow keys
 4. Press Ctrl+C to copy
 5. Go to where you want to paste

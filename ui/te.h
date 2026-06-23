@@ -50,41 +50,71 @@
 #ifndef KEY_CRIGHT
 #define KEY_CRIGHT 0x7F4
 #endif
-#ifndef KEY_CUP
-#define KEY_CUP 0x7F7
-#endif
-#ifndef KEY_CDOWN
-#define KEY_CDOWN 0x7F8
-#endif
 #ifndef KEY_ALEFT
 #define KEY_ALEFT 0x7F5
 #endif
 #ifndef KEY_ARIGHT
 #define KEY_ARIGHT 0x7F6
 #endif
+#ifndef KEY_CUP
+#define KEY_CUP 0x7F7
+#endif
+#ifndef KEY_CDOWN
+#define KEY_CDOWN 0x7F8
+#endif
+#ifndef KEY_CHOME
+#define KEY_CHOME 0x7F9
+#endif
+#ifndef KEY_CEND
+#define KEY_CEND 0x7FA
+#endif
 #ifndef KEY_CSLEFT
-#define KEY_CSLEFT 0x7F9
+#define KEY_CSLEFT 0x801
 #endif
 #ifndef KEY_CSRIGHT
-#define KEY_CSRIGHT 0x7FA
-#endif
-#ifndef KEY_CSUP
-#define KEY_CSUP 0x7FB
-#endif
-#ifndef KEY_CSDOWN
-#define KEY_CSDOWN 0x7FC
+#define KEY_CSRIGHT 0x802
 #endif
 #ifndef KEY_SLEFT
-#define KEY_SLEFT 0x7FD
+#define KEY_SLEFT 0x7FB
 #endif
 #ifndef KEY_SRIGHT
-#define KEY_SRIGHT 0x7FE
+#define KEY_SRIGHT 0x7FC
 #endif
 #ifndef KEY_SUP
-#define KEY_SUP 0x7FF
+#define KEY_SUP 0x7FD
 #endif
 #ifndef KEY_SDOWN
-#define KEY_SDOWN 0x800
+#define KEY_SDOWN 0x7FE
+#endif
+#ifndef KEY_SHOME
+#define KEY_SHOME 0x7FF
+#endif
+#ifndef KEY_SEND
+#define KEY_SEND 0x800
+#endif
+#ifndef KEY_CSUP
+#define KEY_CSUP 0x803
+#endif
+#ifndef KEY_CSDOWN
+#define KEY_CSDOWN 0x804
+#endif
+#ifndef KEY_SPPAGE
+#define KEY_SPPAGE 0x807
+#endif
+#ifndef KEY_SNPAGE
+#define KEY_SNPAGE 0x808
+#endif
+#ifndef KEY_CSUPD
+#define KEY_CSUPD 0x809
+#endif
+#ifndef KEY_CSDOWNU
+#define KEY_CSDOWNU 0x80A
+#endif
+#ifndef KEY_CSHOME
+#define KEY_CSHOME 0x805
+#endif
+#ifndef KEY_CSEND
+#define KEY_CSEND 0x806
 #endif
 #ifndef KEY_TAB
 #define KEY_TAB 9

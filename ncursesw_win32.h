@@ -245,6 +245,21 @@ extern int COLORS;
 #define ACS_BOARD '#'
 #define ACS_BULLET '*'
 
+/* Mouse support (stub for Windows) */
+#define BUTTON1_PRESSED 0x01
+#define BUTTON1_RELEASED 0x02
+#define BUTTON1_CLICKED 0x04
+#define BUTTON4_PRESSED 0x08
+#define BUTTON5_PRESSED 0x10
+#define REPORT_MOUSE_POSITION 0x20
+
+typedef struct
+{
+    short x;
+    short y;
+    unsigned long bstate;
+} MEVENT;
+
 /* Initialization */
 WINDOW *initscr(void);
 int endwin(void);
@@ -478,6 +493,8 @@ int resize_term(int nlines, int ncols);
 /* Control */
 int beep(void);
 int flash(void);
+
+int getmouse(MEVENT *ev);
 
 #endif /* PLATFORM_WIN32 */
 

@@ -26,6 +26,7 @@
 
 #if defined(PLATFORM_WIN32)
 #include <windows.h>
+#include <direct.h>
 #elif defined(PLATFORM_AMIGA)
 #include <exec/types.h>
 #include <dos/dos.h>

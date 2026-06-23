@@ -662,12 +662,29 @@ int cut(TeApp *app)
 
 int ui_editor_goto_start(TeApp *app)
 {
-    ed_set_pos(te_app_get_editor(app), 0, 0);
-    ed_ensure_visible(te_app_get_editor(app));
+    EdInfo info;
+    ed_get_info(te_app_get_editor(app), &info);
 
-    /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
-    if (!app->hard_wrap)
-        soft_reset_viewport_to_cursor(app, COLS);
+    if (info.block.active)
+    {
+        /* Extend selection to start of document */
+        ed_set_pos(te_app_get_editor(app), 0, 0);
+        ed_ensure_visible(te_app_get_editor(app));
+
+        /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
+        if (!app->hard_wrap)
+            soft_reset_viewport_to_cursor(app, COLS);
+    }
+    else
+    {
+        /* Move to start without selection */
+        ed_set_pos(te_app_get_editor(app), 0, 0);
+        ed_ensure_visible(te_app_get_editor(app));
+
+        /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
+        if (!app->hard_wrap)
+            soft_reset_viewport_to_cursor(app, COLS);
+    }
 
     return 1;
 }
@@ -681,12 +698,26 @@ int ui_editor_goto_end(TeApp *app)
     {
         int ll = info.line_count - 1;
 
-        ed_set_pos(te_app_get_editor(app), ll, ed_line_len(te_app_get_editor(app), ll));
-        ed_ensure_visible(te_app_get_editor(app));
+        if (info.block.active)
+        {
+            /* Extend selection to end of document */
+            ed_set_pos(te_app_get_editor(app), ll, ed_line_len(te_app_get_editor(app), ll));
+            ed_ensure_visible(te_app_get_editor(app));
 
-        /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
-        if (!app->hard_wrap)
-            soft_reset_viewport_to_cursor(app, COLS);
+            /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
+            if (!app->hard_wrap)
+                soft_reset_viewport_to_cursor(app, COLS);
+        }
+        else
+        {
+            /* Move to end without selection */
+            ed_set_pos(te_app_get_editor(app), ll, ed_line_len(te_app_get_editor(app), ll));
+            ed_ensure_visible(te_app_get_editor(app));
+
+            /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
+            if (!app->hard_wrap)
+                soft_reset_viewport_to_cursor(app, COLS);
+        }
     }
 
     return 1;
@@ -699,7 +730,7 @@ int ui_editor_export(TeApp *app)
 
     if (!info.block.active)
     {
-        te_status(app, "No block marked (F6 to mark)");
+        te_status(app, "No block marked");
     }
     else
     {

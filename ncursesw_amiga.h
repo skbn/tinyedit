@@ -191,6 +191,12 @@ extern int COLORS;
 #endif
 
 /* Alt+Arrow keycodes (word movement in editor) */
+#ifndef KEY_AUP
+#define KEY_AUP 0x7F1
+#endif
+#ifndef KEY_ADOWN
+#define KEY_ADOWN 0x7F2
+#endif
 #ifndef KEY_ALEFT
 #define KEY_ALEFT 0x7F5
 #endif
@@ -204,6 +210,26 @@ extern int COLORS;
 #endif
 #ifndef KEY_SRIGHT
 #define KEY_SRIGHT 0x7F8
+#endif
+#ifndef KEY_SUP
+#define KEY_SUP 0x7F9
+#endif
+#ifndef KEY_SDOWN
+#define KEY_SDOWN 0x7FA
+#endif
+
+/* Ctrl+Shift+Arrow keycodes (word selection) */
+#ifndef KEY_CSLEFT
+#define KEY_CSLEFT 0x801
+#endif
+#ifndef KEY_CSRIGHT
+#define KEY_CSRIGHT 0x802
+#endif
+#ifndef KEY_CSUP
+#define KEY_CSUP 0x803
+#endif
+#ifndef KEY_CSDOWN
+#define KEY_CSDOWN 0x804
 #endif
 
 /* Attributes */

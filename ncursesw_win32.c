@@ -2464,11 +2464,6 @@ int ungetch(int ch)
     return OK;
 }
 
-unsigned long getmouse(void)
-{
-    return s_mouse_event;
-}
-
 int flushinp(void)
 {
     s_key_count = 0;
@@ -2679,6 +2674,11 @@ int beep(void)
 int flash(void)
 {
     return beep();
+}
+
+int getmouse(MEVENT *ev)
+{
+    return ERR;
 }
 
 int border(chtype ls, chtype rs, chtype ts, chtype bs, chtype tl, chtype tr, chtype bl, chtype br)

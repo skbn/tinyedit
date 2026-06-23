@@ -69,7 +69,6 @@ static const char *HELP_LINES[] =
         "    F3 / Alt+C       Choose output charset",
         "",
         "  Block (selection):",
-        "    F6 / Alt+B       Mark / unmark block",
         "    Ctrl+C           Copy block",
         "    Ctrl+X           Cut block",
         "    Ctrl+V           Paste block (or clipboard)",
@@ -82,7 +81,7 @@ static const char *HELP_LINES[] =
         "    Alt+G            Go to line",
         "    F3 / Alt+C       Prev",
         "    F4 / Alt+T       Next",
-        "    F6 / Alt+B       Replace all",
+        "    F6 / Alt+B       Replace all (search mode)",
         "",
         "  Files:",
         "    F7 / Alt+O       Insert file at cursor",
@@ -472,6 +471,17 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
     int remaining;
     int last;
     int ll;
+    int soft;
+    const wchar_t *l = NULL;
+    int len;
+    int j;
+    int acc_w;
+    int n_sub;
+    int sub_left_in_line;
+    int target_sub;
+    int seg_start;
+    int seg_end;
+    int cw;
 
     if (!app || !out_line || !out_col)
         return -1;
@@ -499,10 +509,51 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
     if (screen_x < 0)
         screen_x = 0;
 
-    /* Walk forward through logical lines, consuming sub-rows */
-    line = s_soft_top_line;
-    sub = s_soft_top_sub;
-    remaining = screen_y;
+    /* In hard-wrap mode, use info.top directly (1 logical line = 1 screen row) */
+    soft = !app->hard_wrap;
+
+    line = soft ? s_soft_top_line : info.top + screen_y;
+    sub = soft ? s_soft_top_sub : 0;
+    remaining = soft ? screen_y : 0;
+
+    if (!soft)
+    {
+        if (line >= info.line_count)
+        {
+            line = info.line_count - 1;
+
+            ll = ed_line_len(ed, line);
+
+            *out_line = line;
+            *out_col = ll;
+            return 0;
+        }
+
+        if (line < 0)
+            line = 0;
+
+        /* Calculate column from screen_x (walk char by char, summing visual width) */
+        l = ed_line_wcs(ed, line);
+        len = ed_line_len(ed, line);
+
+        acc_w = 0;
+
+        for (j = 0; j < len; j++)
+        {
+            cw = wcs_vwidth(&l[j], 1);
+
+            if (acc_w + cw > screen_x)
+                break;
+
+            acc_w += cw;
+        }
+
+        *out_line = line;
+        *out_col = j;
+        return 0;
+    }
+
+    /* Soft-wrap: walk forward through logical lines, consuming sub-rows */
 
     while (line < info.line_count)
     {
@@ -1972,17 +2023,11 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
             return do_search(app);
     }
 
-    /* F6 / Alt+B : toggle block anchor OR Replace All in search mode */
+    /* F6 / Alt+B : Replace All in search mode */
     if ((is_key && ch == KEY_F(6)) || (ch == KEY_ALT('B')))
     {
         if (app->search.is_mode && app->search.count > 0)
             return replace_all(app);
-        else if (!app->search.only_mode && !app->search.is_mode)
-        {
-            /* Normal block anchor functionality */
-            ed_block_anchor(te_app_get_editor(app));
-            return 1;
-        }
     }
 
     /* F7 / Alt+O : insert file */
@@ -1996,7 +2041,9 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
 
         if (cp >= 0)
         {
+            ed_block_clear(te_app_get_editor(app));
             ed_insert_char(te_app_get_editor(app), (wchar_t)cp);
+
             clear_search_highlights(app);
         }
 
@@ -2219,6 +2266,8 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
     switch (ch)
     {
     case KEY_UP:
+        ed_block_clear(te_app_get_editor(app));
+
         if (soft)
         {
             soft_move_up_visual(app, width);
@@ -2230,6 +2279,8 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_DOWN:
+        ed_block_clear(te_app_get_editor(app));
+
         if (soft)
         {
             soft_move_down_visual(app, width);
@@ -2241,14 +2292,18 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_LEFT:
+        ed_block_clear(te_app_get_editor(app));
         ed_move_left(te_app_get_editor(app));
         return 1;
 
     case KEY_RIGHT:
+        ed_block_clear(te_app_get_editor(app));
         ed_move_right(te_app_get_editor(app));
         return 1;
 
     case KEY_HOME:
+        ed_block_clear(te_app_get_editor(app));
+
         if (soft)
             soft_move_home_visual(app, width);
         else
@@ -2257,6 +2312,8 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_END:
+        ed_block_clear(te_app_get_editor(app));
+
         if (soft)
             soft_move_end_visual(app, width);
         else
@@ -2265,6 +2322,8 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_PPAGE:
+        ed_block_clear(te_app_get_editor(app));
+
         if (soft)
         {
             soft_move_pgup_visual(app, width, body_rows);
@@ -2276,6 +2335,8 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_NPAGE:
+        ed_block_clear(te_app_get_editor(app));
+
         if (soft)
         {
             soft_move_pgdn_visual(app, width, body_rows);
@@ -2287,9 +2348,9 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_ENTER:
+        ed_block_clear(te_app_get_editor(app));
         ed_enter(te_app_get_editor(app));
         clear_search_highlights(app);
-
         return 1;
 
     case KEY_BACKSPACE:
@@ -2303,7 +2364,10 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
             te_status(app, "Block deleted");
         }
         else
+        {
+            ed_block_clear(te_app_get_editor(app));
             ed_backspace(te_app_get_editor(app));
+        }
 
         clear_search_highlights(app);
 
@@ -2321,7 +2385,10 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
             te_status(app, "Block deleted");
         }
         else
+        {
+            ed_block_clear(te_app_get_editor(app));
             ed_delete(te_app_get_editor(app));
+        }
 
         clear_search_highlights(app);
 
@@ -2334,10 +2401,12 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_CLEFT:
+        ed_block_clear(te_app_get_editor(app));
         ed_word_left(te_app_get_editor(app));
         return 1;
 
     case KEY_CRIGHT:
+        ed_block_clear(te_app_get_editor(app));
         ed_word_right(te_app_get_editor(app));
         return 1;
 
@@ -2377,6 +2446,34 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         ed_move_down(te_app_get_editor(app));
         return 1;
 
+    case KEY_SPPAGE:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_pgup(te_app_get_editor(app), 0);
+        return 1;
+
+    case KEY_SNPAGE:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_pgdn(te_app_get_editor(app), 0);
+        return 1;
+
+    case KEY_CSUPD:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_pgdn(te_app_get_editor(app), 0);
+        return 1;
+
+    case KEY_CSDOWNU:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_pgup(te_app_get_editor(app), 0);
+        return 1;
+
     case KEY_SLEFT:
         if (!te_app_get_editor(app)->block.active)
             ed_block_anchor(te_app_get_editor(app));
@@ -2403,6 +2500,34 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
             ed_block_anchor(te_app_get_editor(app));
 
         ed_move_down(te_app_get_editor(app));
+        return 1;
+
+    case KEY_SHOME:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_home(te_app_get_editor(app));
+        return 1;
+
+    case KEY_SEND:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_end(te_app_get_editor(app));
+        return 1;
+
+    case KEY_CSHOME:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_top(te_app_get_editor(app));
+        return 1;
+
+    case KEY_CSEND:
+        if (!te_app_get_editor(app)->block.active)
+            ed_block_anchor(te_app_get_editor(app));
+
+        ed_move_bottom(te_app_get_editor(app));
         return 1;
 
     case KEY_ALT('Z'):
@@ -2436,13 +2561,14 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
     {
     case '\n':
     case '\r':
+        ed_block_clear(te_app_get_editor(app));
         ed_enter(te_app_get_editor(app));
         clear_search_highlights(app);
-
         return 1;
 
     case 8:
     case 127:
+        ed_block_clear(te_app_get_editor(app));
         ed_backspace(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
@@ -2486,6 +2612,7 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         return 1;
 
     case CTRL('Y'):
+        ed_block_clear(te_app_get_editor(app));
         ed_delete_line(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
@@ -2497,11 +2624,13 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         return 1;
 
     case CTRL('T'):
+        ed_block_clear(te_app_get_editor(app));
         ed_delete_word_right(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
 
     case CTRL('_'):
+        ed_block_clear(te_app_get_editor(app));
         ed_delete_word_left(te_app_get_editor(app));
         clear_search_highlights(app);
         return 1;
@@ -2514,6 +2643,7 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
     default:
         if (wch >= 0x20 && wch != 127)
         {
+            ed_block_clear(te_app_get_editor(app));
             ed_insert_char(te_app_get_editor(app), (wchar_t)wch);
             clear_search_highlights(app);
 

@@ -360,10 +360,11 @@ static FileEnt *load_dir(const char *dir, int *out_n)
         {
             int nc = cap ? cap * 2 : 32;
             FileEnt *nb = (FileEnt *)realloc(ents, (size_t)nc * sizeof(FileEnt));
+            int i;
 
             if (!nb)
             {
-                for (int i = 0; i < n; i++)
+                for (i = 0; i < n; i++)
                     free(ents[i].name);
 
                 free(ents);

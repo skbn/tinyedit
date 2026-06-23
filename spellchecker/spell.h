@@ -102,4 +102,4 @@ void spell_free_list(struct spell *s, char **list, int n);
 int spell_load_custom(struct spell *s, const char *path);
 int spell_add_to_custom_dict(struct spell *s, const char *word, const char *custom_dict_path);
 
-#endif
+#endif /* SPELL_H */

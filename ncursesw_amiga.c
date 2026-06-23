@@ -2284,8 +2284,30 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
         return ERR;
 
     /* Modified arrows MUST be checked before bare-arrow switch, otherwise modified keys fall through and return bare KEY_LEFT/RIGHT */
+    /* Ctrl+Shift takes priority over Shift or Ctrl alone */
+    if ((qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) && (qual & IEQUALIFIER_CONTROL))
+    {
+        if (code == 0x4C)
+            return KEY_CSUP;
+
+        if (code == 0x4D)
+            return KEY_CSDOWN;
+
+        if (code == 0x4F)
+            return KEY_CSLEFT;
+
+        if (code == 0x4E)
+            return KEY_CSRIGHT;
+    }
+
     if (qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT))
     {
+        if (code == 0x4C)
+            return KEY_SUP;
+
+        if (code == 0x4D)
+            return KEY_SDOWN;
+
         if (code == 0x4F)
             return KEY_SLEFT;
 
@@ -2295,6 +2317,12 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
     if (qual & IEQUALIFIER_CONTROL)
     {
+        if (code == 0x4C)
+            return KEY_CUP;
+
+        if (code == 0x4D)
+            return KEY_CDOWN;
+
         if (code == 0x4F)
             return KEY_CLEFT;
 
@@ -2304,6 +2332,12 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
     if (qual & (IEQUALIFIER_LALT | IEQUALIFIER_RALT))
     {
+        if (code == 0x4C)
+            return KEY_AUP;
+
+        if (code == 0x4D)
+            return KEY_ADOWN;
+
         if (code == 0x4F)
             return KEY_ALEFT;
 

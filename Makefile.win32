@@ -52,7 +52,7 @@ ifeq ($(USE_HYPHEN),1)
     $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
   endif
   CFLAGS += -DHAVE_HYPHEN -I$(SPELL_DIR)
-  HYPHWRAP_OBJS = $(OBJDIR)/spellchecker_hyph.o
+  HYPHWRAP_OBJS = $(OBJDIR)/spellchecker_hyph.o $(OBJDIR)/ui_hyph.o
 endif
 
 # Thesaurus support (same as Amiga: spellchecker/ C-only engine)
@@ -62,7 +62,7 @@ ifeq ($(USE_MYTHES),1)
     $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
   endif
   CFLAGS += -DHAVE_MYTHES -I$(SPELL_DIR)
-  THES_OBJS = $(OBJDIR)/spellchecker_thes.o
+  THES_OBJS = $(OBJDIR)/spellchecker_thes.o $(OBJDIR)/ui_thes.o
 endif
 
 # Architecture (default: win64 for 64-bit Windows)
@@ -210,10 +210,16 @@ endif
 ifeq ($(USE_HYPHEN),1)
 $(OBJDIR)/spellchecker_hyph.o: $(SPELL_DIR)/hyph.c $(SPELL_DIR)/hyph.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_hyph.o: $(UIDIR)/ui_hyph.c $(UIDIR)/ui_hyph.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 
 ifeq ($(USE_MYTHES),1)
 $(OBJDIR)/spellchecker_thes.o: $(SPELL_DIR)/thes.c $(SPELL_DIR)/thes.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_thes.o: $(UIDIR)/ui_thes.c $(UIDIR)/ui_thes.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 

@@ -290,18 +290,28 @@ int main(int argc, char **argv)
     define_key("\033[1;5C", KEY_CRIGHT);
     define_key("\033[1;5A", KEY_CUP);
     define_key("\033[1;5B", KEY_CDOWN);
+    define_key("\033[1;5H", KEY_CHOME);
+    define_key("\033[1;5F", KEY_CEND);
 
     /* Register Ctrl+Shift+arrow key sequences for word selection */
     define_key("\033[1;6D", KEY_CSLEFT);
     define_key("\033[1;6C", KEY_CSRIGHT);
     define_key("\033[1;6A", KEY_CSUP);
     define_key("\033[1;6B", KEY_CSDOWN);
+    define_key("\033[5;2~", KEY_SPPAGE);
+    define_key("\033[6;2~", KEY_SNPAGE);
+    define_key("\033[1;6d", KEY_CSUPD);
+    define_key("\033[1;6u", KEY_CSDOWNU);
+    define_key("\033[1;6H", KEY_CSHOME);
+    define_key("\033[1;6F", KEY_CSEND);
 
     /* Register Shift+arrow key sequences for character/line selection */
     define_key("\033[1;2D", KEY_SLEFT);
     define_key("\033[1;2C", KEY_SRIGHT);
     define_key("\033[1;2A", KEY_SUP);
     define_key("\033[1;2B", KEY_SDOWN);
+    define_key("\033[1;2H", KEY_SHOME);
+    define_key("\033[1;2F", KEY_SEND);
 
     /* Register Alt+key sequences for editor functions */
     define_key("\033y", KEY_ALT('Y'));
