@@ -437,6 +437,15 @@ int main(int argc, char **argv)
 
     if (!app)
     {
+#if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
+        /* Disable mouse if it was enabled */
+        if (cfg.mouse_enabled)
+        {
+            printf("\033[?1002l");
+            printf("\033[?1006l");
+            fflush(stdout);
+        }
+#endif
         endwin();
 
         fprintf(stderr, "tinyedit: out of memory\n");
@@ -548,12 +557,9 @@ int main(int argc, char **argv)
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
     /* Disable button event tracking if mouse was enabled */
-    if (cfg.mouse_enabled)
-    {
-        printf("\033[?1002l");
-        printf("\033[?1006l");
-        fflush(stdout);
-    }
+    printf("\033[?1002l");
+    printf("\033[?1006l");
+    fflush(stdout);
 #endif
 
     endwin();
