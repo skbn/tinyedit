@@ -216,6 +216,12 @@ typedef struct
 
     char charset_in[32];
     char charset_out[32];
+
+    /* Editor assistance toggles. Default off; enabled via setup UI
+     * Each one independent: smart_quotes, repeat_check, auto_cap */
+    int assist_smart_quotes; /* '  -> ‘/’ ; "  -> “/”            */
+    int assist_repeat_check; /* warn/highlight on "the the" etc. */
+    int assist_auto_cap;     /* capitalize after ". ", "? ", "! " */
 } TeApp;
 
 /* Helper functions to access active tab data */

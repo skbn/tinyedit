@@ -36,7 +36,8 @@ ifeq ($(USE_HUNSPELL),1)
                $(OBJDIR)/spellchecker_core.o \
                $(OBJDIR)/spellchecker_suggest.o \
                $(OBJDIR)/spellchecker_stem.o \
-               $(OBJDIR)/spellchecker_custom.o
+               $(OBJDIR)/spellchecker_custom.o \
+               $(OBJDIR)/spellchecker_dict_scan.o
 endif
 
 # Hyphen support (new C-only engine in spellchecker/)
@@ -73,7 +74,7 @@ CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
 COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o
+            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o $(OBJDIR)/ui_assist.o
 
 ifeq ($(USE_HUNSPELL),1)
 UI_OBJS   += $(OBJDIR)/ui_spell.o
@@ -165,6 +166,9 @@ $(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c $(UIDIR)/te.h | $(OBJDIR)
 $(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(OBJDIR)/ui_assist.o: $(UIDIR)/ui_assist.c $(UIDIR)/ui_assist.h | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -208,6 +212,9 @@ $(OBJDIR)/spellchecker_stem.o: $(SPELL_DIR)/spell_stem.c $(SPELL_PRIV) | $(OBJDI
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)/spellchecker_custom.o: $(SPELL_DIR)/spell_custom.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_dict_scan.o: $(SPELL_DIR)/dict_scan.c $(SPELL_DIR)/dict_scan.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Hyphenation object (only if USE_HYPHEN=1)

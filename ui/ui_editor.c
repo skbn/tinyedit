@@ -30,6 +30,7 @@
 #include "ui_spell.h"
 #include "ui_glyph_picker.h"
 #include "ui_mouse.h"
+#include "ui_assist.h"
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
 #include "ui_hyph.h"
@@ -1308,11 +1309,12 @@ static void draw_body(TeApp *app)
                     }
 
 #ifdef HAVE_HUNSPELL
-                    /* Highlight misspelled words */
-                    if (app->spell_active && app->spell_handle)
+                    /* Highlight misspelled words AND/OR repeated words. Enter loop if either feature is active */
+                    if ((app->spell_active && app->spell_handle) || app->cfg.assist_repeat_check)
                     {
                         int word_start = seg_start;
                         int word_end;
+                        int spell_on = (app->spell_active && app->spell_handle);
 
                         standend();
 
@@ -1334,13 +1336,24 @@ static void draw_body(TeApp *app)
                             if (word_end > word_start)
                             {
                                 int word_len = word_end - word_start;
+                                int marked = 0;
 
                                 /* Ignore single-character words */
-                                if (word_len > 1 && ui_spell_check_word_simple(app, &l[word_start], word_len))
+                                if (spell_on && word_len > 1 && ui_spell_check_word_simple(app, &l[word_start], word_len))
                                 {
                                     attron(COLOR_PAIR(COL_SPELL_CURRENT));
                                     mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth(&l[seg_start], word_start - seg_start), &l[word_start], word_len);
                                     attroff(COLOR_PAIR(COL_SPELL_CURRENT));
+
+                                    marked = 1;
+                                }
+
+                                /* Repeated-word check (independent of spell) Highlight if previous word on same line is the same */
+                                if (!marked && app->cfg.assist_repeat_check && ui_assist_check_repeat(app, li, word_start, word_len))
+                                {
+                                    attron(A_REVERSE);
+                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth(&l[seg_start], word_start - seg_start), &l[word_start], word_len);
+                                    attroff(A_REVERSE);
                                 }
                             }
 
@@ -1457,11 +1470,12 @@ static void draw_body(TeApp *app)
             }
 
 #ifdef HAVE_HUNSPELL
-            /* Highlight misspelled words */
-            if (app->spell_active && app->spell_handle)
+            /* Highlight misspelled words AND/OR repeated words */
+            if ((app->spell_active && app->spell_handle) || app->cfg.assist_repeat_check)
             {
                 int word_start = 0;
                 int word_end;
+                int spell_on = (app->spell_active && app->spell_handle);
 
                 standend();
 
@@ -1483,13 +1497,24 @@ static void draw_body(TeApp *app)
                     if (word_end > word_start)
                     {
                         int word_len = word_end - word_start;
+                        int marked = 0;
 
                         /* Ignore single-character words like word processors do */
-                        if (word_len > 1 && ui_spell_check_word_simple(app, &wl[word_start], word_len))
+                        if (spell_on && word_len > 1 && ui_spell_check_word_simple(app, &wl[word_start], word_len))
                         {
                             attron(COLOR_PAIR(COL_SPELL_CURRENT));
                             mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth(wl, word_start), &wl[word_start], word_len);
                             attroff(COLOR_PAIR(COL_SPELL_CURRENT));
+
+                            marked = 1;
+                        }
+
+                        /* Repeated-word check (independent of spell active) */
+                        if (!marked && app->cfg.assist_repeat_check && ui_assist_check_repeat(app, line_idx, word_start, word_len))
+                        {
+                            attron(A_REVERSE);
+                            mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth(wl, word_start), &wl[word_start], word_len);
+                            attroff(A_REVERSE);
                         }
                     }
 
@@ -2764,6 +2789,10 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
             ed_block_clear(te_app_get_editor(app));
             ed_insert_char(te_app_get_editor(app), (wchar_t)wch);
             clear_search_highlights(app);
+
+            /* Editor assists: smart quotes, auto-cap
+             * Independent of wrap mode -- they only touch the buffer */
+            ui_assist_on_char(app, (wchar_t)wch);
 
             /* HARD-WRAP only: insert CR at wrap col; soft-wrap leaves line intact */
             if (app->hard_wrap)

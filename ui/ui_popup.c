@@ -103,6 +103,9 @@ int ui_popup_confirm(const char *title, const char *msg)
 
         ch = getch();
 
+        if (ch == ERR)
+            continue;
+
         if (ch == 'y' || ch == 'Y' || ch == '\n' || ch == '\r')
         {
             standend();
@@ -1130,6 +1133,9 @@ int ui_popup_replace(const wchar_t *search_in, const wchar_t *replace_in, wchar_
         refresh();
 
         ch = getch();
+
+        if (ch == ERR)
+            continue;
 
         if (ch == 27)
         {

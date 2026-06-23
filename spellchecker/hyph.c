@@ -10,6 +10,7 @@
  */
 
 #include "hyph.h"
+#include "dict_scan.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -655,82 +656,7 @@ static char *extract_dict_name(const unsigned char *name)
 
 char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
 {
-    char **list = NULL;
-    int cap;
-    int count;
-
-#ifdef PLATFORM_AMIGA
-    BPTR lock;
-    struct FileInfoBlock *fib = NULL;
-#endif
-
-    if (n_dicts)
-        *n_dicts = 0;
-
-    if (!dir_path || !n_dicts)
-        return NULL;
-
-    cap = 16;
-    count = 0;
-    list = (char **)malloc((size_t)cap * sizeof(char *));
-
-    if (!list)
-        return NULL;
-
-#ifdef PLATFORM_AMIGA
-    lock = Lock((CONST_STRPTR)dir_path, ACCESS_READ);
-
-    if (lock)
-    {
-        fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
-
-        if (fib && Examine(lock, fib))
-        {
-            while (ExNext(lock, fib))
-            {
-                if (fib->fib_DirEntryType < 0 && ends_with_dic(fib->fib_FileName))
-                {
-                    char *base = extract_dict_name(fib->fib_FileName);
-
-                    if (base)
-                    {
-                        if (count >= cap)
-                        {
-                            int new_cap = cap * 2;
-                            char **g = (char **)realloc(list, (size_t)new_cap * sizeof(char *));
-
-                            if (!g)
-                            {
-                                free(base);
-                                continue;
-                            }
-
-                            list = g;
-                            cap = new_cap;
-                        }
-
-                        list[count++] = base;
-                    }
-                }
-            }
-        }
-
-        if (fib)
-            FreeDosObject(DOS_FIB, fib);
-
-        UnLock(lock);
-    }
-#endif
-
-    if (count == 0)
-    {
-        free(list);
-        return NULL;
-    }
-
-    *n_dicts = count;
-
-    return list;
+    return dict_scan(dir_path, n_dicts, (dict_filter_fn)ends_with_dic, (dict_xform_fn)extract_dict_name);
 }
 
 void hyph_free_dictionaries(char **dicts, int n_dicts)

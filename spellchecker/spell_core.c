@@ -119,6 +119,31 @@ void spell_free(struct spell *s)
 
     free(s->maps);
     free(s->try_chars);
+    free(s->wordchars);
+    free(s->key_layout);
+
+    if (s->break_chars)
+    {
+        int bi;
+
+        for (bi = 0; bi < s->n_break; bi++)
+            free(s->break_chars[bi]);
+
+        free(s->break_chars);
+    }
+
+    /* Free AF alias table (slot 0 reserved, [1..n_af] hold ms_cp arrays) */
+    if (s->af_flags)
+    {
+        int ai;
+
+        for (ai = 1; ai <= s->n_af; ai++)
+            free(s->af_flags[ai]);
+
+        free(s->af_flags);
+    }
+
+    free(s->af_n_flags);
 
     /* Free custom dictionary */
     if (s->custom_words)
@@ -156,6 +181,7 @@ int spell_check(struct spell *s, const char *word)
     struct ms_hentry *he = NULL;
     size_t wlen;
     char utf8_word[SPELL_MAX_WORD];
+    char normalized[SPELL_MAX_WORD];
     char lower[SPELL_MAX_WORD];
     const char *word_to_check = word;
 
@@ -170,6 +196,10 @@ int spell_check(struct spell *s, const char *word)
         if (converted > 0)
             word_to_check = utf8_word;
     }
+
+    /* Normalize typographic chars to ASCII before lookup */
+    if (spell_normalize_chars(word_to_check, normalized, sizeof(normalized)) > 0)
+        word_to_check = normalized;
 
     wlen = strlen(word_to_check);
 
@@ -209,7 +239,15 @@ int spell_check(struct spell *s, const char *word)
 
     if (he)
     {
+        /* FORBIDDENWORD: explicit blacklist, reject even if direct hit */
+        if (he->attrs & MS_ATTR_FORBIDDEN)
+        {
+            check_cache_put(s, word_to_check, 0);
+            return 0;
+        }
+
         check_cache_put(s, word_to_check, 1);
+
         return 1;
     }
 
@@ -225,7 +263,22 @@ int spell_check(struct spell *s, const char *word)
 
             if (he)
             {
+                /* FORBIDDENWORD on lowercase: also reject */
+                if (he->attrs & MS_ATTR_FORBIDDEN)
+                {
+                    check_cache_put(s, word_to_check, 0);
+                    return 0;
+                }
+
+                /* KEEPCASE: dict entry requires exact case match; reject if user typed mixed case differing from dict */
+                if (he->attrs & MS_ATTR_KEEPCASE)
+                {
+                    check_cache_put(s, word_to_check, 0);
+                    return 0;
+                }
+
                 check_cache_put(s, word_to_check, 1);
+
                 return 1;
             }
 
@@ -242,6 +295,47 @@ int spell_check(struct spell *s, const char *word)
     {
         check_cache_put(s, word_to_check, 1);
         return 1;
+    }
+
+    /* BREAK fallback: split word at BREAK chars and check halves */
+    if (s->n_break > 0)
+    {
+        int bi;
+
+        for (bi = 0; bi < s->n_break; bi++)
+        {
+            const char *brk = s->break_chars[bi];
+            const char *pos = NULL;
+            size_t bl;
+            size_t left_len;
+            char left[SPELL_MAX_WORD];
+            const char *right = NULL;
+
+            if (!brk || !*brk)
+                continue;
+
+            bl = strlen(brk);
+            pos = strstr(word_to_check, brk);
+
+            /* Don't split if break is at start/end of word (would leave empty half) */
+            if (!pos || pos == word_to_check || !*(pos + bl))
+                continue;
+
+            left_len = (size_t)(pos - word_to_check);
+            right = pos + bl;
+
+            if (left_len + 1 > sizeof(left))
+                continue;
+
+            memcpy(left, word_to_check, left_len);
+            left[left_len] = '\0';
+
+            if (spell_check(s, left) == 1 && spell_check(s, right) == 1)
+            {
+                check_cache_put(s, word_to_check, 1);
+                return 1;
+            }
+        }
     }
 
     check_cache_put(s, word_to_check, 0);

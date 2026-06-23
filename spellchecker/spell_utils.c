@@ -129,9 +129,9 @@ ms_cp *parse_flags(const char *s, int flag_type, int *n_out)
 
     p = s;
 
-    if (flag_type == 2 || flag_type == 3)
+    if (flag_type == 2)
     {
-        /* FLAG NUM or LONG: numbers separated by commas */
+        /* FLAG NUM: numbers separated by commas, e.g. "1,5,42" = 3 flags */
         while (*p)
         {
             unsigned long num = 0;
@@ -161,6 +161,40 @@ ms_cp *parse_flags(const char *s, int flag_type, int *n_out)
                 p++;
             else
                 break;
+        }
+    }
+    else if (flag_type == 3)
+    {
+        /* FLAG LONG: pairs of ASCII chars packed as (first << 8) | second, odd trailing char treated as single-byte */
+        while (*p)
+        {
+            ms_cp packed;
+
+            if (!p[1])
+            {
+                /* Odd trailing char -- treat as single-byte flag */
+                packed = (unsigned char)*p;
+                p++;
+            }
+            else
+            {
+                packed = ((ms_cp)(unsigned char)p[0] << 8) | (ms_cp)(unsigned char)p[1];
+                p += 2;
+            }
+
+            if (count == cap)
+            {
+                int new_cap = cap * 2;
+                ms_cp *ng = (ms_cp *)realloc(result, (size_t)new_cap * sizeof(ms_cp));
+
+                if (!ng)
+                    break;
+
+                result = ng;
+                cap = new_cap;
+            }
+
+            result[count++] = packed;
         }
     }
     else
@@ -391,4 +425,139 @@ int te_is_word_char(wint_t wc)
         return 1;
 
     return 0;
+}
+
+/* WORDCHARS-aware variant: if s->wordchars contains char (ASCII), return 1, else fall back to te_is_word_char */
+int te_is_word_char_ex(struct spell *s, wint_t wc)
+{
+    if (te_is_word_char(wc))
+        return 1;
+
+    if (s && s->wordchars && wc < 0x80)
+    {
+        unsigned char b = (unsigned char)wc;
+        const char *p;
+
+        for (p = s->wordchars; *p; p++)
+        {
+            if ((unsigned char)*p == b)
+                return 1;
+        }
+    }
+
+    return 0;
+}
+
+/* Mini-ICONV: hard-coded table of typographic codepoints to ASCII equivalents before dict lookup (curly quotes, dashes, NBSP) */
+int spell_normalize_chars(const char *in, char *out, size_t outsz)
+{
+    const char *p = in;
+    size_t used = 0;
+    int changed = 0;
+
+    if (!in || !out || outsz == 0)
+        return 0;
+
+    /* Small table */
+    while (*p)
+    {
+        ms_cp cp;
+        int adv = utf8_decode(p, &cp);
+        char ascii = 0;
+
+        switch (cp)
+        {
+        /* Single quotes / apostrophes */
+        case 0x2018:
+            ascii = '\'';
+            break; /* left single  */
+        case 0x2019:
+            ascii = '\'';
+            break; /* right single / typographic apos */
+        case 0x201B:
+            ascii = '\'';
+            break; /* high-reversed-9 */
+        case 0x2032:
+            ascii = '\'';
+            break; /* prime */
+
+        /* Double quotes */
+        case 0x201C:
+            ascii = '"';
+            break; /* left double  */
+        case 0x201D:
+            ascii = '"';
+            break; /* right double */
+        case 0x201E:
+            ascii = '"';
+            break; /* low-9 */
+        case 0x201F:
+            ascii = '"';
+            break; /* high-reversed-9 double */
+        case 0x2033:
+            ascii = '"';
+            break; /* double prime */
+
+        /* Hyphens / dashes */
+        case 0x2010:
+            ascii = '-';
+            break; /* hyphen */
+        case 0x2011:
+            ascii = '-';
+            break; /* non-breaking hyphen */
+        case 0x2013:
+            ascii = '-';
+            break; /* en dash */
+        case 0x2014:
+            ascii = '-';
+            break; /* em dash */
+        case 0x2212:
+            ascii = '-';
+            break; /* minus sign */
+
+        /* Spaces */
+        case 0x00A0:
+            ascii = ' ';
+            break; /* NBSP */
+        case 0x2009:
+            ascii = ' ';
+            break; /* thin space */
+        case 0x202F:
+            ascii = ' ';
+            break; /* narrow NBSP */
+
+            /* Ellipsis -> three dots? No, leave as-is. Dict words don't contain ellipsis. Keep the original char */
+        default:
+            break;
+        }
+
+        if (ascii)
+        {
+            if (used + 1 >= outsz)
+                return 0;
+
+            out[used++] = ascii;
+
+            changed = 1;
+            p += adv;
+        }
+        else
+        {
+            /* Copy original bytes verbatim */
+            if (used + (size_t)adv >= outsz)
+                return 0;
+
+            memcpy(out + used, p, (size_t)adv);
+
+            used += (size_t)adv;
+            p += adv;
+        }
+    }
+
+    if (used >= outsz)
+        return 0;
+
+    out[used] = '\0';
+
+    return changed ? (int)used : 0;
 }

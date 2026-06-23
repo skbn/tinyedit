@@ -30,7 +30,7 @@ int htab_init(struct spell *m, int initial_pow2)
     return 0;
 }
 
-void htab_insert_into(struct ms_hentry *tab, int sz, char *word, ms_cp *flags, int n_flags)
+void htab_insert_into(struct ms_hentry *tab, int sz, char *word, ms_cp *flags, int n_flags, unsigned char attrs)
 {
     unsigned long h = ms_hash(word);
     int mask = sz - 1;
@@ -62,6 +62,9 @@ void htab_insert_into(struct ms_hentry *tab, int sz, char *word, ms_cp *flags, i
                 }
             }
 
+            /* Merge attrs by OR (any decl on either copy sticks) */
+            tab[i].attrs |= attrs;
+
             free(word);
             free(flags);
 
@@ -74,6 +77,7 @@ void htab_insert_into(struct ms_hentry *tab, int sz, char *word, ms_cp *flags, i
     tab[i].word = word;
     tab[i].flags = flags;
     tab[i].n_flags = n_flags;
+    tab[i].attrs = attrs;
 }
 
 int htab_resize(struct spell *m, int new_sz)
@@ -87,7 +91,7 @@ int htab_resize(struct spell *m, int new_sz)
     for (i = 0; i < m->htab_size; i++)
     {
         if (m->htab[i].word)
-            htab_insert_into(nt, new_sz, m->htab[i].word, m->htab[i].flags, m->htab[i].n_flags);
+            htab_insert_into(nt, new_sz, m->htab[i].word, m->htab[i].flags, m->htab[i].n_flags, m->htab[i].attrs);
     }
 
     free(m->htab);
@@ -104,6 +108,8 @@ void htab_insert(struct spell *m, const char *word, const char *flags_str)
     ms_cp *flags = NULL;
     int n_flags = 0;
     int new_size;
+    unsigned char attrs;
+    int k;
 
     /* Resize if over 70% */
     if (m->htab_count * 10 >= m->htab_size * 7)
@@ -119,6 +125,74 @@ void htab_insert(struct spell *m, const char *word, const char *flags_str)
     }
 
     w = ms_strdup(word);
+
+    /* Check if flags_str is AF alias (all digits): expand using af_flags[i] instead of parsing */
+    if (m->n_af > 0 && flags_str && *flags_str)
+    {
+        const char *p = flags_str;
+        int is_alias = 1;
+
+        while (*p)
+        {
+            if (*p < '0' || *p > '9')
+            {
+                is_alias = 0;
+                break;
+            }
+
+            p++;
+        }
+
+        if (is_alias)
+        {
+            int idx = atoi(flags_str);
+
+            if (idx >= 1 && idx <= m->n_af)
+            {
+                /* Duplicate alias's flag array so htab entry owns it (free_aff doesn't track it) */
+                int nf = m->af_n_flags[idx];
+
+                if (nf > 0)
+                {
+                    flags = (ms_cp *)malloc((size_t)nf * sizeof(ms_cp));
+
+                    if (flags)
+                    {
+                        memcpy(flags, m->af_flags[idx], (size_t)nf * sizeof(ms_cp));
+                        n_flags = nf;
+                    }
+                }
+
+                if (!w)
+                {
+                    free(flags);
+                    return;
+                }
+
+                if (!htab_find(m, w))
+                    m->htab_count++;
+
+                attrs = 0;
+
+                for (k = 0; k < n_flags; k++)
+                {
+                    if (m->flag_nosuggest && flags[k] == m->flag_nosuggest)
+                        attrs |= MS_ATTR_NOSUGGEST;
+
+                    if (m->flag_forbidden && flags[k] == m->flag_forbidden)
+                        attrs |= MS_ATTR_FORBIDDEN;
+
+                    if (m->flag_keepcase && flags[k] == m->flag_keepcase)
+                        attrs |= MS_ATTR_KEEPCASE;
+                }
+
+                htab_insert_into(m->htab, m->htab_size, w, flags, n_flags, attrs);
+
+                return;
+            }
+        }
+    }
+
     flags = parse_flags(flags_str, m->flag_type, &n_flags);
 
     if (!w)
@@ -130,7 +204,21 @@ void htab_insert(struct spell *m, const char *word, const char *flags_str)
     if (!htab_find(m, w))
         m->htab_count++;
 
-    htab_insert_into(m->htab, m->htab_size, w, flags, n_flags);
+    attrs = 0;
+
+    for (k = 0; k < n_flags; k++)
+    {
+        if (m->flag_nosuggest && flags[k] == m->flag_nosuggest)
+            attrs |= MS_ATTR_NOSUGGEST;
+
+        if (m->flag_forbidden && flags[k] == m->flag_forbidden)
+            attrs |= MS_ATTR_FORBIDDEN;
+
+        if (m->flag_keepcase && flags[k] == m->flag_keepcase)
+            attrs |= MS_ATTR_KEEPCASE;
+    }
+
+    htab_insert_into(m->htab, m->htab_size, w, flags, n_flags, attrs);
 }
 
 struct ms_hentry *htab_find(struct spell *m, const char *word)

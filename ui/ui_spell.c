@@ -293,15 +293,16 @@ int spell_check_word(TeApp *app)
 
     line_len = ed_line_len(ed, info.row);
 
-    /* Find word boundaries */
+    /* Find word boundaries. Use _ex so WORDCHARS (".", "'", digits)
+     * from the loaded .aff also count -- e.g. "etc." extracts whole */
     word_start = info.col;
 
-    while (word_start > 0 && te_is_word_char(line[word_start - 1]))
+    while (word_start > 0 && te_is_word_char_ex(app->spell_handle, line[word_start - 1]))
         word_start--;
 
     word_end = info.col;
 
-    while (word_end < line_len && te_is_word_char(line[word_end]))
+    while (word_end < line_len && te_is_word_char_ex(app->spell_handle, line[word_end]))
         word_end++;
 
     if (word_start == word_end)

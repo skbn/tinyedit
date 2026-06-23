@@ -55,7 +55,12 @@ struct ms_hentry
     char *word;   /* word (utf-8), NULL if slot free */
     ms_cp *flags; /* array of associated flags */
     int n_flags;
+    unsigned char attrs; /* bitfield: 1=NOSUGGEST, 2=FORBIDDEN, 4=KEEPCASE */
 };
+
+#define MS_ATTR_NOSUGGEST 0x01
+#define MS_ATTR_FORBIDDEN 0x02
+#define MS_ATTR_KEEPCASE 0x04
 
 struct ms_rep
 {
@@ -76,6 +81,11 @@ struct spell
     int flag_type; /* 0=ASCII, 1=UTF-8, 2=NUM, 3=LONG */
     int flag_utf8; /* 1 if FLAG UTF-8 (deprecated, use flag_type) */
 
+    /* Special-purpose flags: NOSUGGEST, FORBIDDENWORD, KEEPCASE (0 if undeclared) */
+    ms_cp flag_nosuggest;
+    ms_cp flag_forbidden;
+    ms_cp flag_keepcase;
+
     struct ms_hentry *htab;
     int htab_size; /* Always power of 2 */
     int htab_count;
@@ -89,7 +99,21 @@ struct spell
     char ***maps; /* maps[i] = array of strings terminated by NULL */
     int n_maps;
 
+    /* AF alias table: af_flags[i] holds flag list for word/N references (1-indexed) */
+    ms_cp **af_flags; /* af_flags[i] = decoded flag array */
+    int *af_n_flags;  /* count of flags in af_flags[i] */
+    int n_af;         /* number of AF entries declared (af_flags has n_af+1 slots) */
+
     char *try_chars; /* UTF-8 string with characters to try */
+
+    /* WORDCHARS: extra word characters (e.g. .', digits). KEY: keyboard-adjacent rows for suggest sort. */
+    char *key_layout;
+
+    char *wordchars;
+
+    /* BREAK table: characters/strings that split compound words for checking (e.g. BREAK - for light-bulb) */
+    char **break_chars;
+    int n_break;
 
     struct ms_check_cache cache[SPELL_CACHE_N];
     short head, tail;
@@ -121,10 +145,11 @@ unsigned long ms_hash(const char *s);
 int utf8_char_is_upper(const char *str, int byte_pos);
 int utf8_match_char_case(const char *ref_char, char *target_char, int target_len);
 int te_is_word_char(wint_t wc);
+int spell_normalize_chars(const char *in, char *out, size_t outsz);
 
 /* spell_htab */
 int htab_init(struct spell *m, int initial_pow2);
-void htab_insert_into(struct ms_hentry *tab, int sz, char *word, ms_cp *flags, int n_flags);
+void htab_insert_into(struct ms_hentry *tab, int sz, char *word, ms_cp *flags, int n_flags, unsigned char attrs);
 int htab_resize(struct spell *m, int new_sz);
 void htab_insert(struct spell *m, const char *word, const char *flags_str);
 struct ms_hentry *htab_find(struct spell *m, const char *word);

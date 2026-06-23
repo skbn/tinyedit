@@ -124,6 +124,9 @@ static const SetupField st_fields[] =
         {0, "Hard wrap", FT_BOOL, F_OFF(hard_wrap), 0},
         {0, "Line numbers", FT_BOOL, F_OFF(show_line_numbers), 0},
         {0, "Undo levels", FT_INT, F_OFF(undo_levels), 0},
+        {0, "Smart quotes", FT_BOOL, F_OFF(assist_smart_quotes), 0},
+        {0, "Auto-cap", FT_BOOL, F_OFF(assist_auto_cap), 0},
+        {0, "Repeated words", FT_BOOL, F_OFF(assist_repeat_check), 0},
         {0, "Terminal Mouse", FT_BOOL, F_OFF(mouse_enabled), 0},
 
 /* Colour/Font */
@@ -581,7 +584,7 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
             strncpy(tmp, s, sizeof(tmp) - 1);
             tmp[sizeof(tmp) - 1] = '\0';
 
-            if (ui_files_pick(fld->label, "", tmp, sizeof(tmp)) == 0)
+            if (ui_files_pick(fld->label, "PROGDIR:", tmp, sizeof(tmp)) == 0)
             {
                 strncpy(s, tmp, TE_CFG_STR_MAX - 1);
                 s[TE_CFG_STR_MAX - 1] = '\0';

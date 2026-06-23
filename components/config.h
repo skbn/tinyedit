@@ -100,6 +100,11 @@ typedef struct
 #endif
 #endif /* HAVE_HUNSPELL */
 
+    /* Editor assistance toggles (independent of spell support) */
+    int assist_smart_quotes;
+    int assist_auto_cap;
+    int assist_repeat_check;
+
 } TeConfig;
 
 /* Fill cfg with safe built-in defaults */

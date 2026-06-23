@@ -29,8 +29,49 @@ static int word_to_cps(const char *word, ms_cp *out, int max_chars)
     return n;
 }
 
-/* Levenshtein distance in codepoints SPELL_MAX_WORD limits cost */
-static int levenshtein_cp(const ms_cp *a, int la, const ms_cp *b, int lb)
+/* Levenshtein distance in codepoints, SPELL_MAX_WORD limits cost */
+static int key_neighbors(const char *layout, ms_cp a, ms_cp b)
+{
+    char ca;
+    char cb;
+    const char *pa = NULL;
+    const char *pb = NULL;
+    int diff;
+
+    if (!layout || a > 0x7F || b > 0x7F || a == b)
+        return 0;
+
+    ca = (char)a;
+    cb = (char)b;
+
+    /* Match case-insensitively: keyboards are case-blind */
+    if (ca >= 'A' && ca <= 'Z')
+        ca += 32;
+
+    if (cb >= 'A' && cb <= 'Z')
+        cb += 32;
+
+    pa = strchr(layout, ca);
+    pb = strchr(layout, cb);
+
+    if (!pa || !pb)
+        return 0;
+
+    /* They must be at offset exactly 1 with no '|' between them (different rows) */
+    diff = (int)(pa < pb ? pb - pa : pa - pb);
+
+    if (diff != 1)
+        return 0;
+
+    /* Adjacent in string, but check that neither is a '|' */
+    if (*pa == '|' || *pb == '|')
+        return 0;
+
+    return 1;
+}
+
+static int levenshtein_cp(const ms_cp *a, int la, const ms_cp *b, int lb,
+                          const char *key_layout)
 {
     int prev[SPELL_MAX_WORD + 1];
     int curr[SPELL_MAX_WORD + 1];
@@ -44,19 +85,30 @@ static int levenshtein_cp(const ms_cp *a, int la, const ms_cp *b, int lb)
         lb = SPELL_MAX_WORD;
 
     for (j = 0; j <= lb; j++)
-        prev[j] = j;
+        prev[j] = j * 2; /* base cost = 2 per op so neighbour bonus has room */
 
     for (i = 1; i <= la; i++)
     {
-        curr[0] = i;
+        curr[0] = i * 2;
 
         for (j = 1; j <= lb; j++)
         {
-            int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
-            int del = prev[j] + 1;
-            int ins = curr[j - 1] + 1;
-            int sub = prev[j - 1] + cost;
-            int m = del < ins ? del : ins;
+            int sub_cost;
+            int del = prev[j] + 2;
+            int ins = curr[j - 1] + 2;
+            int sub;
+            int m;
+
+            if (a[i - 1] == b[j - 1])
+                sub_cost = 0;
+            else if (key_layout && key_neighbors(key_layout, a[i - 1], b[j - 1]))
+                sub_cost = 1; /* neighbour: half the cost of a normal sub */
+            else
+                sub_cost = 2;
+
+            sub = prev[j - 1] + sub_cost;
+
+            m = del < ins ? del : ins;
 
             if (sub < m)
                 m = sub;
@@ -92,7 +144,7 @@ static void sugg_sort_by_distance(struct spell *s, const char *word)
         ms_cp sug_cps[SPELL_MAX_WORD];
         int sug_n = word_to_cps(s->sugg_buf[i], sug_cps, SPELL_MAX_WORD);
 
-        dist[i] = levenshtein_cp(word_cps, word_n, sug_cps, sug_n);
+        dist[i] = levenshtein_cp(word_cps, word_n, sug_cps, sug_n, s->key_layout);
     }
 
     /* Insertion sort by dist[] carrying sugg_buf[] in parallel */
@@ -134,11 +186,25 @@ static void sugg_clear(struct spell *s)
 static int sugg_has(struct spell *s, const char *w)
 {
     int i;
+    char w_lower[SPELL_MAX_WORD];
+    char s_lower[SPELL_MAX_WORD];
+
+    if (!w)
+        return 0;
+
+    strcpy(w_lower, w);
+    utf8_tolower(w_lower);
 
     for (i = 0; i < s->sugg_n; i++)
     {
-        if (s->sugg_buf[i] && strcmp(s->sugg_buf[i], w) == 0)
-            return 1;
+        if (s->sugg_buf[i])
+        {
+            strcpy(s_lower, s->sugg_buf[i]);
+            utf8_tolower(s_lower);
+
+            if (strcmp(s_lower, w_lower) == 0)
+                return 1;
+        }
     }
 
     return 0;
@@ -158,6 +224,34 @@ int sugg_try(struct spell *s, const char *cand)
 
     if (spell_check(s, cand) != 1)
         return 0;
+
+    /* NOSUGGEST: word accepted by spell_check but must not be suggested (profanity, etc) */
+    if (s->flag_nosuggest)
+    {
+        struct ms_hentry *he = htab_find(s, cand);
+
+        if (he && (he->attrs & MS_ATTR_NOSUGGEST))
+            return 0;
+
+        /* Also block if the lowercase variant has the flag */
+        if (!he)
+        {
+            char lower[SPELL_MAX_WORD];
+            size_t cl = strlen(cand);
+
+            if (cl + 1 <= sizeof(lower))
+            {
+                memcpy(lower, cand, cl + 1);
+
+                utf8_tolower(lower);
+
+                he = htab_find(s, lower);
+
+                if (he && (he->attrs & MS_ATTR_NOSUGGEST))
+                    return 0;
+            }
+        }
+    }
 
     s->sugg_buf[s->sugg_n] = ms_strdup(cand);
 
@@ -429,7 +523,7 @@ static void gen_replace(struct spell *s, const char *word)
     }
 }
 
-/* Mapchars for each char in word if belongs to MAP group try substitute with each equivalent char useful for accents */
+/* Mapchars: for each char in word, if belongs to MAP group, substitute with each equivalent (useful for accents) */
 static void gen_map(struct spell *s, const char *word)
 {
     char cand[SPELL_MAX_WORD];

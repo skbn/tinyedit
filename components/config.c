@@ -267,6 +267,11 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->default_bg_color = 0;
     cfg->mouse_enabled = 1; /* mouse enabled by default */
 
+    /* Editor assists default OFF -- user opts in via setup */
+    cfg->assist_smart_quotes = 0;
+    cfg->assist_auto_cap = 0;
+    cfg->assist_repeat_check = 0;
+
     /* Initialize color_map as identity mapping (pen 0=black, 1=red, etc) */
     for (i = 0; i < 16; i++)
         cfg->color_map[i] = i;
@@ -654,6 +659,18 @@ int te_cfg_load(TeConfig *cfg, const char *path)
             else
                 cfg->mouse_enabled = 1;
         }
+        else if (strcasecmp(word, "ASSIST_SMART_QUOTES") == 0)
+        {
+            cfg->assist_smart_quotes = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "ASSIST_AUTO_CAP") == 0)
+        {
+            cfg->assist_auto_cap = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "ASSIST_REPEAT_CHECK") == 0)
+        {
+            cfg->assist_repeat_check = parse_yesno(rest);
+        }
         else if (strcasecmp(word, "COLORMAP") == 0)
         {
             char cname[24], penstr[8];
@@ -1005,6 +1022,11 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
     /* Mouse support */
     fprintf(out, "MOUSE_ENABLED %d\n", cfg->mouse_enabled);
+
+    /* Editor assists */
+    fprintf(out, "ASSIST_SMART_QUOTES %s\n", cfg->assist_smart_quotes ? "YES" : "NO");
+    fprintf(out, "ASSIST_AUTO_CAP %s\n", cfg->assist_auto_cap ? "YES" : "NO");
+    fprintf(out, "ASSIST_REPEAT_CHECK %s\n", cfg->assist_repeat_check ? "YES" : "NO");
 
     /* Color pairs */
     fprintf(out, "COLOR NORMAL %s %s\n", color_name(cfg->color_fg[COL_NORMAL]), color_name(cfg->color_bg[COL_NORMAL]));

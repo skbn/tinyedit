@@ -91,6 +91,9 @@ int spell_is_available(void);
 /* Unicode word-char classifier. Use instead of iswalnum() for word boundaries */
 int te_is_word_char(wint_t wc);
 
+/* Like te_is_word_char but also accepts WORDCHARS from .aff (e.g. .', digits). Pass NULL for 's' for plain behaviour. Use this to extract whole words like "etc.", "Dr.", "don't" */
+int te_is_word_char_ex(struct spell *s, wint_t wc);
+
 /* list available dictionaries in directory, returns base names (without .dic) */
 char **spell_list_dictionaries(const char *dir_path, int *n_dicts);
 void spell_free_dictionaries(char **dicts, int n_dicts);

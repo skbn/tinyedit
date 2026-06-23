@@ -28,9 +28,9 @@ int parse_aff_header(const char *line, int flag_type, ms_cp *flag_out, char *cp_
     if (!*p)
         return -1;
 
-    if (flag_type == 2 || flag_type == 3)
+    if (flag_type == 2)
     {
-        /* FLAG NUM or LONG: number */
+        /* FLAG NUM: number */
         char *end = NULL;
 
         f = (ms_cp)strtoul(p, &end, 10);
@@ -39,6 +39,15 @@ int parse_aff_header(const char *line, int flag_type, ms_cp *flag_out, char *cp_
             return -1;
 
         p = end;
+    }
+    else if (flag_type == 3)
+    {
+        /* FLAG LONG: pair of ASCII chars, packed as (c0 << 8) | c1 */
+        if (!p[0] || !p[1])
+            return -1;
+
+        f = ((ms_cp)(unsigned char)p[0] << 8) | (ms_cp)(unsigned char)p[1];
+        p += 2;
     }
     else
     {
@@ -88,9 +97,9 @@ int parse_aff_rule(const char *line, ms_cp expected_flag, int flag_type, char **
         return -1;
 
     /* Flag - according to flag_type */
-    if (flag_type == 2 || flag_type == 3)
+    if (flag_type == 2)
     {
-        /* FLAG NUM or LONG: number */
+        /* FLAG NUM: number */
         char *end = NULL;
 
         f = (ms_cp)strtoul(p, &end, 10);
@@ -99,6 +108,15 @@ int parse_aff_rule(const char *line, ms_cp expected_flag, int flag_type, char **
             return -1;
 
         p = end;
+    }
+    else if (flag_type == 3)
+    {
+        /* FLAG LONG: pair of ASCII chars */
+        if (!p[0] || !p[1])
+            return -1;
+
+        f = ((ms_cp)(unsigned char)p[0] << 8) | (ms_cp)(unsigned char)p[1];
+        p += 2;
     }
     else
     {
@@ -355,6 +373,133 @@ int load_aff(struct spell *m, const char *path)
             continue;
         }
 
+        if (strncmp(line, "WORDCHARS ", 10) == 0)
+        {
+            /* Extra characters that count as part of a word */
+            const char *rest = line + 10;
+
+            /* Skip leading spaces */
+            while (*rest == ' ')
+                rest++;
+
+            if (*rest)
+            {
+                free(m->wordchars);
+                m->wordchars = ms_strdup(rest);
+            }
+
+            continue;
+        }
+
+        if (strncmp(line, "KEY ", 4) == 0)
+        {
+            /* Keyboard adjacency layout for suggest sort: KEY row1|row2|row3 */
+            const char *rest = line + 4;
+
+            while (*rest == ' ')
+                rest++;
+
+            if (*rest)
+            {
+                free(m->key_layout);
+                m->key_layout = ms_strdup(rest);
+            }
+
+            continue;
+        }
+
+        if (strncmp(line, "BREAK ", 6) == 0)
+        {
+            /* BREAK table: characters/substrings that split words for checking */
+            const char *rest = line + 6;
+            char **g = NULL;
+            const char *p = NULL;
+            int is_header;
+
+            while (*rest == ' ')
+                rest++;
+
+            if (!*rest)
+                continue;
+
+            /* Skip pure-numeric "BREAK N" header */
+            p = rest;
+            is_header = 1;
+
+            while (*p)
+            {
+                if (*p < '0' || *p > '9')
+                {
+                    is_header = 0;
+                    break;
+                }
+
+                p++;
+            }
+
+            if (is_header)
+                continue;
+
+            g = (char **)realloc(m->break_chars, (size_t)(m->n_break + 1) * sizeof(char *));
+
+            if (!g)
+                continue;
+
+            m->break_chars = g;
+            m->break_chars[m->n_break] = ms_strdup(rest);
+
+            if (m->break_chars[m->n_break])
+                m->n_break++;
+
+            continue;
+        }
+
+        /* Single-flag declarations: NOSUGGEST, FORBIDDENWORD, KEEPCASE */
+        if (strncmp(line, "NOSUGGEST ", 10) == 0 || strncmp(line, "FORBIDDENWORD ", 14) == 0 || strncmp(line, "KEEPCASE ", 9) == 0)
+        {
+            const char *rest;
+            ms_cp *flags;
+            int nf = 0;
+            ms_cp val = 0;
+            int which; /* 0=NOSUGGEST 1=FORBIDDEN 2=KEEPCASE */
+
+            if (line[0] == 'N')
+            {
+                rest = line + 10;
+                which = 0;
+            }
+            else if (line[0] == 'F')
+            {
+                rest = line + 14;
+                which = 1;
+            }
+            else
+            {
+                rest = line + 9;
+                which = 2;
+            }
+
+            /* parse_flags reads the whole "flag list" but here we expect one */
+            flags = parse_flags(rest, m->flag_type, &nf);
+
+            if (flags && nf > 0)
+                val = flags[0];
+
+            free(flags);
+
+            if (val != 0)
+            {
+                if (which == 0)
+                    m->flag_nosuggest = val;
+                else if (which == 1)
+                    m->flag_forbidden = val;
+                else
+                    m->flag_keepcase = val;
+            }
+
+            continue;
+        }
+
         if (strncmp(line, "REP ", 4) == 0)
         {
             /* REP N or REP from to */
@@ -394,6 +539,74 @@ int load_aff(struct spell *m, const char *path)
             }
 
             parse_map(m, rest);
+
+            continue;
+        }
+
+        if (strncmp(line, "AF ", 3) == 0)
+        {
+            /* AF alias table: numeric aliases for flag lists (word/N in .dic) */
+            const char *rest = line + 3;
+            ms_cp *flags = NULL;
+            int n_flags = 0;
+            int new_idx;
+            ms_cp **g_flags = NULL;
+            int *g_n;
+
+            /* Skip "AF N" header */
+            if (rest[0] >= '0' && rest[0] <= '9')
+            {
+                const char *p = rest;
+                int is_header = 1;
+
+                while (*p && *p != ' ')
+                {
+                    if (*p < '0' || *p > '9')
+                    {
+                        is_header = 0;
+                        break;
+                    }
+                    p++;
+                }
+
+                if (is_header)
+                    continue;
+            }
+
+            flags = parse_flags(rest, m->flag_type, &n_flags);
+
+            new_idx = m->n_af + 1;
+
+            g_flags = (ms_cp **)realloc(m->af_flags, (size_t)(new_idx + 1) * sizeof(ms_cp *));
+
+            if (!g_flags)
+            {
+                free(flags);
+                continue;
+            }
+
+            g_n = (int *)realloc(m->af_n_flags, (size_t)(new_idx + 1) * sizeof(int));
+
+            if (!g_n)
+            {
+                m->af_flags = g_flags; /* keep what we have */
+                free(flags);
+                continue;
+            }
+
+            m->af_flags = g_flags;
+            m->af_n_flags = g_n;
+
+            /* Initialize slot 0 the first time */
+            if (m->n_af == 0)
+            {
+                m->af_flags[0] = NULL;
+                m->af_n_flags[0] = 0;
+            }
+
+            m->af_flags[new_idx] = flags; /* may be NULL if empty */
+            m->af_n_flags[new_idx] = n_flags;
+            m->n_af = new_idx;
 
             continue;
         }
