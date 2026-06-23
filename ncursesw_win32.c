@@ -346,55 +346,128 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 switch (key)
                 {
                 case VK_UP:
-                    key = KEY_UP;
+                {
+                    int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                    int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                    if (ctrl && shift)
+                        key = KEY_CSUP;
+                    else if (ctrl)
+                        key = KEY_CUP;
+                    else if (shift)
+                        key = KEY_SUP;
+                    else
+                        key = KEY_UP;
+
                     is_control_key = 1;
                     break;
+                }
                 case VK_DOWN:
-                    key = KEY_DOWN;
+                {
+                    int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                    int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                    if (ctrl && shift)
+                        key = KEY_CSDOWN;
+                    else if (ctrl)
+                        key = KEY_CDOWN;
+                    else if (shift)
+                        key = KEY_SDOWN;
+                    else
+                        key = KEY_DOWN;
+
                     is_control_key = 1;
                     break;
+                }
                 case VK_LEFT:
-                    if (GetKeyState(VK_CONTROL) & 0x8000)
-                    {
+                {
+                    int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                    int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                    if (ctrl && shift)
+                        key = KEY_CSLEFT;
+                    else if (ctrl)
                         key = KEY_CLEFT;
-                        is_control_key = 1;
-                    }
+                    else if (shift)
+                        key = KEY_SLEFT;
                     else
-                    {
                         key = KEY_LEFT;
-                        is_control_key = 1;
-                    }
 
+                    is_control_key = 1;
                     break;
+                }
                 case VK_RIGHT:
-                    if (GetKeyState(VK_CONTROL) & 0x8000)
-                    {
+                {
+                    int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                    int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                    if (ctrl && shift)
+                        key = KEY_CSRIGHT;
+                    else if (ctrl)
                         key = KEY_CRIGHT;
-                        is_control_key = 1;
-                    }
+                    else if (shift)
+                        key = KEY_SRIGHT;
                     else
-                    {
                         key = KEY_RIGHT;
-                        is_control_key = 1;
-                    }
+
+                    is_control_key = 1;
+                    break;
+                }
+                case VK_HOME:
+                {
+                    int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                    int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                    if (ctrl && shift)
+                        key = KEY_CSHOME;
+                    else if (shift)
+                        key = KEY_SHOME;
+                    else
+                        key = KEY_HOME;
+
+                    is_control_key = 1;
+                    break;
+                }
+                case VK_END:
+                {
+                    int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                    int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                    if (ctrl && shift)
+                        key = KEY_CSEND;
+                    else if (shift)
+                        key = KEY_SEND;
+                    else
+                        key = KEY_END;
+
+                    is_control_key = 1;
+                    break;
+                }
+                case VK_PRIOR:
+                {
+                    int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                    /* tinyedit treats KEY_SPPAGE same as KEY_SPREVIOUS */
+                    if (shift)
+                        key = KEY_SPPAGE;
+                    else
+                        key = KEY_PPAGE;
+
+                    is_control_key = 1;
+                    break;
+                }
+                case VK_NEXT:
+                {
+                    int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                    if (shift)
+                        key = KEY_SNPAGE;
+                    else
+                        key = KEY_NPAGE;
+                    is_control_key = 1;
 
                     break;
-                case VK_HOME:
-                    key = KEY_HOME;
-                    is_control_key = 1;
-                    break;
-                case VK_END:
-                    key = KEY_END;
-                    is_control_key = 1;
-                    break;
-                case VK_PRIOR:
-                    key = KEY_PPAGE;
-                    is_control_key = 1;
-                    break;
-                case VK_NEXT:
-                    key = KEY_NPAGE;
-                    is_control_key = 1;
-                    break;
+                }
                 case VK_INSERT:
                     key = KEY_IC;
                     is_control_key = 1;
@@ -2678,7 +2751,55 @@ int flash(void)
 
 int getmouse(MEVENT *ev)
 {
-    return ERR;
+    UiMouseEventType type;
+    int x, y;
+
+    if (!ev)
+        return ERR;
+
+    if (s_mouse_event == 0)
+        return ERR;
+
+    /* Unpack the event saved by the WindowProc on WM_LBUTTON*, WM_MOUSEMOVE, WM_MOUSEWHEEL */
+    type = (UiMouseEventType)(s_mouse_event & 0xFF);
+    x = (int)((s_mouse_event >> 8) & 0xFFF);
+    y = (int)((s_mouse_event >> 20) & 0xFFF);
+
+    /* Consume so a subsequent KEY_MOUSE without an event returns ERR */
+    s_mouse_event = 0;
+
+    ev->x = (short)x;
+    ev->y = (short)y;
+    ev->bstate = 0;
+
+    switch (type)
+    {
+    case UI_MOUSE_PRESS_LEFT:
+        ev->bstate = BUTTON1_PRESSED;
+        break;
+
+    case UI_MOUSE_RELEASE_LEFT:
+        ev->bstate = BUTTON1_RELEASED;
+        break;
+
+    case UI_MOUSE_DRAG_LEFT:
+        /* Use REPORT_MOUSE_POSITION only so editor classifies as drag, not new press */
+        ev->bstate = REPORT_MOUSE_POSITION;
+        break;
+
+    case UI_MOUSE_WHEEL_UP:
+        ev->bstate = BUTTON4_PRESSED;
+        break;
+
+    case UI_MOUSE_WHEEL_DOWN:
+        ev->bstate = BUTTON5_PRESSED;
+        break;
+
+    default:
+        return ERR;
+    }
+
+    return OK;
 }
 
 int border(chtype ls, chtype rs, chtype ts, chtype bs, chtype tl, chtype tr, chtype bl, chtype br)

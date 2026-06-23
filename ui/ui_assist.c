@@ -184,6 +184,7 @@ int ui_assist_check_repeat(TeApp *app, int line, int col_start, int word_len)
     int k;
     int prev_end;
     int prev_start;
+    int i;
 
 #ifdef HAVE_HUNSPELL
     struct spell *sp = NULL;
@@ -237,17 +238,13 @@ int ui_assist_check_repeat(TeApp *app, int line, int col_start, int word_len)
         return 0; /* different lengths -> not a repeat */
 
     /* Case-insensitive compare */
+    for (i = 0; i < word_len; i++)
     {
-        int i;
+        wchar_t a = (wchar_t)towlower((wint_t)l[prev_start + i]);
+        wchar_t b = (wchar_t)towlower((wint_t)l[col_start + i]);
 
-        for (i = 0; i < word_len; i++)
-        {
-            wchar_t a = (wchar_t)towlower((wint_t)l[prev_start + i]);
-            wchar_t b = (wchar_t)towlower((wint_t)l[col_start + i]);
-
-            if (a != b)
-                return 0;
-        }
+        if (a != b)
+            return 0;
     }
 
     return 1;

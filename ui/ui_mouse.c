@@ -50,14 +50,7 @@ static unsigned long get_time_ms(void)
     unsigned long t;
 
 #ifdef PLATFORM_WIN32
-    FILETIME ft;
-    unsigned long long tmp;
-
-    GetSystemTimeAsFileTime(&ft);
-
-    tmp = ((unsigned long long)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-    t = (unsigned long)(tmp / 10000ULL);
-
+    t = (unsigned long)GetTickCount();
 #elif defined(PLATFORM_AMIGA)
     struct timeval tv;
 
