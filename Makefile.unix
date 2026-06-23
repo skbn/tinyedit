@@ -166,6 +166,9 @@ COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o
+
+# spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
+SPELL_UTILS_OBJS = $(OBJDIR)/spell_utils.o
             
 ifeq ($(USE_HUNSPELL),1)
 UI_OBJS   += $(OBJDIR)/ui_spell.o
@@ -176,7 +179,7 @@ endif
 ifeq ($(USE_MYTHES),1)
 UI_OBJS   += $(OBJDIR)/ui_thes.o
 endif
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(HYPH_OBJS) $(THES_OBJS)
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPH_OBJS) $(THES_OBJS)
 
 all: $(TARGET) tinyedit
 
@@ -250,6 +253,10 @@ $(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c $(UIDIR)/te.h | $(OBJDIR)
 $(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+# spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
+$(OBJDIR)/spell_utils.o: $(HERE)spellchecker/spell_utils.c $(HERE)spellchecker/spell_priv.h $(HERE)spellchecker/spell.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -267,9 +274,6 @@ endif
 
 # Spell checker object (only if USE_HUNSPELL=1)
 $(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/spell_utils.o: $(HERE)spellchecker/spell_utils.c $(HERE)spellchecker/spell_priv.h $(HERE)spellchecker/spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 # Hyphenation backend (only if USE_HYPHEN=1)

@@ -25,6 +25,10 @@ const char __attribute__((used)) tinyedit_stack_size[] = "$STACK:131072";
 #include <sys/types.h>
 #include "core/portable.h"
 
+#if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
+#include <langinfo.h> /* nl_langinfo(CODESET) for UTF-8 locale detection (fix BSD) */
+#endif
+
 #ifdef PLATFORM_AMIGA
 #include <proto/exec.h>
 #include "ncursesw_amiga.h"
@@ -149,6 +153,45 @@ static char *load_file(const char *path, TeApp *app)
     return buf;
 }
 
+static void ui_init_locale(void)
+{
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
+    /* Wrapper layers handle encoding */
+    setlocale(LC_ALL, "");
+#else
+
+    static const char *utf8_fallbacks[] =
+        {
+            "C.UTF-8",
+            "en_US.UTF-8",
+            "POSIX.UTF-8",
+            NULL};
+
+    const char *codeset;
+    int i;
+
+    /* First honour the environment */
+    setlocale(LC_ALL, "");
+
+    codeset = nl_langinfo(CODESET);
+
+    if (codeset && (strcmp(codeset, "UTF-8") == 0 || strcmp(codeset, "utf8") == 0 || strcmp(codeset, "UTF8") == 0))
+        return; /* environment already UTF-8 */
+
+    /* Try to upgrade LC_CTYPE to UTF-8 locale */
+    for (i = 0; utf8_fallbacks[i]; i++)
+    {
+        if (setlocale(LC_CTYPE, utf8_fallbacks[i]))
+        {
+            codeset = nl_langinfo(CODESET);
+
+            if (codeset && (strcmp(codeset, "UTF-8") == 0 || strcmp(codeset, "utf8") == 0 || strcmp(codeset, "UTF8") == 0))
+                return; /* success */
+        }
+    }
+#endif
+}
+
 int main(int argc, char **argv)
 {
     TeApp *app = NULL;
@@ -161,7 +204,8 @@ int main(int argc, char **argv)
     char dir_path[512];
     const char *last_sep = NULL;
 
-    setlocale(LC_ALL, "");
+    /* Locale init for wide-character ncursesw */
+    ui_init_locale();
 
 #ifdef PLATFORM_AMIGA
     /* Open iffparse.library for clipboard operations */
