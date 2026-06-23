@@ -265,6 +265,7 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->show_line_numbers = 0; /* line numbers disabled by default */
     cfg->cursor_color = -1;
     cfg->default_bg_color = 0;
+    cfg->mouse_enabled = 1; /* mouse enabled by default */
 
     /* Initialize color_map as identity mapping (pen 0=black, 1=red, etc) */
     for (i = 0; i < 16; i++)
@@ -642,6 +643,17 @@ int te_cfg_load(TeConfig *cfg, const char *path)
                 }
             }
         }
+        else if (strcasecmp(word, "MOUSE_ENABLED") == 0)
+        {
+            char val[16];
+
+            get_token(rest, val, sizeof(val));
+
+            if (strcasecmp(val, "0") == 0 || strcasecmp(val, "OFF") == 0 || strcasecmp(val, "NO") == 0 || strcasecmp(val, "FALSE") == 0)
+                cfg->mouse_enabled = 0;
+            else
+                cfg->mouse_enabled = 1;
+        }
         else if (strcasecmp(word, "COLORMAP") == 0)
         {
             char cname[24], penstr[8];
@@ -926,6 +938,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "TTF_USE_UTF8") == 0 ||
                 strcasecmp(word, "DEFAULT_BG_COLOR") == 0 ||
                 strcasecmp(word, "CURSORCOLOR") == 0 ||
+                strcasecmp(word, "MOUSE_ENABLED") == 0 ||
                 strcasecmp(word, "COLOR") == 0 ||
                 strcasecmp(word, "COLORMAP") == 0
 #ifdef HAVE_HUNSPELL
@@ -989,6 +1002,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
         fprintf(out, "CURSORCOLOR \"%s\"\n", cfg->cursor_color_rgb);
     else
         fprintf(out, "CURSORCOLOR %d\n", cfg->cursor_color);
+
+    /* Mouse support */
+    fprintf(out, "MOUSE_ENABLED %d\n", cfg->mouse_enabled);
 
     /* Color pairs */
     fprintf(out, "COLOR NORMAL %s %s\n", color_name(cfg->color_fg[COL_NORMAL]), color_name(cfg->color_bg[COL_NORMAL]));

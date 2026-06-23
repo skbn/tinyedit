@@ -70,6 +70,9 @@ typedef struct
     int cursor_color;
     char cursor_color_rgb[16]; /* "#RRGGBB" form for OSC 12 */
 
+    /* Mouse support: 0=disabled, 1=enabled */
+    int mouse_enabled;
+
     /* Amiga color palette mapping (COLORMAP): physical pen for each logical color */
     int color_map[16];
     int color_map_initialized; /* 1 if user configured COLORMAP explicitly */

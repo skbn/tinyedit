@@ -27,6 +27,72 @@
 #include <stdlib.h>
 #endif
 
+/* Simple base64 encoder */
+static char *base64_encode(const char *src)
+{
+    static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    char *out = NULL;
+    int len;
+    int i;
+    int j;
+    unsigned int a;
+    unsigned int b;
+    unsigned int c;
+    unsigned int triple;
+
+    if (!src)
+        return NULL;
+
+    len = strlen(src);
+    out = (char *)malloc(((len + 2) / 3) * 4 + 1);
+
+    if (!out)
+        return NULL;
+
+    for (i = 0, j = 0; i < len;)
+    {
+        a = (unsigned char)src[i++];
+        b = (i < len) ? (unsigned char)src[i++] : 0;
+        c = (i < len) ? (unsigned char)src[i++] : 0;
+
+        triple = (a << 16) | (b << 8) | c;
+
+        out[j++] = table[(triple >> 18) & 0x3F];
+        out[j++] = table[(triple >> 12) & 0x3F];
+        out[j++] = table[(triple >> 6) & 0x3F];
+        out[j++] = table[triple & 0x3F];
+    }
+
+    while (j % 4)
+        out[j++] = '=';
+
+    out[j] = '\0';
+
+    return out;
+}
+
+/* Copy to terminal clipboard using OSC 52 (works over SSH) */
+static int clipboard_copy_osc52(const char *utf8)
+{
+    char *b64 = NULL;
+    int i;
+
+    if (!utf8 || !utf8[0])
+        return -1;
+
+    b64 = base64_encode(utf8);
+
+    if (!b64)
+        return -1;
+
+    printf("\033]52;c;%s\007", b64);
+    fflush(stdout);
+
+    free(b64);
+
+    return 0;
+}
+
 static char *normalise_newlines(char *s)
 {
     /* Convert CRLF / CR to LF in place, strip trailing NULs */
@@ -537,7 +603,7 @@ int clipboard_use_external(void)
 
 int clipboard_copy(const char *utf8)
 {
-    /* Try Wayland, X11 (xclip/xsel), MacOS in order, stderr suppressed */
+    /* Fallback to Wayland, X11 (xclip/xsel), MacOS */
     static const char *const cmds[] =
         {
             "wl-copy 2>/dev/null",
@@ -556,6 +622,10 @@ int clipboard_copy(const char *utf8)
         if (try_copy_cmd(cmds[i], utf8) == 0)
             return 0;
     }
+
+    /* Try OSC 52 first (works over SSH) */
+    if (clipboard_copy_osc52(utf8) == 0)
+        return 0;
 
     return -1;
 }

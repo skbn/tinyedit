@@ -1635,6 +1635,105 @@ static void position_cursor(TeApp *app)
     curs_set(1);
 }
 
+/* Mouse SGR sequence parser for SSH terminals */
+static int parse_sgr_mouse(int *out_type, int *out_x, int *out_y)
+{
+    char buf[32];
+    int i;
+    wint_t wch;
+    int wrc;
+    int button;
+    int x;
+    int y;
+    char end_char;
+    int parsed;
+
+    while (i < sizeof(buf) - 1)
+    {
+        wrc = wrapper_read_key(&wch);
+
+        if (wrc == ERR)
+            return 0;
+
+        if (wrc == KEY_CODE_YES)
+            return 0;
+
+        buf[i] = (char)wch;
+        i++;
+
+        if (wch == 'M' || wch == 'm')
+            break;
+    }
+
+    buf[i] = '\0';
+
+    parsed = sscanf(buf, "%d;%d;%d%c", &button, &x, &y, &end_char);
+
+    if (parsed != 4)
+    {
+        parsed = sscanf(buf, "%d%c", &button, &end_char);
+
+        if (parsed == 2)
+        {
+            x = -1;
+            y = -1;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    if (end_char == 'M')
+    {
+        switch (button)
+        {
+        case 0:
+            *out_type = UI_MOUSE_PRESS_LEFT;
+            break;
+        case 1:
+            *out_type = UI_MOUSE_PRESS_LEFT;
+            break;
+        case 2:
+            *out_type = UI_MOUSE_PRESS_LEFT;
+            break;
+        case 32:
+            *out_type = UI_MOUSE_DRAG_LEFT;
+            break;
+        case 33:
+            *out_type = UI_MOUSE_DRAG_LEFT;
+            break;
+        case 34:
+            *out_type = UI_MOUSE_DRAG_LEFT;
+            break;
+        case 64:
+            *out_type = UI_MOUSE_WHEEL_UP;
+            break;
+        case 65:
+            *out_type = UI_MOUSE_WHEEL_DOWN;
+            break;
+        default:
+            return 0;
+        }
+    }
+    else
+    {
+        *out_type = UI_MOUSE_RELEASE_LEFT;
+    }
+
+    if (x > 0)
+        *out_x = x - 1;
+    else
+        *out_x = -1;
+
+    if (y > 0)
+        *out_y = y - 1;
+    else
+        *out_y = -1;
+
+    return 1;
+}
+
 /* Paste helpers */
 static char *collect_bracketed_paste(void)
 {
@@ -2004,6 +2103,25 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
                     app->charset_out
                         [sizeof(app->charset_out) - 1] = '\0';
                 }
+
+#if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
+                /* Reconfigure mouse if setting changed */
+                if (app->cfg.mouse_enabled)
+                {
+                    mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, NULL);
+                    mouseinterval(0);
+                    printf("\033[?1002h");
+                    printf("\033[?1006h");
+                    fflush(stdout);
+                }
+                else
+                {
+                    mousemask(0, NULL);
+                    printf("\033[?1002l");
+                    printf("\033[?1006l");
+                    fflush(stdout);
+                }
+#endif
 
                 te_init_colors(&app->cfg);
             }
@@ -2947,6 +3065,29 @@ void ui_editor_run(TeApp *app)
                         ch == KEY_HOME || ch == KEY_END || ch == KEY_PPAGE || ch == KEY_NPAGE ||
                         ch == KEY_BACKSPACE || ch == KEY_DC || ch == KEY_ENTER))
             is_key = 1;
+
+        if (is_key && ch == KEY_MOUSE_SGR)
+        {
+            int mtype;
+            int mx;
+            int my;
+
+            if (parse_sgr_mouse(&mtype, &mx, &my))
+            {
+                win = wm_get_window_by_type(app->wm, WIN_EDITOR);
+
+                if (win && win->visible)
+                {
+                    my -= win->y;
+                    mx -= win->x;
+                }
+
+                if (ui_mouse_dispatch(app, mtype, my, mx))
+                    screen_dirty = 1;
+            }
+
+            continue;
+        }
 
         if (is_key && ch == KEY_MOUSE)
         {

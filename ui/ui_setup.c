@@ -124,6 +124,7 @@ static const SetupField st_fields[] =
         {0, "Hard wrap", FT_BOOL, F_OFF(hard_wrap), 0},
         {0, "Line numbers", FT_BOOL, F_OFF(show_line_numbers), 0},
         {0, "Undo levels", FT_INT, F_OFF(undo_levels), 0},
+        {0, "Terminal Mouse", FT_BOOL, F_OFF(mouse_enabled), 0},
 
 /* Colour/Font */
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)

@@ -125,6 +125,9 @@
 #ifndef KEY_SIC
 #define KEY_SIC 0x188
 #endif
+#ifndef KEY_MOUSE_SGR
+#define KEY_MOUSE_SGR 0x80B
+#endif
 
 /* Bracketed paste sequences */
 #define TE_BRACKET_PASTE_ON()  \

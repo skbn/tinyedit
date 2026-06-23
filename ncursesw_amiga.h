@@ -156,6 +156,7 @@ extern int COLORS;
 #define KEY_SLEFT 0x189
 #define KEY_SMESSAGE 0x18A
 #define KEY_SMOVE 0x18B
+#define KEY_MOUSE_SGR 0x80B
 #define KEY_SNEXT 0x18C
 #define KEY_SOPTIONS 0x18D
 #define KEY_SPREVIOUS 0x18E

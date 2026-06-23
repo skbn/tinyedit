@@ -310,8 +310,8 @@ int main(int argc, char **argv)
     keypad(stdscr, TRUE);
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
-    /* Disable mouse in SSH sessions to avoid escape code issues */
-    if (!getenv("SSH_TTY") && !getenv("SSH_CONNECTION"))
+    /* Enable mouse if configured */
+    if (cfg.mouse_enabled)
     {
         mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, NULL);
         mouseinterval(0);
@@ -319,12 +319,19 @@ int main(int argc, char **argv)
         /* Button event tracking: motion while button held */
         printf("\033[?1002h");
         fflush(stdout);
+
+        /* Enable SGR mouse mode for better SSH support */
+        printf("\033[?1006h");
+        fflush(stdout);
     }
 
     set_escdelay(25);
 #endif
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
+    /* Register SGR mouse escape sequence for SSH */
+    define_key("\033[<", KEY_MOUSE_SGR);
+
     /* Register bracketed paste sequences */
     define_key("\033[200~", KEY_PASTE_START);
     define_key("\033[201~", KEY_PASTE_END);
@@ -540,10 +547,11 @@ int main(int argc, char **argv)
 #endif
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
-    /* Disable button event tracking only if not in SSH */
-    if (!getenv("SSH_TTY") && !getenv("SSH_CONNECTION"))
+    /* Disable button event tracking if mouse was enabled */
+    if (cfg.mouse_enabled)
     {
         printf("\033[?1002l");
+        printf("\033[?1006l");
         fflush(stdout);
     }
 #endif
