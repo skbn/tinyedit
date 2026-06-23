@@ -68,7 +68,7 @@ ifeq ($(USE_HUNSPELL),1)
       HUNSPELL_LIB = -lhunspell
     endif
   endif
-  SPELL_OBJS = $(OBJDIR)/spell.o $(OBJDIR)/spell_utils.o
+  SPELL_OBJS = $(OBJDIR)/spell.o
 endif
 
 # Hyphenation support (libhyphen)
