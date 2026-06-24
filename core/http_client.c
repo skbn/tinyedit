@@ -240,7 +240,7 @@ static size_t http_curl_write_callback(void *contents, size_t size, size_t nmemb
     return total;
 }
 
-static int do_request_libcurl(const char *method, const char *url, const char *body, int body_len, const char *content_type, int timeout_secs, HttpResponse *out)
+static int do_request_libcurl(const char *method, const char *url, const char *body, int body_len, const char *content_type, const char *extra_headers, int timeout_secs, HttpResponse *out)
 {
     CURL *curl = NULL;
     CURLcode res;
@@ -279,6 +279,9 @@ static int do_request_libcurl(const char *method, const char *url, const char *b
         snprintf(header, sizeof(header), "Content-Type: %s", content_type);
         headers = curl_slist_append(headers, header);
     }
+
+    if (extra_headers && extra_headers[0])
+        headers = curl_slist_append(headers, extra_headers);
 
     if (strcmp(method, "POST") == 0)
     {
@@ -533,7 +536,7 @@ static int extract_location(const char *headers, char *location, int loc_size)
 static int do_request(const char *method, const char *url, const char *body, int body_len, const char *content_type, const char *extra_headers, int timeout_secs, HttpResponse *out)
 {
 #ifndef PLATFORM_AMIGA
-    return do_request_libcurl(method, url, body, body_len, content_type, timeout_secs, out);
+    return do_request_libcurl(method, url, body, body_len, content_type, extra_headers, timeout_secs, out);
 #else
 
     char host[256];
@@ -674,20 +677,26 @@ static int do_request(const char *method, const char *url, const char *body, int
                      "Host: %s\r\n"
                      "Content-Type: %s\r\n"
                      "Content-Length: %d\r\n"
+                     "%s%s"
                      "Connection: close\r\n"
                      "\r\n",
                      method, path, host,
                      (content_type && content_type[0]) ? content_type : "application/octet-stream",
-                     body_len);
+                     body_len,
+                     (extra_headers && extra_headers[0]) ? extra_headers : "",
+                     (extra_headers && extra_headers[0]) ? "\r\n" : "");
         }
         else
         {
             snprintf(request, sizeof(request),
                      "%s %s HTTP/1.1\r\n"
                      "Host: %s\r\n"
+                     "%s%s"
                      "Connection: close\r\n"
                      "\r\n",
-                     method, path, host);
+                     method, path, host,
+                     (extra_headers && extra_headers[0]) ? extra_headers : "",
+                     (extra_headers && extra_headers[0]) ? "\r\n" : "");
         }
 
         /* Send request headers */

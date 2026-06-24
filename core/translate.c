@@ -325,6 +325,337 @@ static char *lang_normalize(const char *lang, char *dst, int dst_size)
     return dst;
 }
 
+/* Per-backend safe chunk budget (headroom for URL-encoding overhead) */
+static int backend_max_chunk(TranslateBackend b)
+{
+    switch (b)
+    {
+    case TRANSLATE_BACKEND_MYMEMORY:
+        return 450; /* hard 500 limit */
+    case TRANSLATE_BACKEND_LIBRETRANSLATE:
+        return 5000;
+    case TRANSLATE_BACKEND_LINGVA:
+        return 1500; /* path-based URL */
+    case TRANSLATE_BACKEND_STARDICT:
+        return 64;
+    case TRANSLATE_BACKEND_APERTIUM:
+        return 4096;
+    default:
+        return 256;
+    }
+}
+
+/* Find last separator in window at priority, return chunk/sep lengths */
+static int find_break_at_prio(const char *src, int offset, int span, int prio, int *out_chunk_len, int *out_sep_len)
+{
+    int i;
+    int last_chunk = -1;
+    int last_sep = 0;
+    char c;
+    char next;
+
+    for (i = 0; i < span; i++)
+    {
+        c = src[offset + i];
+        next = (i + 1 < span) ? src[offset + i + 1] : '\0';
+
+        switch (prio)
+        {
+        case 5: /* \n\n */
+            if (c == '\n' && next == '\n')
+            {
+                last_chunk = i;
+                last_sep = 2;
+            }
+
+            break;
+        case 4: /* \n */
+            if (c == '\n')
+            {
+                last_chunk = i;
+                last_sep = 1;
+            }
+
+            break;
+        case 3: /* sentence end */
+            if ((c == '.' || c == '!' || c == '?') && (next == ' ' || next == '\t'))
+            {
+                last_chunk = i + 1;
+                last_sep = 1;
+            }
+
+            break;
+        case 2: /* clause */
+            if ((c == ',' || c == ';') && next == ' ')
+            {
+                last_chunk = i + 1;
+                last_sep = 1;
+            }
+
+            break;
+        case 1: /* word */
+            if (c == ' ')
+            {
+                last_chunk = i;
+                last_sep = 1;
+            }
+
+            break;
+        }
+    }
+
+    if (last_chunk < 0)
+        return 0;
+
+    *out_chunk_len = last_chunk;
+    *out_sep_len = last_sep;
+
+    return 1;
+}
+
+/* Find next chunk end, write chunk/sep lengths, return next offset */
+static int next_chunk(const char *src, int src_len, int offset, int max_chunk, int *out_chunk_len, int *out_sep_len)
+{
+    int remaining = src_len - offset;
+    int span;
+    int prio;
+
+    if (remaining <= 0)
+    {
+        *out_chunk_len = 0;
+        *out_sep_len = 0;
+        return offset;
+    }
+
+    if (remaining <= max_chunk)
+    {
+        *out_chunk_len = remaining;
+        *out_sep_len = 0;
+        return offset + remaining;
+    }
+
+    span = max_chunk;
+
+    /* Try priorities high to low, take first break point in window */
+    for (prio = 5; prio >= 1; prio--)
+    {
+        if (find_break_at_prio(src, offset, span, prio, out_chunk_len, out_sep_len))
+        {
+            return offset + *out_chunk_len + *out_sep_len;
+        }
+    }
+
+    /* No natural break, hard truncate at max_chunk (rare) */
+    *out_chunk_len = max_chunk;
+    *out_sep_len = 0;
+
+    return offset + max_chunk;
+}
+
+/* Dispatch one backend call for one chunk, return malloc'd result or NULL */
+static char *call_backend_once(TranslateHandle *h, const char *from, const char *to, const char *src, char *detected, int detected_size, char *err, int err_size)
+{
+    char *result = NULL;
+
+    if (detected_size > 0)
+        detected[0] = '\0';
+
+    if (err_size > 0)
+        err[0] = '\0';
+
+    switch (h->opts.backend)
+    {
+    case TRANSLATE_BACKEND_MYMEMORY:
+#ifdef HAVE_TRANSLATE_HTTP
+        result = translate_http_mymemory(h->opts.endpoint, h->opts.api_key, h->opts.email, from, to, src, h->opts.timeout_secs, detected, detected_size, err, err_size);
+#else
+        snprintf(err, err_size, "HTTP backends not built in");
+#endif
+        break;
+
+    case TRANSLATE_BACKEND_LIBRETRANSLATE:
+#ifdef HAVE_TRANSLATE_HTTP
+        result = translate_http_libretranslate(h->opts.endpoint, h->opts.api_key, from, to, src, h->opts.timeout_secs, detected, detected_size, err, err_size);
+#else
+        snprintf(err, err_size, "HTTP backends not built in");
+#endif
+        break;
+
+    case TRANSLATE_BACKEND_LINGVA:
+#ifdef HAVE_TRANSLATE_HTTP
+        result = translate_http_lingva(h->opts.endpoint, from, to, src, h->opts.timeout_secs, detected, detected_size, err, err_size);
+#else
+        snprintf(err, err_size, "HTTP backends not built in");
+#endif
+        break;
+
+    case TRANSLATE_BACKEND_STARDICT:
+#ifdef HAVE_TRANSLATE_STARDICT
+        if (!h->stardict_handle || strcmp(h->stardict_from, from) != 0 || strcmp(h->stardict_to, to) != 0)
+        {
+            if (h->stardict_handle)
+            {
+                translate_stardict_close(h->stardict_handle);
+                h->stardict_handle = NULL;
+            }
+            if (translate_stardict_open(h->opts.stardict_path, from, to, &h->stardict_handle, err, err_size) == 0)
+            {
+                strncpy(h->stardict_from, from, sizeof(h->stardict_from) - 1);
+                h->stardict_from[sizeof(h->stardict_from) - 1] = '\0';
+
+                strncpy(h->stardict_to, to, sizeof(h->stardict_to) - 1);
+                h->stardict_to[sizeof(h->stardict_to) - 1] = '\0';
+            }
+        }
+        if (h->stardict_handle)
+            result = translate_stardict_lookup(h->stardict_handle, src, err, err_size);
+        else if (!err[0])
+            snprintf(err, err_size, "stardict not opened");
+        if (detected_size > 0)
+        {
+            strncpy(detected, from, detected_size - 1);
+            detected[detected_size - 1] = '\0';
+        }
+#else
+        snprintf(err, err_size, "StarDict backend not built in");
+#endif
+        break;
+
+    case TRANSLATE_BACKEND_APERTIUM:
+#ifdef HAVE_TRANSLATE_APERTIUM
+        result = translate_apertium(h->opts.apertium_bin, from, to, src, h->opts.timeout_secs, err, err_size);
+        if (detected_size > 0)
+        {
+            strncpy(detected, from, detected_size - 1);
+            detected[detected_size - 1] = '\0';
+        }
+#else
+        snprintf(err, err_size, "Apertium backend not built in");
+#endif
+        break;
+
+    case TRANSLATE_BACKEND_NONE:
+    default:
+        snprintf(err, err_size, "no translator backend configured");
+        break;
+    }
+
+    return result;
+}
+
+/* Translate src in chunks, join with separators, return malloc'd result or NULL */
+static char *translate_chunked(TranslateHandle *h, const char *from, const char *to, const char *src, int src_len, int max_chunk, char *detected, int detected_size, char *err, int err_size)
+{
+    char *out = NULL;
+    size_t out_cap = 0;
+    size_t out_len = 0;
+    char chunk_buf[8192];
+    char chunk_from[8];
+    char chunk_err[128];
+    int offset = 0;
+    int chunk_len = 0;
+    int sep_len = 0;
+    int next_off;
+    char *piece = NULL;
+    size_t piece_len;
+    int n_chunks = 0;
+
+    if (max_chunk > (int)sizeof(chunk_buf) - 1)
+        max_chunk = (int)sizeof(chunk_buf) - 1;
+
+    while (offset < src_len)
+    {
+        next_off = next_chunk(src, src_len, offset, max_chunk, &chunk_len, &sep_len);
+
+        if (chunk_len <= 0)
+            break;
+
+        memcpy(chunk_buf, src + offset, (size_t)chunk_len);
+        chunk_buf[chunk_len] = '\0';
+
+        chunk_from[0] = '\0';
+        chunk_err[0] = '\0';
+
+        piece = call_backend_once(h, from, to, chunk_buf, chunk_from, sizeof(chunk_from), chunk_err, sizeof(chunk_err));
+
+        if (!piece)
+        {
+            if (out)
+                free(out);
+
+            if (err_size > 0)
+            {
+                snprintf(err, (size_t)err_size, "chunk %d failed: %s", n_chunks + 1, chunk_err[0] ? chunk_err : "no error");
+            }
+
+            return NULL;
+        }
+
+        if (n_chunks == 0 && detected_size > 0 && chunk_from[0])
+        {
+            strncpy(detected, chunk_from, detected_size - 1);
+            detected[detected_size - 1] = '\0';
+        }
+
+        piece_len = strlen(piece);
+
+        /* Grow output buffer for piece + separator + NUL */
+        if (out_len + piece_len + sep_len + 1 > out_cap)
+        {
+            size_t new_cap = out_cap ? out_cap * 2 : 4096;
+            char *new_out = NULL;
+
+            while (new_cap < out_len + piece_len + sep_len + 1)
+                new_cap *= 2;
+
+            new_out = (char *)realloc(out, new_cap);
+
+            if (!new_out)
+            {
+                free(piece);
+
+                if (out)
+                    free(out);
+
+                if (err_size > 0)
+                    snprintf(err, (size_t)err_size, "out of memory");
+
+                return NULL;
+            }
+
+            out = new_out;
+            out_cap = new_cap;
+        }
+
+        memcpy(out + out_len, piece, piece_len);
+        out_len += piece_len;
+
+        free(piece);
+
+        if (sep_len > 0)
+        {
+            memcpy(out + out_len, src + offset + chunk_len, (size_t)sep_len);
+            out_len += sep_len;
+        }
+
+        out[out_len] = '\0';
+
+        offset = next_off;
+        n_chunks++;
+    }
+
+    if (!out)
+    {
+        /* Empty source (shouldn't reach here because translate_text guards on src[0]) - return empty string */
+        out = (char *)malloc(1);
+
+        if (out)
+            out[0] = '\0';
+    }
+
+    return out;
+}
+
 char *translate_text(TranslateHandle *h, const char *from_lang, const char *to_lang, const char *src, char *out_from_lang_buf, int out_from_lang_buf_size, char *err_buf, int err_buf_size)
 {
     char from[8], to[8];
@@ -334,6 +665,8 @@ char *translate_text(TranslateHandle *h, const char *from_lang, const char *to_l
     char local_err[128];
     char detected[8];
     size_t vl;
+    int src_len;
+    int max_chunk;
 
     if (err_buf && err_buf_size > 0)
         err_buf[0] = '\0';
@@ -416,83 +749,15 @@ char *translate_text(TranslateHandle *h, const char *from_lang, const char *to_l
     detected[0] = '\0';
     local_err[0] = '\0';
 
-    /* Backend dispatch */
-    switch (h->opts.backend)
-    {
-    case TRANSLATE_BACKEND_MYMEMORY:
-#ifdef HAVE_TRANSLATE_HTTP
-        result = translate_http_mymemory(h->opts.endpoint, h->opts.api_key, h->opts.email, from, to, src, h->opts.timeout_secs, detected, sizeof(detected), local_err, sizeof(local_err));
-#else
-        snprintf(local_err, sizeof(local_err), "HTTP backends not built in");
-#endif
-        break;
+    /* Chunker dispatch */
+    src_len = (int)strlen(src);
+    max_chunk = backend_max_chunk(h->opts.backend);
 
-    case TRANSLATE_BACKEND_LIBRETRANSLATE:
-#ifdef HAVE_TRANSLATE_HTTP
-        result = translate_http_libretranslate(h->opts.endpoint, h->opts.api_key, from, to, src, h->opts.timeout_secs, detected, sizeof(detected), local_err, sizeof(local_err));
-#else
-        snprintf(local_err, sizeof(local_err), "HTTP backends not built in");
-#endif
-        break;
+    if (src_len <= max_chunk)
+        result = call_backend_once(h, from, to, src, detected, sizeof(detected), local_err, sizeof(local_err));
+    else
 
-    case TRANSLATE_BACKEND_LINGVA:
-#ifdef HAVE_TRANSLATE_HTTP
-        result = translate_http_lingva(h->opts.endpoint, from, to, src, h->opts.timeout_secs, detected, sizeof(detected), local_err, sizeof(local_err));
-#else
-        snprintf(local_err, sizeof(local_err), "HTTP backends not built in");
-#endif
-        break;
-
-    case TRANSLATE_BACKEND_STARDICT:
-#ifdef HAVE_TRANSLATE_STARDICT
-        /* Reopen dictionary if from/to changed */
-        if (!h->stardict_handle || strcmp(h->stardict_from, from) != 0 || strcmp(h->stardict_to, to) != 0)
-        {
-            if (h->stardict_handle)
-            {
-                translate_stardict_close(h->stardict_handle);
-                h->stardict_handle = NULL;
-            }
-
-            if (translate_stardict_open(h->opts.stardict_path, from, to, &h->stardict_handle, local_err, sizeof(local_err)) == 0)
-            {
-                strncpy(h->stardict_from, from, sizeof(h->stardict_from) - 1);
-                h->stardict_from[sizeof(h->stardict_from) - 1] = '\0';
-
-                strncpy(h->stardict_to, to, sizeof(h->stardict_to) - 1);
-                h->stardict_to[sizeof(h->stardict_to) - 1] = '\0';
-            }
-        }
-
-        if (h->stardict_handle)
-            result = translate_stardict_lookup(h->stardict_handle, src, local_err, sizeof(local_err));
-        else if (!local_err[0])
-            snprintf(local_err, sizeof(local_err), "stardict not opened");
-
-        /* StarDict tells us its language pair, so detected = from */
-        strncpy(detected, from, sizeof(detected) - 1);
-        detected[sizeof(detected) - 1] = '\0';
-#else
-        snprintf(local_err, sizeof(local_err), "StarDict backend not built in");
-#endif
-        break;
-
-    case TRANSLATE_BACKEND_APERTIUM:
-#ifdef HAVE_TRANSLATE_APERTIUM
-        result = translate_apertium(h->opts.apertium_bin, from, to, src, h->opts.timeout_secs, local_err, sizeof(local_err));
-
-        strncpy(detected, from, sizeof(detected) - 1);
-        detected[sizeof(detected) - 1] = '\0';
-#else
-        snprintf(local_err, sizeof(local_err), "Apertium backend not built in");
-#endif
-        break;
-
-    case TRANSLATE_BACKEND_NONE:
-    default:
-        snprintf(local_err, sizeof(local_err), "no translator backend configured");
-        break;
-    }
+        result = translate_chunked(h, from, to, src, src_len, max_chunk, detected, sizeof(detected), local_err, sizeof(local_err));
 
     if (!result)
     {
@@ -512,7 +777,6 @@ char *translate_text(TranslateHandle *h, const char *from_lang, const char *to_l
     }
 
     /* Cache the result if it fits */
-
     vl = strlen(result);
 
     if (vl < TRANSLATE_CACHE_VAL_MAX && build_cache_key(key, sizeof(key), from, to, src))

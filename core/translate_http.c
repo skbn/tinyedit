@@ -71,12 +71,6 @@ char *translate_http_mymemory(const char *endpoint, const char *api_key, const c
         return NULL;
     }
 
-    if (strlen(src) > HTTP_TR_MAX_SRC_BYTES)
-    {
-        set_err(err, err_size, "text too long for MyMemory (limit %d bytes)", HTTP_TR_MAX_SRC_BYTES);
-        return NULL;
-    }
-
     if (http_url_encode(src, src_enc, sizeof(src_enc)) < 0)
     {
         set_err(err, err_size, "URL encoding failed");
@@ -322,7 +316,6 @@ char *translate_http_libretranslate(const char *endpoint, const char *api_key, c
 char *translate_http_lingva(const char *endpoint, const char *from, const char *to, const char *src, int timeout_secs, char *out_from, int out_from_size, char *err, int err_size)
 {
     char url[8192];
-    char src_clean[LINGVA_MAX_SRC_BYTES + 1];
     char body[LINGVA_MAX_SRC_BYTES * 3 + 1];
     HttpResponse r;
     int rc;
@@ -330,8 +323,6 @@ char *translate_http_lingva(const char *endpoint, const char *from, const char *
     char *translated = NULL;
     char *detected = NULL;
     const char *base = NULL;
-    int i;
-    int pos;
 
     memset(&r, 0, sizeof(r));
 
@@ -341,24 +332,8 @@ char *translate_http_lingva(const char *endpoint, const char *from, const char *
         return NULL;
     }
 
-    if (strlen(src) > LINGVA_MAX_SRC_BYTES)
-    {
-        set_err(err, err_size, "text too long for Lingva (limit %d bytes)", LINGVA_MAX_SRC_BYTES);
-        return NULL;
-    }
-
-    /* Replace newlines with spaces for Lingva (path-based API doesn't handle %0A) */
-    for (i = 0; src[i]; i++)
-    {
-        if (src[i] == '\n')
-            src_clean[i] = ' ';
-        else
-            src_clean[i] = src[i];
-    }
-
-    src_clean[i] = '\0';
-
-    if (http_url_encode(src_clean, body, sizeof(body)) < 0)
+    /* Chunker handles length/newlines, encode src verbatim */
+    if (http_url_encode(src, body, sizeof(body)) < 0)
     {
         set_err(err, err_size, "URL encoding failed");
         return NULL;
