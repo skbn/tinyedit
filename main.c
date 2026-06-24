@@ -60,6 +60,10 @@ extern void amiga_add_ttf_fallback(const char *path, int size);
 
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_TRANSLATE
+#include "ui/ui_translate.h"
+#endif
+
 /* Read a whole file into a malloc'd UTF-8 buffer with charset conversion */
 static char *load_file(const char *path, TeApp *app)
 {
@@ -406,6 +410,10 @@ int main(int argc, char **argv)
     define_key("\033W", KEY_ALT('W'));
     define_key("\033u", KEY_ALT('U'));
     define_key("\033U", KEY_ALT('U'));
+    define_key("\033r", KEY_ALT('R'));
+    define_key("\033R", KEY_ALT('R'));
+    define_key("\033m", KEY_ALT('M'));
+    define_key("\033M", KEY_ALT('M'));
 #endif
 
     curs_set(1);
@@ -458,7 +466,9 @@ int main(int argc, char **argv)
 
     app->hard_wrap = cfg.hard_wrap;
     ed_set_hard_wrap(te_app_get_editor(app), cfg.hard_wrap);
+
     app->wrap_col = cfg.autowrap_col;
+
     te_app_set_show_line_numbers(app, cfg.show_line_numbers);
 
     strncpy(app->cfg_path, cfg_path, sizeof(app->cfg_path) - 1);
@@ -469,13 +479,14 @@ int main(int argc, char **argv)
 #ifdef HAVE_HUNSPELL
     /* Initialize spell_enabled from config */
     app->spell_enabled = cfg.spell_enabled;
-    app->spell_active = 0; /* Disabled by default, user must activate with Alt+H */
+    app->spell_active = 0; /* Disabled by default */
 
     /* Load spell checker from config */
     spell_load_from_config(app);
 
 #ifdef HAVE_HYPHEN
     hyph_load_from_config(app);
+
     app->hyph_wrap_enabled = cfg.hyph_wrap_enabled;
 #endif
 
@@ -484,6 +495,15 @@ int main(int argc, char **argv)
 #endif
 
 #endif /* HAVE_HUNSPELL */
+
+#ifdef HAVE_TRANSLATE
+    /* Initialize translate_enabled from config */
+    app->translate_enabled = cfg.translate_enabled;
+    app->translate_active = 0; /* Disabled by default */
+
+    /* Load translator from config */
+    ui_translate_load_from_config(app);
+#endif
 
     /* Initialize charsets from config */
     /* View charset is always UTF-8 by default */

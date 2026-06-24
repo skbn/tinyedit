@@ -66,59 +66,52 @@ void ui_spell_draw_panel(TeApp *app)
 
     /* Draw panel title */
     attron(COLOR_PAIR(COL_TITLEBAR));
-    mvaddnwstr(win->y, win->x + 1, app->spell_panel_mode == 0 ? L"[Spell Checker]" : L"[Translator]", 16);
+    mvaddnwstr(win->y, win->x + 1, L"[Spell Checker]", 16);
     attron(COLOR_PAIR(COL_NORMAL));
 
     /* Draw current word or placeholder text */
-    if (app->spell_panel_mode == 0)
+    if (app->spell_current_word[0])
     {
-        if (app->spell_current_word[0])
+        const char *word_utf8 = NULL;
+
+        mvaddnwstr(win->y + 1, win->x + 1, L"Current word: ", 14);
+        attron(COLOR_PAIR(COL_SPELL_CURRENT));
+
+        word_utf8 = te_wcs2u8(app->spell_current_word);
+
+        if (word_utf8)
+            mvaddstr(win->y + 1, win->x + 15, word_utf8);
+
+        attron(COLOR_PAIR(COL_NORMAL));
+
+        /* Show word status */
+        if (app->spell_word_status == 1)
         {
-            const char *word_utf8 = NULL;
-
-            mvaddnwstr(win->y + 1, win->x + 1, L"Current word: ", 14);
-            attron(COLOR_PAIR(COL_SPELL_CURRENT));
-
-            word_utf8 = te_wcs2u8(app->spell_current_word);
-
-            if (word_utf8)
-                mvaddstr(win->y + 1, win->x + 15, word_utf8);
-
+            attron(COLOR_PAIR(COL_NORMAL));
+            mvaddnwstr(win->y + 2, win->x + 1, L"Status: CORRECT", 15);
+        }
+        else if (app->spell_word_status == 2)
+        {
+            attron(COLOR_PAIR(COL_SEARCH_MATCH));
+            mvaddnwstr(win->y + 2, win->x + 1, L"Status: INCORRECT", 17);
             attron(COLOR_PAIR(COL_NORMAL));
 
-            /* Show word status */
-            if (app->spell_word_status == 1)
+            /* Show no suggestions message */
+            if (app->spell_suggestion_count == 0)
             {
                 attron(COLOR_PAIR(COL_NORMAL));
-                mvaddnwstr(win->y + 2, win->x + 1, L"Status: CORRECT", 15);
-            }
-            else if (app->spell_word_status == 2)
-            {
-                attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                mvaddnwstr(win->y + 2, win->x + 1, L"Status: INCORRECT", 17);
-                attron(COLOR_PAIR(COL_NORMAL));
-
-                /* Show no suggestions message */
-                if (app->spell_suggestion_count == 0)
-                {
-                    attron(COLOR_PAIR(COL_NORMAL));
-                    mvaddnwstr(win->y + 3, win->x + 1, L"Not in database?", 16);
-                }
-            }
-            else
-            {
-                /* Not checked yet */
-                mvaddnwstr(win->y + 2, win->x + 1, L"Press Alt+P to check", 20);
+                mvaddnwstr(win->y + 3, win->x + 1, L"Not in database?", 16);
             }
         }
         else
         {
-            mvaddnwstr(win->y + 1, win->x + 1, L"Press Alt+P to check word", 25);
+            /* Not checked yet */
+            mvaddnwstr(win->y + 2, win->x + 1, L"Press Alt+P to check", 20);
         }
     }
     else
     {
-        mvaddnwstr(win->y + 1, win->x + 1, L"Translator not yet implemented", 27);
+        mvaddnwstr(win->y + 1, win->x + 1, L"Press Alt+P to check word", 25);
     }
 }
 

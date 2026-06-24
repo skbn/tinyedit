@@ -32,6 +32,10 @@
 #include "ui_mouse.h"
 #include "ui_assist.h"
 
+#ifdef HAVE_TRANSLATE
+#include "ui_translate.h"
+#endif
+
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
 #include "ui_hyph.h"
 #endif
@@ -59,8 +63,6 @@ static const char *HELP_LINES[] =
         "    Ctrl+Y           Delete line",
         "    Ctrl+Z           Undo",
         "    Alt+Z            Redo",
-        "    Ctrl+T           Delete word right",
-        "    Ctrl+_           Delete word left",
         "    Ins / Alt+I      Toggle insert / overwrite",
         "    Ctrl+W           Rewrap paragraph",
         "    Tab              Insert tab (4 spaces)",
@@ -98,10 +100,14 @@ static const char *HELP_LINES[] =
         "    Alt+K            Previous tab",
         "    Alt+W            Close current tab",
         "",
-        "  Spell/Translate:",
-        "    Alt+S            Toggle spell/translate panel",
+        "  Spell:",
+        "    Alt+S            Toggle spell panel",
         "    Alt+H            Toggle spell checker",
         "    Alt+P            Spell check word under cursor",
+#ifdef HAVE_TRANSLATE
+        "    Alt+R            Translate selected text",
+        "    Ctrl+T           Toggle translator",
+#endif
 #ifdef HAVE_MYTHES
         "    Alt+A            Thesaurus lookup for word under cursor",
 #endif
@@ -1664,7 +1670,7 @@ static void position_cursor(TeApp *app)
 static int parse_sgr_mouse(int *out_type, int *out_x, int *out_y)
 {
     char buf[32];
-    int i;
+    int i = 0;
     wint_t wch;
     int wrc;
     int button;
@@ -2193,6 +2199,15 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 
+#ifdef HAVE_TRANSLATE
+    /* Alt+R : translate selected text */
+    if (ch == KEY_ALT('R'))
+    {
+        ui_translate_action(app);
+        return 1;
+    }
+#endif
+
     return 0;
 }
 
@@ -2242,6 +2257,31 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 #endif /* HAVE_HUNSPELL */
+
+#ifdef HAVE_TRANSLATE
+    /* Ctrl+T : toggle translator */
+    if (!is_key && ch == CTRL('T'))
+    {
+        if (!app->translate_handle && app->cfg.translate_enabled)
+            ui_translate_load_from_config(app);
+
+        if (app->translate_handle)
+        {
+            app->translate_active = !app->translate_active;
+            te_status(app, "Translator %s", app->translate_active ? "enabled" : "disabled");
+        }
+        else if (!app->cfg.translate_enabled)
+        {
+            te_status(app, "Translator disabled in config (enable in Setup F2)");
+        }
+        else
+        {
+            te_status(app, "Cannot load translator");
+        }
+
+        return 1;
+    }
+#endif
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_MYTHES)
     /* Alt+A : thesaurus lookup for word under cursor */
@@ -2766,17 +2806,26 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         clear_search_highlights(app);
         return 1;
 
+#ifdef HAVE_TRANSLATE
     case CTRL('T'):
-        ed_block_clear(te_app_get_editor(app));
-        ed_delete_word_right(te_app_get_editor(app));
-        clear_search_highlights(app);
-        return 1;
+        if (!app->translate_handle && app->cfg.translate_enabled)
+            ui_translate_load_from_config(app);
 
-    case CTRL('_'):
-        ed_block_clear(te_app_get_editor(app));
-        ed_delete_word_left(te_app_get_editor(app));
-        clear_search_highlights(app);
+        if (app->translate_handle)
+        {
+            app->translate_active = !app->translate_active;
+            te_status(app, "Translator %s", app->translate_active ? "enabled" : "disabled");
+        }
+        else if (!app->cfg.translate_enabled)
+        {
+            te_status(app, "Translator disabled in config (enable in Setup)");
+        }
+        else
+        {
+            te_status(app, "Cannot load translator");
+        }
         return 1;
+#endif
 
     case '\t':
         ed_insert_tab(te_app_get_editor(app), 4);

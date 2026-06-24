@@ -1,5 +1,7 @@
 #
-# tinyedit - Text editor for AmigaOS
+# tinyedit - UTF-8 text editor for AmigaOS
+#
+# This file is part of the tinyedit project.
 #
 # Copyright (C) 2026 Tanausú M. 39:190/101@amiganet 2:341/207@fidonet
 #
@@ -7,6 +9,14 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 2 of the License, or
 # (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # Makefile.win32 -- Build tinyedit for Windows (native with MSYS2/MinGW)
 #
@@ -19,52 +29,13 @@ HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 # Compiler (native MSYS2 MinGW)
 CC = gcc
-CXX = g++
-AR = ar
 
 # Compiler flags
-CFLAGS = -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -std=gnu89 -O2
-CXXFLAGS = -std=c++14 -O2 -Wall -Wextra
-LFLAGS =
+CFLAGS = -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -I$(HERE)spellchecker -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -std=gnu89 -O2
+LFLAGS = 
 
 # Platform-specific defines
 CDEFS = -DPLATFORM_WIN32 -DNO_TYPEDEF_BOOL -D_WINDOWS
-
-# Spellchecker support (same as Amiga: spellchecker/ C-only engine)
-USE_HUNSPELL ?= 1
-SPELL_DIR = $(HERE)spellchecker
-
-ifeq ($(USE_HUNSPELL),1)
-  CFLAGS += -DHAVE_HUNSPELL -I$(SPELL_DIR)
-  SPELL_OBJS = $(OBJDIR)/spellchecker_utils.o \
-               $(OBJDIR)/spellchecker_htab.o \
-               $(OBJDIR)/spellchecker_affix.o \
-               $(OBJDIR)/spellchecker_core.o \
-               $(OBJDIR)/spellchecker_suggest.o \
-               $(OBJDIR)/spellchecker_stem.o \
-               $(OBJDIR)/spellchecker_custom.o \
-               $(OBJDIR)/spellchecker_dict_scan.o
-endif
-
-# Hyphen support (same as Amiga: spellchecker/ C-only engine)
-USE_HYPHEN ?= 0
-ifeq ($(USE_HYPHEN),1)
-  ifeq ($(USE_HUNSPELL),0)
-    $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
-  endif
-  CFLAGS += -DHAVE_HYPHEN -I$(SPELL_DIR)
-  HYPHWRAP_OBJS = $(OBJDIR)/spellchecker_hyph.o $(OBJDIR)/ui_hyph.o
-endif
-
-# Thesaurus support (same as Amiga: spellchecker/ C-only engine)
-USE_MYTHES ?= 0
-ifeq ($(USE_MYTHES),1)
-  ifeq ($(USE_HUNSPELL),0)
-    $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
-  endif
-  CFLAGS += -DHAVE_MYTHES -I$(SPELL_DIR)
-  THES_OBJS = $(OBJDIR)/spellchecker_thes.o $(OBJDIR)/ui_thes.o
-endif
 
 # Architecture (default: win64 for 64-bit Windows)
 ARCH?=win64
@@ -81,97 +52,110 @@ OBJDIR_SUFFIX=objs.win64
 ARCH_SUFFIX=x64
 endif
 
-TARGET = $(HERE)libtinyedit-windows-$(ARCH_SUFFIX).a
+TARGET = $(HERE)tinyedit-$(ARCH_SUFFIX).exe
 
 # Directories
 OBJDIR = $(HERE)$(OBJDIR_SUFFIX)
 COREDIR = $(HERE)core
 COMPDIR = $(HERE)components
 UIDIR = $(HERE)ui
+SPELL_DIR = $(HERE)spellchecker
 
 # Object files in objs/
-CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
-            $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/portable.o $(OBJDIR)/ncursesw_win32.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
-UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
-            $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o $(OBJDIR)/ui_assist.o
+CORE_OBJS = $(OBJDIR)/utf8.o $(OBJDIR)/charset.o \
+            $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
+            $(OBJDIR)/search.o $(OBJDIR)/portable.o $(OBJDIR)/ncursesw_win32.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
+UI_OBJS   = $(OBJDIR)/te_app.o \
+            $(OBJDIR)/ui_popup.o \
+            $(OBJDIR)/ui_editor.o \
+            $(OBJDIR)/ui_editor_helper.o \
+            $(OBJDIR)/ui_assist.o \
+            $(OBJDIR)/ui_files.o \
+            $(OBJDIR)/ui_setup.o \
+            $(OBJDIR)/ui_glyph_picker.o \
+            $(OBJDIR)/ui_spell.o $(OBJDIR)/ui_mouse.o \
+            $(OBJDIR)/ui_tabs.o $(OBJDIR)/tabs.o $(OBJDIR)/wm.o
 
-ifeq ($(USE_HUNSPELL),1)
-UI_OBJS   += $(OBJDIR)/ui_spell.o
+# Hyphen and Thesaurus UI objects
+ifeq ($(USE_HYPHEN),1)
+UI_OBJS += $(OBJDIR)/ui_hyph.o
 endif
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS)
+ifeq ($(USE_MYTHES),1)
+UI_OBJS += $(OBJDIR)/ui_thes.o
+endif
+ifeq ($(USE_TRANSLATE),1)
+UI_OBJS += $(OBJDIR)/ui_translate.o
+endif
 
-all: $(TARGET) tinyedit
+# Hunspell spell checker -- opt-in.  Set USE_HUNSPELL=1 to enable.
+ifeq ($(USE_HUNSPELL),1)
+CDEFS    += -DHAVE_HUNSPELL -I$(SPELL_DIR)
+ifneq ($(findstring win,$(ARCH)),)
+SPELL_OBJS = $(OBJDIR)/spellchecker_utils.o \
+             $(OBJDIR)/spellchecker_htab.o \
+             $(OBJDIR)/spellchecker_affix.o \
+             $(OBJDIR)/spellchecker_core.o \
+             $(OBJDIR)/spellchecker_suggest.o \
+             $(OBJDIR)/spellchecker_stem.o \
+             $(OBJDIR)/spellchecker_custom.o \
+             $(OBJDIR)/spellchecker_dict_scan.o
+else ifeq ($(PLATFORM),amiga)
+SPELL_OBJS = $(OBJDIR)/spellchecker_utils.o \
+             $(OBJDIR)/spellchecker_htab.o \
+             $(OBJDIR)/spellchecker_affix.o \
+             $(OBJDIR)/spellchecker_core.o \
+             $(OBJDIR)/spellchecker_suggest.o \
+             $(OBJDIR)/spellchecker_stem.o \
+             $(OBJDIR)/spellchecker_custom.o \
+             $(OBJDIR)/spellchecker_dict_scan.o
+else
+CORE_OBJS += $(OBJDIR)/spell.o
+SPELL_LIB := -lhunspell
+SPELL_OBJS :=
+endif
+ifeq ($(USE_HYPHEN),1)
+CDEFS    += -DHAVE_HYPHEN
+SPELL_OBJS += $(OBJDIR)/spellchecker_hyph.o
+endif
+ifeq ($(USE_MYTHES),1)
+CDEFS    += -DHAVE_MYTHES
+SPELL_OBJS += $(OBJDIR)/spellchecker_thes.o
+endif
+else
+SPELL_OBJS :=
+SPELL_LIB :=
+endif
 
-$(TARGET): $(ALL_OBJS)
-	$(AR) rcs $@ $(ALL_OBJS)
+# Translator -- opt-in. Uses HTTP backends (MyMemory, LibreTranslate, Lingva).
+USE_TRANSLATE ?= 0
+
+ifeq ($(USE_TRANSLATE),1)
+CDEFS    += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
+TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
+TRANSLATE_LIB = -lm -lcurl
+else
+TRANSLATE_OBJS =
+TRANSLATE_LIB =
+endif
+
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(TRANSLATE_OBJS)
+
+all: $(TARGET)
+
+$(TARGET): $(HERE)main.c $(ALL_OBJS)
+	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) \
+	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32 $(TRANSLATE_LIB)
 
 # Create obj directory
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
-# Core library objects
-$(OBJDIR)/charset.o: $(COREDIR)/charset.c $(COREDIR)/charset.h $(COREDIR)/utf8.h | $(OBJDIR)
+# Spell checker (backend + UI).  spell.c is only compiled when USE_HUNSPELL=1.
+$(OBJDIR)/spell.o: $(COREDIR)/spell.c $(COREDIR)/spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/clipboard.o: $(COREDIR)/clipboard.c $(COREDIR)/clipboard.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/keys.o: $(COREDIR)/keys.c $(COREDIR)/keys.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/search.o: $(COREDIR)/search.c $(COREDIR)/search.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/utf8.o: $(COREDIR)/utf8.c $(COREDIR)/utf8.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/portable.o: $(COREDIR)/portable.c $(COREDIR)/portable.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/ncursesw_win32.o: $(HERE)ncursesw_win32.c $(HERE)ncursesw_win32.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-# Component objects
-$(OBJDIR)/editor.o: $(COMPDIR)/editor.c $(COMPDIR)/editor.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/config.o: $(COMPDIR)/config.c $(COMPDIR)/config.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-# UI objects
-$(OBJDIR)/te_app.o: $(UIDIR)/te_app.c $(UIDIR)/te.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/ui_editor.o: $(UIDIR)/ui_editor.c $(UIDIR)/te.h $(UIDIR)/ui_editor_helper.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/ui_editor_helper.o: $(UIDIR)/ui_editor_helper.c $(UIDIR)/te.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/ui_popup.o: $(UIDIR)/ui_popup.c $(UIDIR)/te.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/ui_files.o: $(UIDIR)/ui_files.c $(UIDIR)/ui_files.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/ui_setup.o: $(UIDIR)/ui_setup.c $(UIDIR)/ui_setup.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/ui_glyph_picker.o: $(UIDIR)/ui_glyph_picker.c $(UIDIR)/ui_glyph_picker.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/tabs.o: $(UIDIR)/tabs.c $(UIDIR)/tabs.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/wm.o: $(UIDIR)/wm.c $(UIDIR)/wm.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c $(UIDIR)/te.h | $(OBJDIR)
+$(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
@@ -180,18 +164,29 @@ $(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
 $(OBJDIR)/ui_assist.o: $(UIDIR)/ui_assist.c $(UIDIR)/ui_assist.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-ifeq ($(USE_HUNSPELL),1)
-$(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
+# Translator objects (only if USE_TRANSLATE=1)
+ifeq ($(USE_TRANSLATE),1)
+$(OBJDIR)/translate.o: $(COREDIR)/translate.c $(COREDIR)/translate.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/translate_http.o: $(COREDIR)/translate_http.c $(COREDIR)/translate.h $(COREDIR)/http_client.h $(COREDIR)/json_utils.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/http_client.o: $(COREDIR)/http_client.c $(COREDIR)/http_client.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/json_utils.o: $(COREDIR)/json_utils.c $(COREDIR)/json_utils.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 
-# Spell checker objects (same as Amiga: spellchecker/ C-only engine)
+# Spell checker objects (native spellchecker/ C-only engine)
 SPELL_PRIV = $(SPELL_DIR)/spell_priv.h $(SPELL_DIR)/spell.h
 
-ifeq ($(USE_HUNSPELL),1)
+# spellchecker_utils.o is always needed for te_is_word_char (used by ui_mouse.c)
 $(OBJDIR)/spellchecker_utils.o: $(SPELL_DIR)/spell_utils.c $(SPELL_PRIV) | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/spellchecker_htab.o: $(SPELL_DIR)/spell_htab.c $(SPELL_PRIV) | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
@@ -212,8 +207,6 @@ $(OBJDIR)/spellchecker_custom.o: $(SPELL_DIR)/spell_custom.c $(SPELL_PRIV) | $(O
 
 $(OBJDIR)/spellchecker_dict_scan.o: $(SPELL_DIR)/dict_scan.c $(SPELL_DIR)/dict_scan.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-endif
-
 ifeq ($(USE_HYPHEN),1)
 $(OBJDIR)/spellchecker_hyph.o: $(SPELL_DIR)/hyph.c $(SPELL_DIR)/hyph.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -221,7 +214,6 @@ $(OBJDIR)/spellchecker_hyph.o: $(SPELL_DIR)/hyph.c $(SPELL_DIR)/hyph.h | $(OBJDI
 $(OBJDIR)/ui_hyph.o: $(UIDIR)/ui_hyph.c $(UIDIR)/ui_hyph.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
-
 ifeq ($(USE_MYTHES),1)
 $(OBJDIR)/spellchecker_thes.o: $(SPELL_DIR)/thes.c $(SPELL_DIR)/thes.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -229,26 +221,76 @@ $(OBJDIR)/spellchecker_thes.o: $(SPELL_DIR)/thes.c $(SPELL_DIR)/thes.h | $(OBJDI
 $(OBJDIR)/ui_thes.o: $(UIDIR)/ui_thes.c $(UIDIR)/ui_thes.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
-
-# Application
-TINYEDIT = $(HERE)tinyedit-$(ARCH_SUFFIX).exe
-
-tinyedit: $(TINYEDIT)
-
-ifeq ($(USE_HUNSPELL),1)
-$(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
-	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) -c $< -o $@
-
-$(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
-	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
-	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32
-else
-$(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
-	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
-	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32
+endif
+ifeq ($(USE_TRANSLATE),1)
+$(OBJDIR)/ui_translate.o: $(UIDIR)/ui_translate.c $(UIDIR)/ui_translate.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 
+# Core objects
+$(OBJDIR)/utf8.o: $(COREDIR)/utf8.c $(COREDIR)/utf8.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/charset.o: $(COREDIR)/charset.c $(COREDIR)/charset.h $(COREDIR)/utf8.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/keys.o: $(COREDIR)/keys.c $(COREDIR)/keys.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/clipboard.o: $(COREDIR)/clipboard.c $(COREDIR)/clipboard.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/search.o: $(COREDIR)/search.c $(COREDIR)/search.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/portable.o: $(COREDIR)/portable.c $(COREDIR)/portable.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ncursesw_win32.o: $(HERE)ncursesw_win32.c $(HERE)ncursesw_win32.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# Component objects
+$(OBJDIR)/editor.o: $(COMPDIR)/editor.c $(COMPDIR)/editor.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/config.o: $(COMPDIR)/config.c $(COMPDIR)/config.h $(COREDIR)/charset.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# UI objects (ui/)
+$(OBJDIR)/te_app.o: $(UIDIR)/te_app.c $(UIDIR)/te.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_popup.o: $(UIDIR)/ui_popup.c | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_editor.o: $(UIDIR)/ui_editor.c | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_editor_helper.o: $(UIDIR)/ui_editor_helper.c $(UIDIR)/ui_editor_helper.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_files.o: $(UIDIR)/ui_files.c $(UIDIR)/ui_files.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_setup.o: $(UIDIR)/ui_setup.c $(UIDIR)/ui_setup.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_glyph_picker.o: $(UIDIR)/ui_glyph_picker.c $(UIDIR)/ui_glyph_picker.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_tabs.o: $(UIDIR)/ui_tabs.c | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/tabs.o: $(UIDIR)/tabs.c $(UIDIR)/tabs.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/wm.o: $(UIDIR)/wm.c $(UIDIR)/wm.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 clean:
-	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)
+	rm -rf $(OBJDIR) $(TARGET)
 
 .PHONY: all clean

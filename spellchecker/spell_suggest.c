@@ -407,7 +407,7 @@ static void gen_insert(struct spell *s, const char *word)
                 /* Use first character of word as reference */
                 int ref_len = char_len_at(word, 0);
 
-                if (ref_len > 0 && ref_len <= (int)sizeof(ref_buf))
+                if (ref_len > 0 && ref_len < (int)sizeof(ref_buf))
                 {
                     memcpy(ref_buf, word, (size_t)ref_len);
 
@@ -421,7 +421,7 @@ static void gen_insert(struct spell *s, const char *word)
                 int prev_b = utf8_offset(word, i - 1);
                 int prev_len = char_len_at(word, prev_b);
 
-                if (prev_len > 0 && prev_len <= (int)sizeof(ref_buf))
+                if (prev_len > 0 && prev_len < (int)sizeof(ref_buf))
                 {
                     memcpy(ref_buf, word + prev_b, (size_t)prev_len);
 
@@ -476,7 +476,7 @@ static void gen_replace(struct spell *s, const char *word)
         t = s->try_chars;
 
         /* Get original character as reference for case matching */
-        if (cl > 0 && cl <= (int)sizeof(orig_buf))
+        if (cl > 0 && cl < (int)sizeof(orig_buf))
         {
             memcpy(orig_buf, word + b, (size_t)cl);
             orig_buf[cl] = '\0';

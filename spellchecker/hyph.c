@@ -330,7 +330,12 @@ struct hyph *hyph_new(const char *path)
         }
 
         if (parse_pattern(line, &h->pats[n]) == 0)
+        {
             n++;
+
+            /* Keep in sync so hyph_free can clean up on error */
+            h->n_pats = n;
+        }
     }
 
     fclose(fp);

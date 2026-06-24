@@ -53,30 +53,60 @@
 #if defined(PLATFORM_AMIGA)
 #ifdef AMIGA_TTF_TE
 #ifdef HAVE_HUNSPELL
+#ifdef HAVE_TRANSLATE
+#define ST_TAB_COUNT 5
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF", "Spell", "X-late"};
+#else
 #define ST_TAB_COUNT 4
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF", "Spell"};
+#endif
+#else /* !HAVE_HUNSPELL */
+#ifdef HAVE_TRANSLATE
+#define ST_TAB_COUNT 4
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF", "X-late"};
 #else
 #define ST_TAB_COUNT 3
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF"};
 #endif
-#else
+#endif /* HAVE_HUNSPELL */
+#else  /* !AMIGA_TTF_TE */
 #ifdef HAVE_HUNSPELL
+#ifdef HAVE_TRANSLATE
+#define ST_TAB_COUNT 4
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Spell", "X-late"};
+#else
 #define ST_TAB_COUNT 3
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Spell"};
+#endif
+#else /* !HAVE_HUNSPELL */
+#ifdef HAVE_TRANSLATE
+#define ST_TAB_COUNT 3
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "X-late"};
 #else
 #define ST_TAB_COUNT 2
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
 #endif
-#endif
-#else
+#endif /* HAVE_HUNSPELL */
+#endif /* AMIGA_TTF_TE */
+#else  /* !PLATFORM_AMIGA */
 #ifdef HAVE_HUNSPELL
+#ifdef HAVE_TRANSLATE
+#define ST_TAB_COUNT 4
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Spell", "X-late"};
+#else
 #define ST_TAB_COUNT 3
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Spell"};
+#endif
+#else /* !HAVE_HUNSPELL */
+#ifdef HAVE_TRANSLATE
+#define ST_TAB_COUNT 3
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "X-late"};
 #else
 #define ST_TAB_COUNT 2
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
 #endif
-#endif
+#endif /* HAVE_HUNSPELL */
+#endif /* PLATFORM_AMIGA */
 
 /* Field types */
 typedef enum
@@ -102,6 +132,10 @@ typedef enum
     FT_THESLIST /* cycle through available MyThes dictionaries */
 #endif
 #endif /* HAVE_HUNSPELL */
+#ifdef HAVE_TRANSLATE
+    ,
+    FT_TRANSLATE_BACKEND /* cycle through MyMemory/LibreTranslate/Lingva */
+#endif                   /* HAVE_TRANSLATE */
 
 } FieldType;
 
@@ -188,6 +222,21 @@ static const SetupField st_fields[] =
 #define TAB_DICT 2
 #endif
 
+/* Translate tab number */
+#if defined(PLATFORM_AMIGA) && defined(AMIGA_TTF_TE)
+#ifdef HAVE_HUNSPELL
+#define TAB_TRANSLATE 4
+#else
+#define TAB_TRANSLATE 3
+#endif
+#else
+#ifdef HAVE_HUNSPELL
+#define TAB_TRANSLATE 3
+#else
+#define TAB_TRANSLATE 2
+#endif
+#endif
+
 /* Dictionary */
 #ifdef HAVE_HUNSPELL
         {TAB_DICT, "Spell Enabled", FT_BOOL, F_OFF(spell_enabled), 0},
@@ -207,6 +256,18 @@ static const SetupField st_fields[] =
         {TAB_DICT, "Thesaurus Dict", FT_THESLIST, F_OFF(thes_dict_name), 0},
 #endif /* HAVE_MYTHES */
 #endif /* HAVE_HUNSPELL */
+
+/* Translate */
+#ifdef HAVE_TRANSLATE
+        {TAB_TRANSLATE, "Translate Enabled", FT_BOOL, F_OFF(translate_enabled), 0},
+        {TAB_TRANSLATE, "Backend", FT_TRANSLATE_BACKEND, F_OFF(translate_backend), 0},
+        {TAB_TRANSLATE, "Endpoint", FT_STR, F_OFF(translate_endpoint), TE_CFG_STR_MAX},
+        {TAB_TRANSLATE, "API Key", FT_STR, F_OFF(translate_api_key), TE_CFG_STR_MAX},
+        {TAB_TRANSLATE, "Email", FT_STR, F_OFF(translate_email), TE_CFG_STR_MAX},
+        {TAB_TRANSLATE, "From Lang", FT_STR, F_OFF(translate_from_lang), 16},
+        {TAB_TRANSLATE, "To Lang", FT_STR, F_OFF(translate_to_lang), 16},
+        {TAB_TRANSLATE, "Timeout (sec)", FT_INT, F_OFF(translate_timeout), 0},
+#endif /* HAVE_TRANSLATE */
 
 };
 
@@ -343,6 +404,25 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
     }
 #endif /* HAVE_MYTHES */
 #endif /* HAVE_HUNSPELL */
+#ifdef HAVE_TRANSLATE
+    case FT_TRANSLATE_BACKEND:
+    {
+        int v = *(const int *)(base + fld->off);
+        const char *label = "";
+
+        if (v == 0)
+            label = "MyMemory";
+        else if (v == 1)
+            label = "LibreTranslate";
+        else if (v == 2)
+            label = "Lingva";
+        else
+            label = "MyMemory";
+
+        snprintf(buf, bufsz, "%s", label);
+        break;
+    }
+#endif /* HAVE_TRANSLATE */
     case FT_COLORPAIR:
     {
         int pair_index = (fld->off - F_OFF(color_fg)) / sizeof(int);
@@ -740,6 +820,16 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
 
         break;
     }
+#ifdef HAVE_TRANSLATE
+    case FT_TRANSLATE_BACKEND:
+    {
+        /* Cycle through MyMemory, LibreTranslate, Lingva */
+        int *v = (int *)(base + fld->off);
+
+        *v = (*v + 1) % 3;
+        break;
+    }
+#endif /* HAVE_TRANSLATE */
     case FT_COLORPAIR:
     {
         int pair_index = (fld->off - F_OFF(color_fg)) / sizeof(int);
@@ -1404,6 +1494,21 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
             {
                 *cfg = work;
                 ui_thes_load_from_config(app);
+            }
+#endif
+
+#ifdef HAVE_TRANSLATE
+            if (cfg->translate_enabled != work.translate_enabled ||
+                cfg->translate_backend != work.translate_backend ||
+                strcmp(cfg->translate_endpoint, work.translate_endpoint) != 0 ||
+                strcmp(cfg->translate_api_key, work.translate_api_key) != 0 ||
+                strcmp(cfg->translate_email, work.translate_email) != 0 ||
+                strcmp(cfg->translate_from_lang, work.translate_from_lang) != 0 ||
+                strcmp(cfg->translate_to_lang, work.translate_to_lang) != 0 ||
+                cfg->translate_timeout != work.translate_timeout)
+            {
+                *cfg = work;
+                ui_translate_load_from_config(app);
             }
 #endif
 

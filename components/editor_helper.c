@@ -436,17 +436,29 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
 
                         capacity *= 2;
                         new_rows = realloc(*out_rows, capacity * sizeof(int));
-                        new_cols = realloc(*out_cols, capacity * sizeof(int));
 
-                        if (!new_rows || !new_cols)
+                        if (!new_rows)
                         {
-                            free(new_rows);
-                            free(new_cols);
-                            *out_rows = *out_cols = NULL;
+                            free(*out_cols);
+
+                            *out_rows = NULL;
+                            *out_cols = NULL;
                             return 0;
                         }
 
                         *out_rows = new_rows;
+
+                        new_cols = realloc(*out_cols, capacity * sizeof(int));
+
+                        if (!new_cols)
+                        {
+                            free(*out_rows);
+
+                            *out_rows = NULL;
+                            *out_cols = NULL;
+                            return 0;
+                        }
+
                         *out_cols = new_cols;
                     }
 
@@ -470,7 +482,7 @@ int ed_detect_quote_prefix(const wchar_t *line)
     if (!line)
         return 0;
 
-    while (line[p] == L' ' && p < 8)
+    while (p < 8 && line[p] == L' ')
         p++;
 
     while (p < 8 && line[p] && line[p] != L'>' && line[p] != L'<')
@@ -557,7 +569,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         {
             int p = 0;
 
-            while (l[p] == L' ' && p < 8)
+            while (p < 8 && l[p] == L' ')
                 p++;
 
             if (l[p] == L'>')
@@ -585,7 +597,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         {
             int p = 0;
 
-            while (l[p] == L' ' && p < 8)
+            while (p < 8 && l[p] == L' ')
                 p++;
 
             if (l[p] == L'>')
@@ -1019,6 +1031,8 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
 
         free(buf);
 
+        buf = NULL; /* Ownership transferred; only out lives from here */
+
         if (wrote < 0 || wrote >= (int)outsz)
         {
             free(out);
@@ -1032,15 +1046,13 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
     else
     {
         content_to_paste = buf;
+        buf = NULL; /* Ownership transferred to content_to_paste */
     }
 
     /* Open undo group for paste operation */
     if (ed_undo_open_group(ed) != 0)
     {
-        if (needs_conv)
-            free(content_to_paste);
-        else
-            free(buf);
+        free(content_to_paste);
         return -1;
     }
 
@@ -1052,10 +1064,8 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
     {
         ed->undo_snapshot_mode = 0;
         ed->undo_open = 0;
-        if (needs_conv)
-            free(content_to_paste);
-        else
-            free(buf);
+
+        free(content_to_paste);
         return -1;
     }
 
@@ -1084,11 +1094,7 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
         {
             ed->undo_open = 0;
 
-            if (needs_conv)
-                free(content_to_paste);
-            else
-                free(buf);
-
+            free(content_to_paste);
             return -1;
         }
 
@@ -1110,11 +1116,7 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
     {
         ed->undo_open = 0;
 
-        if (needs_conv)
-            free(content_to_paste);
-        else
-            free(buf);
-
+        free(content_to_paste);
         return -1;
     }
 
@@ -1125,10 +1127,7 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
     ed->undo_open = 0;
 
     /* Free the buffer */
-    if (needs_conv)
-        free(content_to_paste);
-    else
-        free(buf);
+    free(content_to_paste);
 
     /* Invalidate prefix after paste */
     ed_prefix_invalidate_from(ed, cursor_row_before);

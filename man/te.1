@@ -1,0 +1,262 @@
+.Dd June 23, 2026
+.Dt TE 1
+.Os
+.Sh NAME
+.Nm te
+.Nd lightweight text editor with spellchecker, thesaurus and charset conversion
+.Sh SYNOPSIS
+.Nm te
+.Op Ar file
+.Sh DESCRIPTION
+.Nm te
+is a lightweight text editor for Unix-like systems with full UTF-8 support,
+multiple charset conversion, configurable colors, undo/redo, search, clipboard,
+tab system for editing multiple files, spellchecker, hyphenation, thesaurus,
+and editing assistance features.
+.Sh INITIAL CONFIGURATION
+On first run,
+.Nm te
+creates a configuration file at
+.Pa ~/.tinyedit.conf
+in the user's home directory. This file stores editor preferences including
+colors, charset settings, wrap mode, line numbers, spellchecker, and editing
+assistance features.
+.Sh SETUP
+The Setup menu (F4 or Alt+T) allows configuration of:
+.Bl -bullet -compact
+.It
+Default charset for saving files
+.It
+Color schemes
+.It
+Hard/soft wrap mode
+.It
+Line numbers display
+.It
+Spellchecker settings (dictionary path, custom dictionary)
+.It
+Hyphenation settings
+.It
+Thesaurus settings
+.It
+Editing assistance toggles (smart quotes, auto-cap, repeated words)
+.It
+Other editor preferences
+.El
+.Sh WRAP MODES
+.Nm te
+supports two wrap modes:
+.Bl -enum -compact
+.It
+Soft-wrap (default): Visual wrapping only, no line breaks inserted
+.It
+Hard-wrap: Inserts carriage returns at the configured column width
+.El
+Toggle between modes with Alt+Q.
+.Sh TABS
+.Nm te
+supports editing multiple files simultaneously using a tab system.
+Each tab maintains its own editing state, undo history, and cursor position.
+.Pp
+Alt+J and Alt+K switch between tabs.
+Alt+W closes the current tab.
+Alt+1-9 and Alt+0 switch to specific tabs.
+Press F9 or Alt+L to toggle the tabs panel visibility.
+.Sh LINE NUMBERS
+Line numbers can be enabled or disabled in Setup (Alt+D toggles).
+When enabled, line numbers are displayed in the left margin.
+.Sh EDITOR
+.Nm te
+is a full-featured text editor with spellchecker, hyphenation, thesaurus,
+and editing assistance features.
+.Ss Spellchecker
+.Nm te
+includes Hunspell-based spellchecking with support for multiple languages.
+.Pp
+Spellchecker settings are configured in Setup.
+You can enable/disable spellchecking, set the dictionary path, select the dictionary
+name (e.g., en_US, es_ES, de_DE, fr_FR), and specify a custom dictionary file.
+.Pp
+Misspelled words are highlighted in red.
+Press Alt+P to check the word under cursor and see suggestions.
+Press Enter to accept a suggestion, ESC to cancel.
+Press Alt+H to toggle the spell checker panel.
+.Ss Hyphenation
+.Nm te
+supports hyphenation at the hard-wrap column when enabled.
+Hyphenation dictionaries follow the LibreOffice format (hyph_*.dic).
+Enable in Setup under "Hyphenation" section.
+Press Alt+E to toggle hyphen wrap mode.
+.Ss Thesaurus
+.Nm te
+includes thesaurus support (MyThes) for synonym lookup.
+Thesaurus dictionaries consist of .idx and .dat files (th_*).
+Access with Alt+A to see synonyms for the word under cursor.
+.Ss Editing Assistance
+.Nm te
+provides real-time editing assistance features:
+.Bl -enum -compact
+.It
+Smart quotes: Auto-converts straight quotes to curly quotes based on context
+.Bl -bullet -compact
+.It
+Typing ' after a letter becomes closing apostrophe (')
+.It
+Typing ' after space becomes opening apostrophe (')
+.It
+Same logic applies to double quotes (" / ")
+.El
+.It
+Auto-cap: Automatically capitalizes the first letter of a word when starting a sentence
+.Bl -bullet -compact
+.It
+After . ! or ? followed by space
+.It
+At document start
+.It
+After empty line (paragraph separator)
+.It
+After line ending in . ! or ?
+.El
+.It
+Repeated words: Highlights repeated words in the same line
+.Bl -bullet -compact
+.It
+Visual highlight (inverted background) for words like "the the"
+.It
+Case-insensitive comparison
+.El
+.El
+.Pp
+These features can be toggled individually in Setup under "Editor Assistance".
+.Sh CHARSET CONVERSION
+.Nm te
+always works internally with UTF-8. There are two ways to configure charsets:
+.Pp
+.Bl -enum -compact
+.It
+Default charset (Setup):
+.Bl -bullet -compact
+.It
+Press F4 or Alt+T to open Setup
+.It
+In the Editor tab, go to the "Charset" field
+.It
+Press Enter to cycle through available charsets
+.It
+This will be the charset used by default when saving files
+.El
+.It
+Temporary charset for the current file (F3):
+.Bl -bullet -compact
+.It
+Press F3 or Alt+C to change the read/write charset for the current file
+.It
+Select the read charset (View) and save charset (Save)
+.It
+If you change the read charset (View), the file is reloaded from disk with the new encoding
+.It
+If you only change the save charset (Save), the file is not reloaded
+.El
+.El
+.Pp
+Available charsets: UTF-8, LATIN-1, LATIN-2, CP437, CP850, CP865, CP866, CP1252
+.Sh SEARCH
+.Nm te
+provides search functionality:
+.Bl -enum -compact
+.It
+Search (F5 or Alt+F):
+.Bl -bullet -compact
+.It
+Shows all matches in the document
+.It
+Navigate between matches with F3/Alt+P (previous) and F4/Alt+N (next)
+.El
+.It
+Find & replace (Ctrl+R):
+.Bl -bullet -compact
+.It
+Search and replace text with a popup dialog
+.El
+.It
+Replace all (F6 or Alt+B in search mode):
+.Bl -bullet -compact
+.It
+Replace all matches at once
+.El
+.El
+.Pp
+Press ESC to exit search mode.
+.Sh UNICODE GLYPHS
+Press F8 or Alt+U to open the Unicode glyph picker, which allows insertion
+of any Unicode character by browsing and selecting from the full Unicode
+character set.
+.Sh FILE OPERATIONS
+Press F7 or Alt+O to insert a file at the cursor position.
+.Sh KEYBOARD SHORTCUTS
+Basic navigation and editing shortcuts:
+.Bl -tag -width "Ctrl+Left/Right"
+.It Sy Arrows
+Move cursor
+.It Sy Home / Ctrl+B
+Line start
+.It Sy End / Ctrl+E
+Line end
+.It Sy PgUp / Ctrl+U
+Page up
+.It Sy PgDn / Ctrl+D
+Page down
+.It Sy Ctrl+Left/Right
+Word left / right
+.It Sy Ctrl+Y
+Delete line
+.It Sy Ctrl+Z
+Undo
+.It Sy Alt+Z
+Redo
+.It Sy Ctrl+S
+Save
+.It Sy ESC / F10
+Quit
+.El
+.Pp
+Spellchecker and thesaurus shortcuts:
+.Bl -tag -width "Alt+A"
+.It Sy Alt+P
+Spellcheck word under cursor
+.It Sy Alt+H
+Toggle spell checker panel
+.It Sy Alt+A
+Thesaurus lookup
+.El
+.Sh FILES
+.Bl -tag -width "~/.tinyedit.conf"
+.It Pa ~/.tinyedit.conf
+User configuration file
+.El
+.Sh DICTIONARY FORMATS
+.Nm te
+uses Hunspell-compatible dictionaries:
+.Bl -bullet -compact
+.It
+.aff file: Affix rules and flags
+.It
+.dic file: Word list with flags
+.El
+.Pp
+Hyphenation dictionaries:
+.Bl -bullet -compact
+.It
+hyph_*.dic: Hyphenation patterns (LibreOffice format)
+.El
+.Pp
+Thesaurus dictionaries:
+.Bl -bullet -compact
+.It
+th_*.idx: Index file
+.It
+th_*.dat: Data file with synonym entries
+.El
+.Sh AUTHORS
+.An Tanausú M. Aq ervras@aim.com

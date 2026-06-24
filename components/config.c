@@ -355,6 +355,22 @@ void te_cfg_defaults(TeConfig *cfg)
 
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_TRANSLATE
+    /* Translator defaults: disabled, MyMemory backend, default endpoints */
+    cfg->translate_enabled = 0;
+    cfg->translate_backend = 0;        /* MyMemory */
+    cfg->translate_endpoint[0] = '\0'; /* Use default endpoint */
+    cfg->translate_api_key[0] = '\0';
+    cfg->translate_email[0] = '\0';
+
+    strncpy(cfg->translate_from_lang, "en", sizeof(cfg->translate_from_lang) - 1);
+    strncpy(cfg->translate_to_lang, "es", sizeof(cfg->translate_to_lang) - 1);
+
+    cfg->translate_from_lang[sizeof(cfg->translate_from_lang) - 1] = '\0';
+    cfg->translate_to_lang[sizeof(cfg->translate_to_lang) - 1] = '\0';
+    cfg->translate_timeout = 10; /* 10 seconds */
+#endif                           /* HAVE_TRANSLATE */
+
     /* White-on-black fallback */
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
     {
@@ -845,6 +861,89 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         }
 #endif
 #endif /* HAVE_HUNSPELL */
+#ifdef HAVE_TRANSLATE
+        else if (strcasecmp(word, "TRANSLATE_ENABLED") == 0)
+        {
+            cfg->translate_enabled = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "TRANSLATE_BACKEND") == 0)
+        {
+            char val[16];
+            get_token(rest, val, sizeof(val));
+
+            if (strcasecmp(val, "MYMEMORY") == 0)
+                cfg->translate_backend = 0;
+            else if (strcasecmp(val, "LIBRETRANSLATE") == 0)
+                cfg->translate_backend = 1;
+            else if (strcasecmp(val, "LINGVA") == 0)
+                cfg->translate_backend = 2;
+            else
+                cfg->translate_backend = 0;
+        }
+        else if (strcasecmp(word, "TRANSLATE_ENDPOINT") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+
+            strncpy(cfg->translate_endpoint, tmp, sizeof(cfg->translate_endpoint) - 1);
+
+            cfg->translate_endpoint[sizeof(cfg->translate_endpoint) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "TRANSLATE_API_KEY") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+
+            strncpy(cfg->translate_api_key, tmp, sizeof(cfg->translate_api_key) - 1);
+
+            cfg->translate_api_key[sizeof(cfg->translate_api_key) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "TRANSLATE_EMAIL") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+
+            strncpy(cfg->translate_email, tmp, sizeof(cfg->translate_email) - 1);
+
+            cfg->translate_email[sizeof(cfg->translate_email) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "TRANSLATE_FROM_LANG") == 0)
+        {
+            char tmp[16];
+
+            get_token(rest, tmp, sizeof(tmp));
+
+            strncpy(cfg->translate_from_lang, tmp, sizeof(cfg->translate_from_lang) - 1);
+
+            cfg->translate_from_lang[sizeof(cfg->translate_from_lang) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "TRANSLATE_TO_LANG") == 0)
+        {
+            char tmp[16];
+
+            get_token(rest, tmp, sizeof(tmp));
+
+            strncpy(cfg->translate_to_lang, tmp, sizeof(cfg->translate_to_lang) - 1);
+
+            cfg->translate_to_lang[sizeof(cfg->translate_to_lang) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "TRANSLATE_TIMEOUT") == 0)
+        {
+            cfg->translate_timeout = atoi(rest);
+
+            if (cfg->translate_timeout < 1)
+                cfg->translate_timeout = 1;
+
+            if (cfg->translate_timeout > 60)
+                cfg->translate_timeout = 60;
+        }
+#endif /* HAVE_TRANSLATE */
     }
 
     fclose(f);
@@ -967,6 +1066,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 || strcasecmp(word, "THES_ENABLED") == 0 || strcasecmp(word, "THES_DICT_PATH") == 0 || strcasecmp(word, "THES_DICT_NAME") == 0
 #endif
 #endif
+#ifdef HAVE_TRANSLATE
+                || strcasecmp(word, "TRANSLATE_ENABLED") == 0 || strcasecmp(word, "TRANSLATE_BACKEND") == 0 || strcasecmp(word, "TRANSLATE_ENDPOINT") == 0 || strcasecmp(word, "TRANSLATE_API_KEY") == 0 || strcasecmp(word, "TRANSLATE_EMAIL") == 0 || strcasecmp(word, "TRANSLATE_FROM_LANG") == 0 || strcasecmp(word, "TRANSLATE_TO_LANG") == 0 || strcasecmp(word, "TRANSLATE_TIMEOUT") == 0
+#endif
             )
             {
                 skip_line = 1;
@@ -1069,6 +1171,26 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 #endif
 
 #endif /* HAVE_HUNSPELL */
+
+#ifdef HAVE_TRANSLATE
+    const char *backend_name = "MYMEMORY";
+
+    /* Translator settings */
+    fprintf(out, "TRANSLATE_ENABLED %s\n", cfg->translate_enabled ? "YES" : "NO");
+
+    if (cfg->translate_backend == 1)
+        backend_name = "LIBRETRANSLATE";
+    else if (cfg->translate_backend == 2)
+        backend_name = "LINGVA";
+
+    fprintf(out, "TRANSLATE_BACKEND %s\n", backend_name);
+    fprintf(out, "TRANSLATE_ENDPOINT %s\n", cfg->translate_endpoint);
+    fprintf(out, "TRANSLATE_API_KEY %s\n", cfg->translate_api_key);
+    fprintf(out, "TRANSLATE_EMAIL %s\n", cfg->translate_email);
+    fprintf(out, "TRANSLATE_FROM_LANG %s\n", cfg->translate_from_lang);
+    fprintf(out, "TRANSLATE_TO_LANG %s\n", cfg->translate_to_lang);
+    fprintf(out, "TRANSLATE_TIMEOUT %d\n", cfg->translate_timeout);
+#endif /* HAVE_TRANSLATE */
 
     fclose(out);
 

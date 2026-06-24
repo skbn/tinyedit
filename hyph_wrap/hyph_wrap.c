@@ -372,21 +372,17 @@ char **hyph_list_dictionaries(const char *dir_path, int *n_dicts)
         /* Look for *.dic files (any name ending in .dic) */
         if (len > 4 && strcmp(name + len - 4, ".dic") == 0)
         {
-            /* Extract dictionary name */
+            /* Extract dictionary name (everything before ".dic"). len > 4 above guarantees end > 0 here */
             char *dict_name = NULL;
-            size_t start = 0;     /* start from beginning */
-            size_t end = len - 4; /* before ".dic" */
+            size_t end = len - 4;
 
-            if (end <= start)
-                continue;
-
-            dict_name = malloc(end - start + 1);
+            dict_name = malloc(end + 1);
 
             if (!dict_name)
                 continue;
 
-            memcpy(dict_name, name + start, end - start);
-            dict_name[end - start] = '\0';
+            memcpy(dict_name, name, end);
+            dict_name[end] = '\0';
 
             /* Add to array */
             if (count >= capacity)

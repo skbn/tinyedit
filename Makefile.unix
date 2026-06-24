@@ -29,8 +29,8 @@ endif
 
 CC ?= cc
 CXX ?= c++
-CFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
-CXXFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter
+CFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -I$(HERE)cJSON -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
+CXXFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -I$(HERE)cJSON -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter
 AR = ar
 
 # Platform define
@@ -139,6 +139,22 @@ ifeq ($(USE_MYTHES),1)
   THES_OBJS = $(OBJDIR)/thes.o
 endif
 
+# Translator support (HTTP backends via libcurl on Unix/Windows, external curl on Amiga)
+USE_TRANSLATE ?= 0
+ifeq ($(USE_TRANSLATE),1)
+  CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
+  CDEFS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
+  TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
+  # Use pkg-config for libcurl on Unix (multi-platform detection)
+  TRANSLATE_CFLAGS = $(shell pkg-config --cflags libcurl 2>/dev/null)
+  TRANSLATE_LIB = $(shell pkg-config --libs libcurl 2>/dev/null)
+  # Fallback to -lcurl if pkg-config fails
+  ifeq ($(TRANSLATE_LIB),)
+    TRANSLATE_LIB = -lcurl
+  endif
+  CFLAGS += $(TRANSLATE_CFLAGS)
+endif
+
 # ncurses library detection:
 #   Linux, FreeBSD, NetBSD, OpenBSD  -> -lncursesw   (wide-char variant)
 #   macOS (Darwin)                   -> -lncurses     (system curses is wide-capable)
@@ -179,7 +195,10 @@ endif
 ifeq ($(USE_MYTHES),1)
 UI_OBJS   += $(OBJDIR)/ui_thes.o
 endif
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPH_OBJS) $(THES_OBJS)
+ifeq ($(USE_TRANSLATE),1)
+UI_OBJS   += $(OBJDIR)/ui_translate.o
+endif
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPH_OBJS) $(THES_OBJS) $(TRANSLATE_OBJS)
 
 all: $(TARGET) tinyedit
 
@@ -274,6 +293,10 @@ ifeq ($(USE_MYTHES),1)
 $(OBJDIR)/ui_thes.o: $(UIDIR)/ui_thes.c $(UIDIR)/ui_thes.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
+ifeq ($(USE_TRANSLATE),1)
+$(OBJDIR)/ui_translate.o: $(UIDIR)/ui_translate.c $(UIDIR)/ui_translate.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
 
 # Spell checker object (only if USE_HUNSPELL=1)
 $(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
@@ -286,6 +309,21 @@ $(OBJDIR)/hyph_wrap.o: $(HERE)hyph_wrap/hyph_wrap.c $(HERE)hyph_wrap/hyph_wrap.h
 # Thesaurus backend (only if USE_MYTHES=1; C++)
 $(OBJDIR)/thes.o: $(HERE)thes/thes.cpp $(HERE)thes/thes.h | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) $(CDEFS) -c $< -o $@
+
+# Translator objects (only if USE_TRANSLATE=1)
+ifeq ($(USE_TRANSLATE),1)
+$(OBJDIR)/translate.o: $(COREDIR)/translate.c $(COREDIR)/translate.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/translate_http.o: $(COREDIR)/translate_http.c $(COREDIR)/translate.h $(COREDIR)/http_client.h $(COREDIR)/json_utils.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/http_client.o: $(COREDIR)/http_client.c $(COREDIR)/http_client.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/json_utils.o: $(COREDIR)/json_utils.c $(COREDIR)/json_utils.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
 
 # Application
 TINYEDIT = $(HERE)tinyedit
@@ -300,11 +338,11 @@ $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 
 $(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
 	$(CXX) $(CFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB)
+	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB) $(TRANSLATE_LIB)
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HYPHEN_LIB)
+	      -o $@ $(NCURSES_LIB) $(HYPHEN_LIB) $(TRANSLATE_LIB)
 endif
 
 clean:

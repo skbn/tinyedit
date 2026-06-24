@@ -479,22 +479,16 @@ int insert_file(TeApp *app)
 
 int toggle_spell_panel(TeApp *app)
 {
-    /* Cycle: -1 (hidden) -> 0 (spell) -> 1 (translate) -> -1 (hidden) */
-    app->spell_panel_mode++;
-
-    if (app->spell_panel_mode > 1)
-        app->spell_panel_mode = -1;
+    /* Toggle: -1 (hidden) -> 0 (spell) -> -1 (hidden) */
+    app->spell_panel_mode = (app->spell_panel_mode == 0) ? -1 : 0;
 
     switch (app->spell_panel_mode)
     {
     case 0:
         te_status(app, "Spell checker panel enabled");
         break;
-    case 1:
-        te_status(app, "Translator panel enabled");
-        break;
     default:
-        te_status(app, "Spell/translate panel disabled");
+        te_status(app, "Spell panel disabled");
         break;
     }
 

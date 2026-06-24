@@ -341,11 +341,11 @@ static int te_set_face_size(struct TEFont *fnt)
 
 static void te_compute_scale(struct TEFont *fnt)
 {
-    fnt->scaleNum = 1;
-    fnt->scaleDen = 1;
-
     if (!fnt || !fnt->face)
         return;
+
+    fnt->scaleNum = 1;
+    fnt->scaleDen = 1;
 
     /* the metric we have to scale FROM to reach pointSize */
     if (!FT_IS_SCALABLE(fnt->face) && fnt->face->num_fixed_sizes > 0)

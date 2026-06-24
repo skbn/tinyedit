@@ -214,6 +214,13 @@ typedef struct
 
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_TRANSLATE
+    void *translate_handle;    /* TranslateHandle* (opaque) */
+    int translate_enabled;     /* Translator enabled in config */
+    int translate_active;      /* Translator active (manual toggle) */
+    int translate_http_inited; /* flag: http_client_init was called */
+#endif
+
     char charset_in[32];
     char charset_out[32];
 
@@ -252,6 +259,7 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
 
 /* ui_popup.c */
 void ui_popup_help(const char *title, const char *const *lines, int n);
+void ui_popup_info(const char *title, const char *msg);
 int ui_popup_confirm(const char *title, const char *msg);
 int ui_popup_list(const char *title, const char **items, int count, int initial);
 int ui_popup_input_wcs(const char *title, const char *prompt, wchar_t *wbuf, int wcap);

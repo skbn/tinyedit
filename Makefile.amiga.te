@@ -29,8 +29,8 @@ CXX        := $(CROSS)g++ -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA -D
 AR         := $(CROSS)ar
 RANLIB     := $(CROSS)ranlib
 
-CFLAGS     := -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -Wno-pointer-sign -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer -std=gnu89 -O2 -lm
-CXXFLAGS   := -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer
+CFLAGS     := -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -I$(HERE)cjson -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -Wno-pointer-sign -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer -std=gnu89 -O2 -lm
+CXXFLAGS   := -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -I$(HERE)cjson -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer
 
 # Spellchecker support (new C-only engine in spellchecker/)
 USE_HUNSPELL ?= 0
@@ -38,8 +38,7 @@ SPELL_DIR = $(HERE)spellchecker
 
 ifeq ($(USE_HUNSPELL),1)
   CFLAGS += -DHAVE_HUNSPELL -I$(SPELL_DIR)
-  SPELL_OBJS = $(OBJDIR)/spellchecker_utils.o \
-               $(OBJDIR)/spellchecker_htab.o \
+  SPELL_OBJS = $(OBJDIR)/spellchecker_htab.o \
                $(OBJDIR)/spellchecker_affix.o \
                $(OBJDIR)/spellchecker_core.o \
                $(OBJDIR)/spellchecker_suggest.o \
@@ -68,6 +67,26 @@ ifeq ($(USE_MYTHES),1)
   endif
   CFLAGS += -DHAVE_MYTHES -I$(SPELL_DIR)
   THES_OBJS = $(OBJDIR)/spellchecker_thes.o
+endif
+
+# Translator support (HTTP backends via external curl)
+USE_TRANSLATE ?= 0
+ifeq ($(USE_TRANSLATE),1)
+  CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
+  TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
+endif
+
+# AmiSSL SDK path for TLS support
+AMISSL_SDK ?= AmiSSL
+
+# Set WITH_AMISSL=1 to enable TLS support via AmiSSL (requires USE_TRANSLATE=1)
+WITH_AMISSL ?= 0
+ifeq ($(WITH_AMISSL),1)
+  ifeq ($(USE_TRANSLATE),0)
+    $(error WITH_AMISSL=1 requires USE_TRANSLATE=1)
+  endif
+  CFLAGS += -DWITH_AMISSL -I$(AMISSL_SDK)/Developer/include
+  TRANSLATE_LIBS = -L$(AMISSL_SDK)/Developer/lib/AmigaOS3 -lamisslstubs
 endif
 
 # External tree locations -- relative to HERE
@@ -111,8 +130,14 @@ endif
 ifeq ($(USE_MYTHES),1)
 UI_OBJS    += $(OBJDIR)/ui_thes.o
 endif
+ifeq ($(USE_TRANSLATE),1)
+UI_OBJS    += $(OBJDIR)/ui_translate.o
+endif
 
-ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS)
+# spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
+SPELL_UTILS_OBJS = $(OBJDIR)/spell_utils.o
+
+ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS) $(TRANSLATE_OBJS)
 
 # FreeType objects (with gzip + lzw modules) - all in OBJDIR
 FT_OBJS    := \
@@ -185,10 +210,10 @@ $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
-	$(CC) $(CFLAGS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) -lm -o $@
+	$(CC) $(CFLAGS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) -lm $(TRANSLATE_LIBS) -o $@
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET)
-	$(CC) $(CFLAGS) $(HERE)main.c $(TARGET) -lm -o $@
+	$(CC) $(CFLAGS) $(HERE)main.c $(TARGET) -lm $(TRANSLATE_LIBS) -o $@
 endif
 
 # ====================================================================
@@ -496,6 +521,29 @@ $(OBJDIR)/ui_thes.o: $(UIDIR)/ui_thes.c $(UIDIR)/ui_thes.h | $(OBJDIR)
 $(OBJDIR)/spellchecker_thes.o: $(SPELL_DIR)/thes.c $(SPELL_DIR)/thes.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 endif
+ifeq ($(USE_TRANSLATE),1)
+$(OBJDIR)/ui_translate.o: $(UIDIR)/ui_translate.c $(UIDIR)/ui_translate.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+endif
+
+# Translator objects (only if USE_TRANSLATE=1)
+ifeq ($(USE_TRANSLATE),1)
+$(OBJDIR)/translate.o: $(COREDIR)/translate.c $(COREDIR)/translate.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/translate_http.o: $(COREDIR)/translate_http.c $(COREDIR)/translate.h $(COREDIR)/http_client.h $(COREDIR)/json_utils.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/http_client.o: $(COREDIR)/http_client.c $(COREDIR)/http_client.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/json_utils.o: $(COREDIR)/json_utils.c $(COREDIR)/json_utils.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+endif
+
+# spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
+$(OBJDIR)/spell_utils.o: $(SPELL_DIR)/spell_utils.c $(SPELL_DIR)/spell_priv.h $(SPELL_DIR)/spell.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
 
 # Spell checker objects (only if USE_HUNSPELL=1)
 SPELL_PRIV = $(SPELL_DIR)/spell_priv.h $(SPELL_DIR)/spell.h

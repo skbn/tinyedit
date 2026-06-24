@@ -1543,6 +1543,9 @@ int ui_files_open(TeApp *app)
         {
             int dir_len = (int)(last_slash - te_app_get_filename(app));
 
+            if (dir_len > (int)sizeof(start_dir_buf) - 1)
+                dir_len = (int)sizeof(start_dir_buf) - 1;
+
             strncpy(start_dir_buf, te_app_get_filename(app), dir_len);
             start_dir_buf[dir_len] = '\0';
             start_dir = start_dir_buf;

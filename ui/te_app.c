@@ -24,6 +24,10 @@
 #include "../components/editor.h"
 #include "../wrapper.h"
 
+#ifdef HAVE_TRANSLATE
+#include "../core/translate.h"
+#endif
+
 #ifdef HAVE_HUNSPELL
 #if defined(PLATFORM_AMIGA)
 #include "../spellchecker/spell.h"
@@ -186,6 +190,14 @@ void te_app_free(TeApp *app)
     {
         spell_free((SpellChecker *)app->spell_handle);
         app->spell_handle = NULL;
+    }
+#endif
+
+#ifdef HAVE_TRANSLATE
+    if (app->translate_handle)
+    {
+        translate_free((TranslateHandle *)app->translate_handle);
+        app->translate_handle = NULL;
     }
 #endif
 
@@ -535,15 +547,24 @@ void te_draw_titlebar(TeApp *app)
         ed_get_info(tab->editor, &info);
 
 #ifdef HAVE_HUNSPELL
-        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", (app->spell_enabled && app->spell_active && app->spell_handle) ? "SP " : "",
+        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", (app->spell_enabled && app->spell_active && app->spell_handle) ? "SP " : "",
 #ifdef HAVE_HYPHEN
                  (app->hyph_wrap_enabled && app->hyph_handle) ? "HY " : "",
 #else
                  "",
 #endif
+#ifdef HAVE_TRANSLATE
+                 (app->translate_active && app->translate_handle) ? "TR " : "",
+#else
+                 "",
+#endif
                  info.insert_mode ? "INS" : "OVR");
 #else
-        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", info.insert_mode ? "INS" : "OVR");
+        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT",
+#ifdef HAVE_TRANSLATE
+                 (app->translate_active && app->translate_handle) ? "TR " : "",
+#endif
+                 info.insert_mode ? "INS" : "OVR");
 #endif
     }
     else
