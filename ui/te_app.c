@@ -544,28 +544,31 @@ void te_draw_titlebar(TeApp *app)
 
     if (tab && tab->editor)
     {
+        char sp_buf[32];
+        char hy_buf[32];
+        char tr_buf[32];
+
+        sp_buf[0] = '\0';
+        hy_buf[0] = '\0';
+        tr_buf[0] = '\0';
+
         ed_get_info(tab->editor, &info);
 
 #ifdef HAVE_HUNSPELL
-        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", (app->spell_enabled && app->spell_active && app->spell_handle) ? "SP " : "",
+        if (app->spell_enabled && app->spell_active && app->spell_handle)
+            snprintf(sp_buf, sizeof(sp_buf), "SP ");
+#endif
 #ifdef HAVE_HYPHEN
-                 (app->hyph_wrap_enabled && app->hyph_handle) ? "HY " : "",
-#else
-                 "",
+        if (app->hyph_wrap_enabled && app->hyph_handle)
+            snprintf(hy_buf, sizeof(hy_buf), "HY ");
 #endif
 #ifdef HAVE_TRANSLATE
-                 (app->translate_active && app->translate_handle) ? "TR " : "",
-#else
-                 "",
+        if (app->translate_active && app->translate_handle)
+            snprintf(tr_buf, sizeof(tr_buf), "TR [%s]->[%s] ", app->cfg.translate_from_lang, app->cfg.translate_to_lang);
 #endif
+        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT",
+                 sp_buf, hy_buf, tr_buf,
                  info.insert_mode ? "INS" : "OVR");
-#else
-        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT",
-#ifdef HAVE_TRANSLATE
-                 (app->translate_active && app->translate_handle) ? "TR " : "",
-#endif
-                 info.insert_mode ? "INS" : "OVR");
-#endif
     }
     else
     {

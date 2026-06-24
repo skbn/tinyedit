@@ -8,37 +8,31 @@
 # the Free Software Foundation, either version 2 of the License, or
 # (at your option) any later version.
 #
-# Makefile.unix -- Build tinyedit for Linux/BSD/macOS
+# Makefile.unix.static -- Build tinyedit for Linux/BSD/macOS with internal minispell
 #
-# Position-independent: anchored to the directory containing this Makefile,
-# so it works regardless of the CWD it is invoked from
-# (e.g. `make -f path/to/Makefile.unix` or `make -C path/to ...`).
+# Position-independent: paths anchored to the directory containing this
+# Makefile, so it works from any CWD (e.g. `make -f path/to/Makefile.unix.static`).
 
 # Directory of this Makefile (with trailing slash)
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 # Feature selection options (set to 1 to enable)
-USE_HUNSPELL ?= 0
-USE_HYPHEN ?= 0
-USE_MYTHES ?= 0
-USE_TRANSLATE ?= 0
-USE_STARDICT ?= 0
+USE_HUNSPELL ?= 1
+USE_HYPHEN ?= 1
+USE_MYTHES ?= 1
+USE_TRANSLATE ?= 1
+USE_STARDICT ?= 1
 
-# Detect OS and warn if BSD make is used instead of gmake
+# Detect OS
 OS := $(shell uname -s)
 BSD_OS := $(filter FreeBSD NetBSD OpenBSD,$(OS))
 
-ifneq ($(BSD_OS),)
-    ifeq ($(MAKE),make)
-        $(warning On BSD systems, use 'gmake' instead of 'make' for this Makefile)
-    endif
-endif
-
 CC ?= cc
 CXX ?= c++
-CFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
-CXXFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter
+CFLAGS = -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
+CXXFLAGS = -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter
 AR = ar
+TARGET = $(HERE)libtinyedit-unix-static.a
 
 # Platform define
 CDEFS = -DPLATFORM_UNIX
@@ -46,112 +40,49 @@ ifneq ($(BSD_OS),)
   CDEFS += -DPLATFORM_BSD
 endif
 
-# Hunspell support (uses system library on Unix)
+# Spellchecker support (new C-only engine in spellchecker/)
+SPELL_DIR = $(HERE)spellchecker
 
 ifeq ($(USE_HUNSPELL),1)
-  CFLAGS += -DHAVE_HUNSPELL -I$(HERE)spell
+  CFLAGS += -DHAVE_HUNSPELL -I$(SPELL_DIR)
   CDEFS += -DHAVE_HUNSPELL
-
-  # Use pkg-config if available (most reliable, especially for NetBSD)
-  HUNSPELL_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags hunspell 2>/dev/null)
-  HUNSPELL_PKG_CONFIG_LIBS := $(shell pkg-config --libs hunspell 2>/dev/null)
-
-  ifneq ($(HUNSPELL_PKG_CONFIG_LIBS),)
-    CFLAGS += $(HUNSPELL_PKG_CONFIG_CFLAGS)
-    HUNSPELL_LIB = $(HUNSPELL_PKG_CONFIG_LIBS)
-  else
-    # Fallback to platform-specific paths
-    ifeq ($(OS),NetBSD)
-      CFLAGS += -I/usr/pkg/include
-      HUNSPELL_LIB = -L/usr/pkg/lib -Wl,-rpath,/usr/pkg/lib -lhunspell-1.7
-    else ifeq ($(OS),FreeBSD)
-      CFLAGS += -I/usr/local/include
-      HUNSPELL_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lhunspell-1.7
-    else ifeq ($(OS),OpenBSD)
-      CFLAGS += -I/usr/local/include
-      HUNSPELL_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lhunspell-1.7
-    else
-      HUNSPELL_LIB = -lhunspell
-    endif
-  endif
-  SPELL_OBJS = $(OBJDIR)/spell.o
+  SPELL_OBJS = $(OBJDIR)/spellchecker_htab.o \
+               $(OBJDIR)/spellchecker_affix.o \
+               $(OBJDIR)/spellchecker_core.o \
+               $(OBJDIR)/spellchecker_suggest.o \
+               $(OBJDIR)/spellchecker_stem.o \
+               $(OBJDIR)/spellchecker_custom.o \
+               $(OBJDIR)/spellchecker_dict_scan.o
 endif
 
-# Hyphenation support (libhyphen)
+# Hyphen support (new C-only engine in spellchecker/)
 ifeq ($(USE_HYPHEN),1)
   ifeq ($(USE_HUNSPELL),0)
     $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
   endif
-  CFLAGS += -DHAVE_HYPHEN -I$(HERE)hyph_wrap
+  CFLAGS += -DHAVE_HYPHEN -I$(SPELL_DIR)
   CDEFS += -DHAVE_HYPHEN
-
-  HYPHEN_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags hyphen 2>/dev/null)
-  HYPHEN_PKG_CONFIG_LIBS   := $(shell pkg-config --libs   hyphen 2>/dev/null)
-
-  ifneq ($(HYPHEN_PKG_CONFIG_LIBS),)
-    CFLAGS += $(HYPHEN_PKG_CONFIG_CFLAGS)
-    HYPHEN_LIB = $(HYPHEN_PKG_CONFIG_LIBS)
-  else
-    ifeq ($(OS),NetBSD)
-      CFLAGS += -I/usr/pkg/include
-      HYPHEN_LIB = -L/usr/pkg/lib -Wl,-rpath,/usr/pkg/lib -lhyphen
-    else ifeq ($(OS),FreeBSD)
-      CFLAGS += -I/usr/local/include
-      HYPHEN_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lhyphen
-    else ifeq ($(OS),OpenBSD)
-      CFLAGS += -I/usr/local/include
-      HYPHEN_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lhyphen
-    else
-      HYPHEN_LIB = -lhyphen
-    endif
-  endif
-  HYPH_OBJS = $(OBJDIR)/hyph.o
+  HYPHWRAP_OBJS = $(OBJDIR)/spellchecker_hyph.o
 endif
 
-# Thesaurus support (mythes; C++)
+# Thesaurus support (new C-only engine in spellchecker/)
 ifeq ($(USE_MYTHES),1)
   ifeq ($(USE_HUNSPELL),0)
     $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
   endif
-  CFLAGS += -DHAVE_MYTHES -I$(HERE)thes
+  CFLAGS += -DHAVE_MYTHES -I$(SPELL_DIR)
   CDEFS += -DHAVE_MYTHES
-
-  MYTHES_PKG_CONFIG_CFLAGS := $(shell pkg-config --cflags mythes 2>/dev/null)
-  MYTHES_PKG_CONFIG_LIBS   := $(shell pkg-config --libs   mythes 2>/dev/null)
-
-  ifneq ($(MYTHES_PKG_CONFIG_LIBS),)
-    CFLAGS += $(MYTHES_PKG_CONFIG_CFLAGS)
-    CXXFLAGS += $(MYTHES_PKG_CONFIG_CFLAGS)
-    MYTHES_LIB = $(MYTHES_PKG_CONFIG_LIBS)
-  else
-    ifeq ($(OS),NetBSD)
-      CFLAGS += -I/usr/pkg/include
-      CXXFLAGS += -I/usr/pkg/include
-      MYTHES_LIB = -L/usr/pkg/lib -Wl,-rpath,/usr/pkg/lib -lmythes-1.2
-    else ifeq ($(OS),FreeBSD)
-      CFLAGS += -I/usr/local/include
-      CXXFLAGS += -I/usr/local/include
-      MYTHES_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lmythes-1.2
-    else ifeq ($(OS),OpenBSD)
-      CFLAGS += -I/usr/local/include
-      CXXFLAGS += -I/usr/local/include
-      MYTHES_LIB = -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lmythes-1.2
-    else
-      MYTHES_LIB = -lmythes-1.2
-    endif
-  endif
-  THES_OBJS = $(OBJDIR)/thes.o
+  THES_OBJS = $(OBJDIR)/spellchecker_thes.o
 endif
 
-# Translator support (HTTP backends via libcurl on Unix/Windows, external curl on Amiga)
+# Translator support (HTTP backends via libcurl)
 ifeq ($(USE_TRANSLATE),1)
   CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP -I$(HERE)translate
   CDEFS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
   TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
-  # Use pkg-config for libcurl on Unix (multi-platform detection)
+  # Use pkg-config for libcurl on Unix
   TRANSLATE_CFLAGS = $(shell pkg-config --cflags libcurl 2>/dev/null)
   TRANSLATE_LIB = $(shell pkg-config --libs libcurl 2>/dev/null)
-  # Fallback to -lcurl if pkg-config fails
   ifeq ($(TRANSLATE_LIB),)
     TRANSLATE_LIB = -lcurl
   endif
@@ -165,22 +96,17 @@ ifeq ($(USE_TRANSLATE),1)
   endif
 endif
 
-# ncurses library detection:
-#   Linux, FreeBSD, NetBSD, OpenBSD  -> -lncursesw   (wide-char variant)
-#   macOS (Darwin)                   -> -lncurses     (system curses is wide-capable)
-# Override by passing NCURSES_LIB=... on the command line if needed.
+# ncurses library detection
 ifeq ($(OS),Darwin)
     NCURSES_LIB ?= -lncurses
 else ifeq ($(BSD_OS),)
     NCURSES_LIB ?= -lncursesw
 else
-    # BSD: default to ncursesw, but can be overridden
     NCURSES_LIB ?= -lncursesw
 endif
-TARGET = $(HERE)libtinyedit-unix.a
 
 # Directories -- separate obj dir from Amiga build so .o files don't collide
-OBJDIR = $(HERE)objs.unix
+OBJDIR = $(HERE)objs.unix.static
 COREDIR = $(HERE)core
 COMPDIR = $(HERE)components
 UIDIR = $(HERE)ui
@@ -193,22 +119,25 @@ UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o $(OBJDIR)/ui_assist.o
 
-# spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
-SPELL_UTILS_OBJS = $(OBJDIR)/spell_utils.o
-            
 ifeq ($(USE_HUNSPELL),1)
 UI_OBJS   += $(OBJDIR)/ui_spell.o
 endif
+
 ifeq ($(USE_HYPHEN),1)
 UI_OBJS   += $(OBJDIR)/ui_hyph.o
 endif
+
 ifeq ($(USE_MYTHES),1)
 UI_OBJS   += $(OBJDIR)/ui_thes.o
 endif
 ifeq ($(USE_TRANSLATE),1)
 UI_OBJS   += $(OBJDIR)/ui_translate.o
 endif
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPH_OBJS) $(THES_OBJS) $(TRANSLATE_OBJS)
+
+# spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
+SPELL_UTILS_OBJS = $(OBJDIR)/spell_utils.o
+
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS) $(TRANSLATE_OBJS)
 
 all: $(TARGET) tinyedit
 
@@ -242,10 +171,10 @@ $(OBJDIR)/portable.o: $(COREDIR)/portable.c $(COREDIR)/portable.h | $(OBJDIR)
 $(OBJDIR)/editor.o: $(COMPDIR)/editor.c $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)
+$(OBJDIR)/config.o: $(COMPDIR)/config.c $(COMPDIR)/config.h $(COREDIR)/charset.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/config.o: $(COMPDIR)/config.c $(COMPDIR)/config.h $(COREDIR)/charset.h | $(OBJDIR)
+$(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h $(COREDIR)/utf8.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 # UI objects
@@ -285,10 +214,6 @@ $(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
 $(OBJDIR)/ui_assist.o: $(UIDIR)/ui_assist.c $(UIDIR)/ui_assist.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-# spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
-$(OBJDIR)/spell_utils.o: $(HERE)spellchecker/spell_utils.c $(HERE)spellchecker/spell_priv.h $(HERE)spellchecker/spell.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
 ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/ui_spell.o: $(UIDIR)/ui_spell.c $(UIDIR)/ui_spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -302,23 +227,49 @@ endif
 ifeq ($(USE_MYTHES),1)
 $(OBJDIR)/ui_thes.o: $(UIDIR)/ui_thes.c $(UIDIR)/ui_thes.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_thes.o: $(SPELL_DIR)/thes.c $(SPELL_DIR)/thes.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 ifeq ($(USE_TRANSLATE),1)
 $(OBJDIR)/ui_translate.o: $(UIDIR)/ui_translate.c $(UIDIR)/ui_translate.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 
-# Spell checker object (only if USE_HUNSPELL=1)
-$(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
+# spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
+$(OBJDIR)/spell_utils.o: $(SPELL_DIR)/spell_utils.c $(SPELL_DIR)/spell_priv.h $(SPELL_DIR)/spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-# Hyphenation backend (only if USE_HYPHEN=1)
-$(OBJDIR)/hyph.o: $(HERE)hyph_wrap/hyph_wrap.c $(HERE)hyph_wrap/hyph_wrap.h | $(OBJDIR)
+# Spell checker objects (only if USE_HUNSPELL=1)
+SPELL_PRIV = $(SPELL_DIR)/spell_priv.h $(SPELL_DIR)/spell.h
+
+$(OBJDIR)/spellchecker_utils.o: $(SPELL_DIR)/spell_utils.c $(SPELL_PRIV) | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-# Thesaurus backend (only if USE_MYTHES=1; C++)
-$(OBJDIR)/thes.o: $(HERE)thes/thes.cpp $(HERE)thes/thes.h | $(OBJDIR)
-	$(CXX) $(CXXFLAGS) $(CDEFS) -c $< -o $@
+$(OBJDIR)/spellchecker_htab.o: $(SPELL_DIR)/spell_htab.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_affix.o: $(SPELL_DIR)/spell_affix.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_core.o: $(SPELL_DIR)/spell_core.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_suggest.o: $(SPELL_DIR)/spell_suggest.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_stem.o: $(SPELL_DIR)/spell_stem.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_custom.o: $(SPELL_DIR)/spell_custom.c $(SPELL_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/spellchecker_dict_scan.o: $(SPELL_DIR)/dict_scan.c $(SPELL_DIR)/dict_scan.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# Hyphenation object (only if USE_HYPHEN=1)
+$(OBJDIR)/spellchecker_hyph.o: $(SPELL_DIR)/hyph.c $(SPELL_DIR)/hyph.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 # Translator objects (only if USE_TRANSLATE=1)
 ifeq ($(USE_TRANSLATE),1)
@@ -345,23 +296,18 @@ TINYEDIT = $(HERE)tinyedit
 
 tinyedit: $(TINYEDIT)
 
-# Always link with C++ driver if either Hunspell or MyThes (both can
-# pull in C++ runtime) -- keep the existing branching pattern.
-ifneq ($(USE_HUNSPELL)$(USE_MYTHES),00)
+ifeq ($(USE_HUNSPELL),1)
 $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
-	$(CXX) $(CFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB) $(TRANSLATE_LIB)
+	$(CC) $(CFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) -o $@ $(NCURSES_LIB) $(TRANSLATE_LIB)
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
-	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HYPHEN_LIB) $(TRANSLATE_LIB)
+	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) -o $@ $(NCURSES_LIB) $(TRANSLATE_LIB)
 endif
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)
 
 .PHONY: all clean
-

@@ -452,7 +452,7 @@ static int find_ifo_in_dir(const char *dir, char *out, int out_size)
                 found = 1;
                 break;
             }
-        } while (FindNextFileA(hFind, fd));
+        } while (FindNextFileA(hFind, &fd));
 
         FindClose(hFind);
     }

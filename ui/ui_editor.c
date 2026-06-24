@@ -107,6 +107,7 @@ static const char *HELP_LINES[] =
 #ifdef HAVE_TRANSLATE
         "    Alt+R            Translate selected text",
         "    Ctrl+T           Toggle translator",
+        "    Alt+B            Exchange languages",
 #endif
 #ifdef HAVE_MYTHES
         "    Alt+A            Thesaurus lookup for word under cursor",
@@ -2172,11 +2173,29 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
             return do_search(app);
     }
 
-    /* F6 / Alt+B : Replace All in search mode */
+    /* F6 / Alt+B : Replace All in search mode, or swap translate from/to */
     if ((is_key && ch == KEY_F(6)) || (ch == KEY_ALT('B')))
     {
         if (app->search.is_mode && app->search.count > 0)
             return replace_all(app);
+#ifdef HAVE_TRANSLATE
+        else
+        {
+            char tmp[16];
+
+            strncpy(tmp, app->cfg.translate_from_lang, sizeof(tmp) - 1);
+            tmp[sizeof(tmp) - 1] = '\0';
+
+            strncpy(app->cfg.translate_from_lang, app->cfg.translate_to_lang, sizeof(app->cfg.translate_from_lang) - 1);
+            app->cfg.translate_from_lang[sizeof(app->cfg.translate_from_lang) - 1] = '\0';
+
+            strncpy(app->cfg.translate_to_lang, tmp, sizeof(app->cfg.translate_to_lang) - 1);
+            app->cfg.translate_to_lang[sizeof(app->cfg.translate_to_lang) - 1] = '\0';
+
+            te_status(app, "Swapped: %s <-> %s", app->cfg.translate_from_lang, app->cfg.translate_to_lang);
+            return 1;
+        }
+#endif
     }
 
     /* F7 / Alt+O : insert file */
