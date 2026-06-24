@@ -23,12 +23,12 @@ extern char *translate_http_mymemory(const char *endpoint, const char *api_key, 
 extern char *translate_http_libretranslate(const char *endpoint, const char *api_key, const char *from, const char *to, const char *src, int timeout_secs, char *out_from, int out_from_size, char *err, int err_size);
 
 extern char *translate_http_lingva(const char *endpoint, const char *from, const char *to, const char *src, int timeout_secs, char *out_from, int out_from_size, char *err, int err_size);
+
+extern char *translate_http_deepl(const char *endpoint, const char *api_key, const char *from, const char *to, const char *src, int timeout_secs, char *out_from, int out_from_size, char *err, int err_size);
 #endif
 
 #ifdef HAVE_TRANSLATE_STARDICT
-extern int translate_stardict_open(const char *dict_dir, const char *from, const char *to, void **out_handle, char *err, int err_size);
-extern char *translate_stardict_lookup(void *handle, const char *word, char *err, int err_size);
-extern void translate_stardict_close(void *handle);
+#include "translate_stardict.h"
 #endif
 
 #ifdef HAVE_TRANSLATE_APERTIUM
@@ -59,7 +59,7 @@ struct TranslateHandle
     TransCacheEntry cache[TRANSLATE_CACHE_N];
 
 #ifdef HAVE_TRANSLATE_STARDICT
-    void *stardict_handle;
+    StarDictHandle *stardict_handle;
     char stardict_from[8];
     char stardict_to[8];
 #endif
@@ -336,6 +336,8 @@ static int backend_max_chunk(TranslateBackend b)
         return 5000;
     case TRANSLATE_BACKEND_LINGVA:
         return 1500; /* path-based URL */
+    case TRANSLATE_BACKEND_DEEPL:
+        return 5000; /* hard 128 KiB, chunk for latency */
     case TRANSLATE_BACKEND_STARDICT:
         return 64;
     case TRANSLATE_BACKEND_APERTIUM:
@@ -484,6 +486,14 @@ static char *call_backend_once(TranslateHandle *h, const char *from, const char 
     case TRANSLATE_BACKEND_LINGVA:
 #ifdef HAVE_TRANSLATE_HTTP
         result = translate_http_lingva(h->opts.endpoint, from, to, src, h->opts.timeout_secs, detected, detected_size, err, err_size);
+#else
+        snprintf(err, err_size, "HTTP backends not built in");
+#endif
+        break;
+
+    case TRANSLATE_BACKEND_DEEPL:
+#ifdef HAVE_TRANSLATE_HTTP
+        result = translate_http_deepl(h->opts.endpoint, h->opts.api_key, from, to, src, h->opts.timeout_secs, detected, detected_size, err, err_size);
 #else
         snprintf(err, err_size, "HTTP backends not built in");
 #endif
@@ -818,6 +828,8 @@ const char *translate_backend_name(TranslateBackend backend)
         return "libretranslate";
     case TRANSLATE_BACKEND_LINGVA:
         return "lingva";
+    case TRANSLATE_BACKEND_DEEPL:
+        return "deepl";
     case TRANSLATE_BACKEND_STARDICT:
         return "stardict";
     case TRANSLATE_BACKEND_APERTIUM:
@@ -847,6 +859,9 @@ TranslateBackend translate_backend_parse(const char *name)
 
     if (CI_EQ(name, "lingva"))
         return TRANSLATE_BACKEND_LINGVA;
+
+    if (CI_EQ(name, "deepl"))
+        return TRANSLATE_BACKEND_DEEPL;
 
     if (CI_EQ(name, "stardict"))
         return TRANSLATE_BACKEND_STARDICT;

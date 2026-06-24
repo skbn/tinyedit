@@ -24,7 +24,12 @@
 #include "ui_files.h"
 
 #ifdef HAVE_HYPHEN
+
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/hyph.h"
+#else
 #include "../hyph_wrap/hyph_wrap.h"
+#endif
 
 /* Thunk adapting hyph_breakpoints() to EdHyphenFn. user_data is HyphDict* */
 static int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count)
@@ -54,6 +59,7 @@ static int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *o
     *out_count = n;
     return 1;
 }
+
 #endif
 
 /* Static variables that need to be accessible */

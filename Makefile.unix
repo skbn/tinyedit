@@ -17,6 +17,13 @@
 # Directory of this Makefile (with trailing slash)
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
+# Feature selection options (set to 1 to enable)
+USE_HUNSPELL ?= 0
+USE_HYPHEN ?= 0
+USE_MYTHES ?= 0
+USE_TRANSLATE ?= 0
+USE_STARDICT ?= 0
+
 # Detect OS and warn if BSD make is used instead of gmake
 OS := $(shell uname -s)
 BSD_OS := $(filter FreeBSD NetBSD OpenBSD,$(OS))
@@ -29,8 +36,8 @@ endif
 
 CC ?= cc
 CXX ?= c++
-CFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
-CXXFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter
+CFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -I$(HERE)cJSON -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -std=gnu89 -O2 -D_XOPEN_SOURCE_EXTENDED
+CXXFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -I$(HERE)cJSON -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter
 AR = ar
 
 # Platform define
@@ -40,7 +47,6 @@ ifneq ($(BSD_OS),)
 endif
 
 # Hunspell support (uses system library on Unix)
-USE_HUNSPELL ?= 0
 
 ifeq ($(USE_HUNSPELL),1)
   CFLAGS += -DHAVE_HUNSPELL -I$(HERE)spell
@@ -72,7 +78,6 @@ ifeq ($(USE_HUNSPELL),1)
 endif
 
 # Hyphenation support (libhyphen)
-USE_HYPHEN ?= 0
 ifeq ($(USE_HYPHEN),1)
   ifeq ($(USE_HUNSPELL),0)
     $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
@@ -100,11 +105,10 @@ ifeq ($(USE_HYPHEN),1)
       HYPHEN_LIB = -lhyphen
     endif
   endif
-  HYPH_OBJS = $(OBJDIR)/hyph_wrap.o
+  HYPH_OBJS = $(OBJDIR)/hyph.o
 endif
 
 # Thesaurus support (mythes; C++)
-USE_MYTHES ?= 0
 ifeq ($(USE_MYTHES),1)
   ifeq ($(USE_HUNSPELL),0)
     $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
@@ -140,9 +144,8 @@ ifeq ($(USE_MYTHES),1)
 endif
 
 # Translator support (HTTP backends via libcurl on Unix/Windows, external curl on Amiga)
-USE_TRANSLATE ?= 0
 ifeq ($(USE_TRANSLATE),1)
-  CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
+  CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP -I$(HERE)translate
   CDEFS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
   TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
   # Use pkg-config for libcurl on Unix (multi-platform detection)
@@ -153,6 +156,13 @@ ifeq ($(USE_TRANSLATE),1)
     TRANSLATE_LIB = -lcurl
   endif
   CFLAGS += $(TRANSLATE_CFLAGS)
+
+  # StarDict offline backend (pure C, no extra library)
+  ifeq ($(USE_STARDICT),1)
+    CFLAGS += -DHAVE_TRANSLATE_STARDICT
+    CDEFS += -DHAVE_TRANSLATE_STARDICT
+    TRANSLATE_OBJS += $(OBJDIR)/translate_stardict.o
+  endif
 endif
 
 # ncurses library detection:
@@ -303,7 +313,7 @@ $(OBJDIR)/spell.o: $(HERE)spell/spell.c $(HERE)spell/spell.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 # Hyphenation backend (only if USE_HYPHEN=1)
-$(OBJDIR)/hyph_wrap.o: $(HERE)hyph_wrap/hyph_wrap.c $(HERE)hyph_wrap/hyph_wrap.h | $(OBJDIR)
+$(OBJDIR)/hyph.o: $(HERE)hyph_wrap/hyph_wrap.c $(HERE)hyph_wrap/hyph_wrap.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 # Thesaurus backend (only if USE_MYTHES=1; C++)
@@ -312,17 +322,22 @@ $(OBJDIR)/thes.o: $(HERE)thes/thes.cpp $(HERE)thes/thes.h | $(OBJDIR)
 
 # Translator objects (only if USE_TRANSLATE=1)
 ifeq ($(USE_TRANSLATE),1)
-$(OBJDIR)/translate.o: $(COREDIR)/translate.c $(COREDIR)/translate.h | $(OBJDIR)
+$(OBJDIR)/translate.o: $(HERE)translate/translate.c $(HERE)translate/translate.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/translate_http.o: $(COREDIR)/translate_http.c $(COREDIR)/translate.h $(COREDIR)/http_client.h $(COREDIR)/json_utils.h | $(OBJDIR)
+$(OBJDIR)/translate_http.o: $(HERE)translate/translate_http.c $(HERE)translate/translate.h $(HERE)translate/http_client.h $(HERE)translate/json_utils.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/http_client.o: $(COREDIR)/http_client.c $(COREDIR)/http_client.h | $(OBJDIR)
+$(OBJDIR)/http_client.o: $(HERE)translate/http_client.c $(HERE)translate/http_client.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/json_utils.o: $(COREDIR)/json_utils.c $(COREDIR)/json_utils.h | $(OBJDIR)
+$(OBJDIR)/json_utils.o: $(HERE)translate/json_utils.c $(HERE)translate/json_utils.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+ifeq ($(USE_STARDICT),1)
+$(OBJDIR)/translate_stardict.o: $(HERE)translate/translate_stardict.c $(HERE)translate/translate_stardict.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
 endif
 
 # Application

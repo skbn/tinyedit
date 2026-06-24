@@ -41,6 +41,7 @@ void ui_spell_draw_panel(TeApp *app)
 {
     TeWindow *win = NULL;
     int x, y;
+    int i;
 
     if (!app)
         return;
@@ -64,6 +65,7 @@ void ui_spell_draw_panel(TeApp *app)
             mvaddch(win->y + y, win->x + x, ' ');
     }
 
+    /* Spell checker mode (spell_panel_mode == 0) */
     /* Draw panel title */
     attron(COLOR_PAIR(COL_TITLEBAR));
     mvaddnwstr(win->y, win->x + 1, L"[Spell Checker]", 16);

@@ -27,6 +27,13 @@
 # Directory of this Makefile (with trailing slash)
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
+# Feature selection options (set to 1 to enable)
+USE_HUNSPELL ?= 0
+USE_HYPHEN ?= 0
+USE_MYTHES ?= 0
+USE_TRANSLATE ?= 0
+USE_STARDICT ?= 0
+
 # Compiler (native MSYS2 MinGW)
 CC = gcc
 
@@ -128,12 +135,17 @@ SPELL_LIB :=
 endif
 
 # Translator -- opt-in. Uses HTTP backends (MyMemory, LibreTranslate, Lingva).
-USE_TRANSLATE ?= 0
-
 ifeq ($(USE_TRANSLATE),1)
 CDEFS    += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
+CFLAGS   += -I$(HERE)translate
 TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
 TRANSLATE_LIB = -lm -lcurl
+
+# StarDict offline backend (pure C, no extra library)
+ifeq ($(USE_STARDICT),1)
+CDEFS    += -DHAVE_TRANSLATE_STARDICT
+TRANSLATE_OBJS += $(OBJDIR)/translate_stardict.o
+endif
 else
 TRANSLATE_OBJS =
 TRANSLATE_LIB =
@@ -166,17 +178,22 @@ $(OBJDIR)/ui_assist.o: $(UIDIR)/ui_assist.c $(UIDIR)/ui_assist.h | $(OBJDIR)
 
 # Translator objects (only if USE_TRANSLATE=1)
 ifeq ($(USE_TRANSLATE),1)
-$(OBJDIR)/translate.o: $(COREDIR)/translate.c $(COREDIR)/translate.h | $(OBJDIR)
+$(OBJDIR)/translate.o: $(HERE)translate/translate.c $(HERE)translate/translate.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/translate_http.o: $(COREDIR)/translate_http.c $(COREDIR)/translate.h $(COREDIR)/http_client.h $(COREDIR)/json_utils.h | $(OBJDIR)
+$(OBJDIR)/translate_http.o: $(HERE)translate/translate_http.c $(HERE)translate/translate.h $(HERE)translate/http_client.h $(HERE)translate/json_utils.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/http_client.o: $(COREDIR)/http_client.c $(COREDIR)/http_client.h | $(OBJDIR)
+$(OBJDIR)/http_client.o: $(HERE)translate/http_client.c $(HERE)translate/http_client.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/json_utils.o: $(COREDIR)/json_utils.c $(COREDIR)/json_utils.h | $(OBJDIR)
+$(OBJDIR)/json_utils.o: $(HERE)translate/json_utils.c $(HERE)translate/json_utils.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+ifeq ($(USE_STARDICT),1)
+$(OBJDIR)/translate_stardict.o: $(HERE)translate/translate_stardict.c $(HERE)translate/translate_stardict.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
 endif
 
 # Spell checker objects (native spellchecker/ C-only engine)

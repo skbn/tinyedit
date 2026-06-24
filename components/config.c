@@ -368,8 +368,9 @@ void te_cfg_defaults(TeConfig *cfg)
 
     cfg->translate_from_lang[sizeof(cfg->translate_from_lang) - 1] = '\0';
     cfg->translate_to_lang[sizeof(cfg->translate_to_lang) - 1] = '\0';
-    cfg->translate_timeout = 10; /* 10 seconds */
-#endif                           /* HAVE_TRANSLATE */
+    cfg->translate_timeout = 10;  /* 10 seconds */
+    cfg->stardict_path[0] = '\0'; /* Empty by default */
+#endif                            /* HAVE_TRANSLATE */
 
     /* White-on-black fallback */
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
@@ -877,6 +878,10 @@ int te_cfg_load(TeConfig *cfg, const char *path)
                 cfg->translate_backend = 1;
             else if (strcasecmp(val, "LINGVA") == 0)
                 cfg->translate_backend = 2;
+            else if (strcasecmp(val, "DEEPL") == 0)
+                cfg->translate_backend = 4;
+            else if (strcasecmp(val, "STARDICT") == 0)
+                cfg->translate_backend = 10;
             else
                 cfg->translate_backend = 0;
         }
@@ -942,6 +947,11 @@ int te_cfg_load(TeConfig *cfg, const char *path)
 
             if (cfg->translate_timeout > 60)
                 cfg->translate_timeout = 60;
+        }
+        else if (strcasecmp(word, "STARDICT_PATH") == 0)
+        {
+            strncpy(cfg->stardict_path, rest, sizeof(cfg->stardict_path) - 1);
+            cfg->stardict_path[sizeof(cfg->stardict_path) - 1] = '\0';
         }
 #endif /* HAVE_TRANSLATE */
     }
@@ -1182,6 +1192,12 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
         backend_name = "LIBRETRANSLATE";
     else if (cfg->translate_backend == 2)
         backend_name = "LINGVA";
+    else if (cfg->translate_backend == 4)
+        backend_name = "DEEPL";
+    else if (cfg->translate_backend == 10)
+        backend_name = "STARDICT";
+    else
+        backend_name = "MYMEMORY";
 
     fprintf(out, "TRANSLATE_BACKEND %s\n", backend_name);
     fprintf(out, "TRANSLATE_ENDPOINT %s\n", cfg->translate_endpoint);
@@ -1190,6 +1206,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "TRANSLATE_FROM_LANG %s\n", cfg->translate_from_lang);
     fprintf(out, "TRANSLATE_TO_LANG %s\n", cfg->translate_to_lang);
     fprintf(out, "TRANSLATE_TIMEOUT %d\n", cfg->translate_timeout);
+    fprintf(out, "STARDICT_PATH %s\n", cfg->stardict_path);
 #endif /* HAVE_TRANSLATE */
 
     fclose(out);

@@ -23,6 +23,17 @@
 # Directory of this Makefile (with trailing slash)
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
+# Feature selection options (set to 1 to enable)
+USE_HUNSPELL ?= 0
+USE_HYPHEN ?= 0
+USE_MYTHES ?= 0
+USE_TRANSLATE ?= 0
+USE_STARDICT ?= 0
+WITH_AMISSL ?= 0
+
+# AmiSSL SDK path for TLS support
+AMISSL_SDK ?= AmiSSL
+
 CROSS      ?= m68k-amigaos-
 CC         := $(CROSS)gcc -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA -DUSE_FREETYPE -DAMIGA_TTF_TE
 CXX        := $(CROSS)g++ -noixemul -mcpu=68020 -msoft-float -DPLATFORM_AMIGA -DUSE_FREETYPE -DAMIGA_TTF_TE
@@ -33,7 +44,6 @@ CFLAGS     := -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)u
 CXXFLAGS   := -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -std=c++14 -O2 -Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-result -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer
 
 # Spellchecker support (new C-only engine in spellchecker/)
-USE_HUNSPELL ?= 0
 SPELL_DIR = $(HERE)spellchecker
 
 ifeq ($(USE_HUNSPELL),1)
@@ -48,8 +58,6 @@ ifeq ($(USE_HUNSPELL),1)
 endif
 
 # Hyphen support (new C-only engine in spellchecker/)
-USE_HYPHEN ?= 0
-
 ifeq ($(USE_HYPHEN),1)
   ifeq ($(USE_HUNSPELL),0)
     $(error USE_HYPHEN=1 requires USE_HUNSPELL=1)
@@ -59,8 +67,6 @@ ifeq ($(USE_HYPHEN),1)
 endif
 
 # Thesaurus support (new C-only engine in spellchecker/)
-USE_MYTHES ?= 0
-
 ifeq ($(USE_MYTHES),1)
   ifeq ($(USE_HUNSPELL),0)
     $(error USE_MYTHES=1 requires USE_HUNSPELL=1)
@@ -70,17 +76,19 @@ ifeq ($(USE_MYTHES),1)
 endif
 
 # Translator support (HTTP backends via external curl)
-USE_TRANSLATE ?= 0
 ifeq ($(USE_TRANSLATE),1)
-  CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
+  CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP -I$(HERE)translate
   TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
+
+  # StarDict offline backend (pure C, no extra library). Works fine on
+  # classic Amiga because it reads RAM:/Work:/etc directly with stdio
+  ifeq ($(USE_STARDICT),1)
+    CFLAGS += -DHAVE_TRANSLATE_STARDICT
+    TRANSLATE_OBJS += $(OBJDIR)/translate_stardict.o
+  endif
 endif
 
-# AmiSSL SDK path for TLS support
-AMISSL_SDK ?= AmiSSL
-
 # Set WITH_AMISSL=1 to enable TLS support via AmiSSL (requires USE_TRANSLATE=1)
-WITH_AMISSL ?= 0
 ifeq ($(WITH_AMISSL),1)
   ifeq ($(USE_TRANSLATE),0)
     $(error WITH_AMISSL=1 requires USE_TRANSLATE=1)
@@ -528,17 +536,22 @@ endif
 
 # Translator objects (only if USE_TRANSLATE=1)
 ifeq ($(USE_TRANSLATE),1)
-$(OBJDIR)/translate.o: $(COREDIR)/translate.c $(COREDIR)/translate.h | $(OBJDIR)
+$(OBJDIR)/translate.o: $(HERE)translate/translate.c $(HERE)translate/translate.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
-$(OBJDIR)/translate_http.o: $(COREDIR)/translate_http.c $(COREDIR)/translate.h $(COREDIR)/http_client.h $(COREDIR)/json_utils.h | $(OBJDIR)
+$(OBJDIR)/translate_http.o: $(HERE)translate/translate_http.c $(HERE)translate/translate.h $(HERE)translate/http_client.h $(HERE)translate/json_utils.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
-$(OBJDIR)/http_client.o: $(COREDIR)/http_client.c $(COREDIR)/http_client.h | $(OBJDIR)
+$(OBJDIR)/http_client.o: $(HERE)translate/http_client.c $(HERE)translate/http_client.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
-$(OBJDIR)/json_utils.o: $(COREDIR)/json_utils.c $(COREDIR)/json_utils.h | $(OBJDIR)
+$(OBJDIR)/json_utils.o: $(HERE)translate/json_utils.c $(HERE)translate/json_utils.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
+
+ifeq ($(USE_STARDICT),1)
+$(OBJDIR)/translate_stardict.o: $(HERE)translate/translate_stardict.c $(HERE)translate/translate_stardict.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+endif
 endif
 
 # spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)

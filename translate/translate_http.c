@@ -21,6 +21,7 @@
 #define MYMEMORY_DEFAULT_ENDPOINT "https://api.mymemory.translated.net"
 #define LIBRETRANSLATE_DEFAULT_ENDPOINT "https://libretranslate.com"
 #define LINGVA_DEFAULT_ENDPOINT "https://lingva.lunar.icu"
+#define DEEPL_DEFAULT_ENDPOINT "https://api-free.deepl.com"
 
 /* MyMemory rejects requests >500 bytes per call. Keep headroom for langpair, key, etc */
 #define HTTP_TR_MAX_SRC_BYTES 480
@@ -34,6 +35,8 @@ char *translate_http_mymemory(const char *endpoint, const char *api_key, const c
 char *translate_http_libretranslate(const char *endpoint, const char *api_key, const char *from, const char *to, const char *src, int timeout_secs, char *out_from, int out_from_size, char *err, int err_size);
 
 char *translate_http_lingva(const char *endpoint, const char *from, const char *to, const char *src, int timeout_secs, char *out_from, int out_from_size, char *err, int err_size);
+
+char *translate_http_deepl(const char *endpoint, const char *api_key, const char *from, const char *to, const char *src, int timeout_secs, char *out_from, int out_from_size, char *err, int err_size);
 
 static void set_err(char *err, int err_size, const char *fmt, ...)
 {
@@ -403,5 +406,350 @@ char *translate_http_lingva(const char *endpoint, const char *from, const char *
     }
 
     http_response_free(&r);
+    return translated;
+}
+
+static int deepl_lang_to_target(const char *iso, char *out, int out_size)
+{
+    int i;
+
+    if (!iso || !out || out_size < 8)
+        return -1;
+
+    /* Common short codes that need a regional variant on target */
+    if (strcasecmp(iso, "en") == 0)
+    {
+        strcpy(out, "EN-US");
+        return 0;
+    }
+
+    if (strcasecmp(iso, "en-us") == 0)
+    {
+        strcpy(out, "EN-US");
+        return 0;
+    }
+
+    if (strcasecmp(iso, "en-gb") == 0)
+    {
+        strcpy(out, "EN-GB");
+        return 0;
+    }
+
+    if (strcasecmp(iso, "pt") == 0)
+    {
+        strcpy(out, "PT-PT");
+        return 0;
+    }
+
+    if (strcasecmp(iso, "pt-pt") == 0)
+    {
+        strcpy(out, "PT-PT");
+        return 0;
+    }
+
+    if (strcasecmp(iso, "pt-br") == 0)
+    {
+        strcpy(out, "PT-BR");
+        return 0;
+    }
+
+    if (strcasecmp(iso, "zh") == 0)
+    {
+        strcpy(out, "ZH-HANS");
+        return 0;
+    }
+
+    if (strcasecmp(iso, "zh-hans") == 0)
+    {
+        strcpy(out, "ZH-HANS");
+        return 0;
+    }
+
+    if (strcasecmp(iso, "zh-hant") == 0)
+    {
+        strcpy(out, "ZH-HANT");
+        return 0;
+    }
+
+    /* Otherwise uppercase the input (up to 7 chars + NUL) */
+    for (i = 0; iso[i] && i < out_size - 1; i++)
+        out[i] = (char)toupper((unsigned char)iso[i]);
+
+    out[i] = '\0';
+
+    return 0;
+}
+
+static int deepl_lang_to_source(const char *iso, char *out, int out_size)
+{
+    int i;
+
+    if (!iso || !out || out_size < 8)
+        return -1;
+
+    /* "auto" means: omit source_lang from request */
+    if (strcasecmp(iso, "auto") == 0)
+    {
+        out[0] = '\0';
+        return 0;
+    }
+
+    /* Source: strip regional suffix if present, just take the first 2 */
+    for (i = 0; iso[i] && iso[i] != '-' && i < out_size - 1; i++)
+        out[i] = (char)toupper((unsigned char)iso[i]);
+
+    out[i] = '\0';
+    return 0;
+}
+
+char *translate_http_deepl(const char *endpoint, const char *api_key, const char *from, const char *to, const char *src, int timeout_secs, char *out_from, int out_from_size, char *err, int err_size)
+{
+    char url[512];
+    char auth_header[160];
+    char deepl_from[8];
+    char deepl_to[8];
+    char *req_body = NULL;
+    HttpResponse r;
+    int rc;
+    char *translated = NULL;
+    const char *base = NULL;
+    const char *keys[5];
+    const char *values[5];
+    size_t bound;
+    char *body = NULL;
+    char *p = NULL;
+    const char *kk = NULL;
+    const char *vs = NULL;
+    const char *ve = NULL;
+
+    memset(&r, 0, sizeof(r));
+
+    if (!from || !to || !src)
+    {
+        set_err(err, err_size, "invalid args");
+        return NULL;
+    }
+
+    if (!api_key || !api_key[0])
+    {
+        set_err(err, err_size, "DeepL: TRANSLATE_API_KEY is empty");
+        return NULL;
+    }
+
+    if (deepl_lang_to_source(from, deepl_from, sizeof(deepl_from)) < 0 || deepl_lang_to_target(to, deepl_to, sizeof(deepl_to)) < 0)
+    {
+        set_err(err, err_size, "DeepL: invalid lang code");
+        return NULL;
+    }
+
+    base = (endpoint && endpoint[0]) ? endpoint : DEEPL_DEFAULT_ENDPOINT;
+    snprintf(url, sizeof(url), "%s/v2/translate", base);
+
+    /* DeepL expects "text" as an array, so we wrap the escaped string manually */
+    bound = 256 + strlen(src) * 6;
+    body = (char *)malloc(bound);
+
+    if (!body)
+    {
+        set_err(err, err_size, "out of memory");
+        return NULL;
+    }
+
+    /* Escape the source text and then wrap it in an array format */
+    keys[0] = "text";
+    values[0] = src;
+    req_body = json_build_simple_request(keys, values, 1);
+
+    if (!req_body)
+    {
+        free(body);
+        set_err(err, err_size, "JSON build failed");
+        return NULL;
+    }
+
+    /* Wrap the text value in brackets to convert it to an array format. */
+    p = body;
+    *p++ = '{';
+    kk = "\"text\":[";
+
+    while (*kk)
+        *p++ = *kk++;
+
+    /* Copy the escaped value (with quotes) from req_body */
+    vs = strchr(req_body, ':');
+
+    if (!vs)
+    {
+        free(body);
+        free(req_body);
+
+        set_err(err, err_size, "JSON build malformed");
+        return NULL;
+    }
+
+    vs++;
+    ve = req_body + strlen(req_body) - 1; /* points to '}' */
+
+    while (ve > vs && *ve != '"')
+        ve--;
+
+    /* copy from vs to ve inclusive */
+    while (vs <= ve)
+        *p++ = *vs++;
+
+    *p++ = ']';
+    *p++ = ',';
+    *p++ = ' ';
+
+    kk = "\"target_lang\":\"";
+
+    while (*kk)
+        *p++ = *kk++;
+
+    kk = deepl_to;
+
+    while (*kk)
+        *p++ = *kk++;
+
+    *p++ = '"';
+
+    if (deepl_from[0])
+    {
+        *p++ = ',';
+        *p++ = ' ';
+        kk = "\"source_lang\":\"";
+
+        while (*kk)
+            *p++ = *kk++;
+
+        kk = deepl_from;
+
+        while (*kk)
+            *p++ = *kk++;
+
+        *p++ = '"';
+    }
+
+    *p++ = '}';
+    *p = '\0';
+
+    free(req_body);
+
+    req_body = body;
+
+    snprintf(auth_header, sizeof(auth_header), "Authorization: DeepL-Auth-Key %s", api_key);
+
+    rc = http_post(url, req_body, (int)strlen(req_body), "application/json", auth_header, timeout_secs, &r);
+    free(req_body);
+
+    if (rc != HTTP_OK)
+    {
+        set_err(err, err_size, "HTTP error: %s", http_strerror(rc));
+        http_response_free(&r);
+        return NULL;
+    }
+
+    if (r.status > 0 && (r.status < 200 || r.status >= 300))
+    {
+        char *msg = r.body ? json_extract_string(r.body, "message") : NULL;
+
+        switch (r.status)
+        {
+        case 403:
+            set_err(err, err_size, "DeepL: invalid API key (403)");
+            break;
+        case 429:
+            set_err(err, err_size, "DeepL: rate limited (429), retry later");
+            break;
+        case 456:
+            set_err(err, err_size, "DeepL: monthly quota exceeded (456)");
+            break;
+        default:
+            if (msg && msg[0])
+                set_err(err, err_size, "DeepL %d: %s", r.status, msg);
+            else
+                set_err(err, err_size, "DeepL HTTP %d", r.status);
+
+            break;
+        }
+        free(msg);
+        http_response_free(&r);
+        return NULL;
+    }
+
+    if (!r.body || !r.body[0])
+    {
+        set_err(err, err_size, "empty response");
+        http_response_free(&r);
+        return NULL;
+    }
+
+    /* Jump past the array opener to parse the single translation element */
+    p = strstr(r.body, "\"translations\"");
+
+    if (!p)
+    {
+        set_err(err, err_size, "no translations in response");
+        http_response_free(&r);
+        return NULL;
+    }
+
+    p = strchr(p, '[');
+
+    if (!p)
+    {
+        set_err(err, err_size, "malformed translations array");
+        http_response_free(&r);
+        return NULL;
+    }
+
+    p++;
+
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t')
+        p++;
+
+    if (*p != '{')
+    {
+        set_err(err, err_size, "malformed translations entry");
+        http_response_free(&r);
+        return NULL;
+    }
+
+    /* Extract the translated text and detected language from the object */
+    translated = json_extract_string(p, "text");
+
+    if (out_from && out_from_size > 0)
+    {
+        char *det = json_extract_string(p, "detected_source_language");
+
+        if (det && det[0])
+        {
+            int i;
+
+            /* Lowercase for our internal convention */
+            for (i = 0; det[i] && i < out_from_size - 1; i++)
+                out_from[i] = (char)tolower((unsigned char)det[i]);
+
+            out_from[i] = '\0';
+        }
+        else
+        {
+            strncpy(out_from, from, (size_t)out_from_size - 1);
+            out_from[out_from_size - 1] = '\0';
+        }
+
+        free(det);
+    }
+
+    if (!translated || !translated[0])
+    {
+        set_err(err, err_size, "no translation in response");
+        free(translated);
+        http_response_free(&r);
+        return NULL;
+    }
+
+    http_response_free(&r);
+
     return translated;
 }

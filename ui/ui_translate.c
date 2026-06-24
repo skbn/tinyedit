@@ -23,8 +23,9 @@
 #include "../core/utf8.h"
 
 #ifdef HAVE_TRANSLATE
-#include "../core/translate.h"
-#include "../core/http_client.h"
+#include "../translate/translate.h"
+#include "../translate/http_client.h"
+#include "../translate/translate_stardict.h"
 #endif
 
 #ifdef HAVE_TRANSLATE
@@ -57,6 +58,12 @@ int ui_translate_load_from_config(TeApp *app)
     case 2:
         backend_name = "lingva";
         break;
+    case 4:
+        backend_name = "deepl";
+        break;
+    case 10:
+        backend_name = "stardict";
+        break;
     default:
         backend_name = "mymemory";
         break;
@@ -67,6 +74,7 @@ int ui_translate_load_from_config(TeApp *app)
     opts.api_key = app->cfg.translate_api_key[0] ? app->cfg.translate_api_key : NULL;
     opts.email = app->cfg.translate_email[0] ? app->cfg.translate_email : NULL;
     opts.timeout_secs = app->cfg.translate_timeout > 0 ? app->cfg.translate_timeout : 10;
+    opts.stardict_path = app->cfg.stardict_path[0] ? app->cfg.stardict_path : NULL;
 
     if (http_client_init() != HTTP_OK)
     {

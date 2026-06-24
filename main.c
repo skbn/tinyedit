@@ -499,7 +499,7 @@ int main(int argc, char **argv)
 #ifdef HAVE_TRANSLATE
     /* Initialize translate_enabled from config */
     app->translate_enabled = cfg.translate_enabled;
-    app->translate_active = 0; /* Disabled by default */
+    app->translate_active = cfg.translate_enabled;
 
     /* Load translator from config */
     ui_translate_load_from_config(app);

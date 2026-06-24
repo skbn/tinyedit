@@ -25,7 +25,7 @@
 #include "../wrapper.h"
 
 #ifdef HAVE_TRANSLATE
-#include "../core/translate.h"
+#include "../translate/translate.h"
 #endif
 
 #ifdef HAVE_HUNSPELL

@@ -267,6 +267,7 @@ static const SetupField st_fields[] =
         {TAB_TRANSLATE, "From Lang", FT_STR, F_OFF(translate_from_lang), 16},
         {TAB_TRANSLATE, "To Lang", FT_STR, F_OFF(translate_to_lang), 16},
         {TAB_TRANSLATE, "Timeout (sec)", FT_INT, F_OFF(translate_timeout), 0},
+        {TAB_TRANSLATE, "StarDict Path", FT_STR, F_OFF(stardict_path), TE_CFG_STR_MAX},
 #endif /* HAVE_TRANSLATE */
 
 };
@@ -416,6 +417,10 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
             label = "LibreTranslate";
         else if (v == 2)
             label = "Lingva";
+        else if (v == 4)
+            label = "DeepL";
+        else if (v == 10)
+            label = "StarDict";
         else
             label = "MyMemory";
 
@@ -670,7 +675,7 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
                 s[TE_CFG_STR_MAX - 1] = '\0';
             }
         }
-        else if (strcmp(fld->label, "Dict Path") == 0 || strcmp(fld->label, "Hyphen Dict Path") == 0 || strcmp(fld->label, "Thesaurus Path") == 0)
+        else if (strcmp(fld->label, "Dict Path") == 0 || strcmp(fld->label, "Hyphen Dict Path") == 0 || strcmp(fld->label, "Thesaurus Path") == 0 || strcmp(fld->label, "StarDict Path") == 0)
         {
             /* Use directory picker for Dict Path */
             char tmp[TE_CFG_STR_MAX];
@@ -678,7 +683,7 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
             strncpy(tmp, s, sizeof(tmp) - 1);
             tmp[sizeof(tmp) - 1] = '\0';
 
-            if (ui_files_pick_dir(fld->label, "", tmp, sizeof(tmp)) == 0)
+            if (ui_files_pick_dir(fld->label, tmp[0] ? tmp : "", tmp, sizeof(tmp)) == 0)
             {
                 strncpy(s, tmp, TE_CFG_STR_MAX - 1);
                 s[TE_CFG_STR_MAX - 1] = '\0';
@@ -823,10 +828,24 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
 #ifdef HAVE_TRANSLATE
     case FT_TRANSLATE_BACKEND:
     {
-        /* Cycle through MyMemory, LibreTranslate, Lingva */
+        /* Cycle through MyMemory, LibreTranslate, Lingva, DeepL, StarDict */
         int *v = (int *)(base + fld->off);
+        const int backends[] = {0, 1, 2, 4, 10}; /* MyMemory, LibreTranslate, Lingva, DeepL, StarDict */
+        int n_backends = 5;
+        int i;
 
-        *v = (*v + 1) % 3;
+        for (i = 0; i < n_backends; i++)
+        {
+            if (backends[i] == *v)
+            {
+                *v = backends[(i + 1) % n_backends];
+                break;
+            }
+        }
+
+        if (i == n_backends)
+            *v = backends[0]; /* Default to MyMemory */
+
         break;
     }
 #endif /* HAVE_TRANSLATE */
@@ -1505,7 +1524,8 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
                 strcmp(cfg->translate_email, work.translate_email) != 0 ||
                 strcmp(cfg->translate_from_lang, work.translate_from_lang) != 0 ||
                 strcmp(cfg->translate_to_lang, work.translate_to_lang) != 0 ||
-                cfg->translate_timeout != work.translate_timeout)
+                cfg->translate_timeout != work.translate_timeout ||
+                strcmp(cfg->stardict_path, work.stardict_path) != 0)
             {
                 *cfg = work;
                 ui_translate_load_from_config(app);
