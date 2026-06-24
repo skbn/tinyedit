@@ -21,7 +21,7 @@
 #
 
 # Directory of this Makefile (with trailing slash)
-HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+HERE := $(dir $(lastword $(MAKEFILE_LIST)))
 
 # Feature selection options (set to 1 to enable)
 USE_HUNSPELL ?= 0
