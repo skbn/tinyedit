@@ -485,16 +485,27 @@ int insert_file(TeApp *app)
 
 int toggle_spell_panel(TeApp *app)
 {
-    /* Toggle: -1 (hidden) -> 0 (spell) -> -1 (hidden) */
-    app->spell_panel_mode = (app->spell_panel_mode == 0) ? -1 : 0;
+    /* Cycle: -1 (hidden) -> 0 (spell) -> 2 (dict) -> -1 (skip empty translate panel) */
+    if (app->spell_panel_mode < 0 || app->spell_panel_mode >= 2)
+        app->spell_panel_mode = (app->spell_panel_mode < 0) ? 0 : -1;
+    else
+    {
+        if (app->spell_panel_mode == 0)
+            app->spell_panel_mode = 2; /* Skip translate panel (empty) */
+        else
+            app->spell_panel_mode = -1;
+    }
 
     switch (app->spell_panel_mode)
     {
     case 0:
-        te_status(app, "Spell checker panel enabled");
+        te_status(app, "Spell checker panel");
+        break;
+    case 2:
+        te_status(app, "Dictionary panel");
         break;
     default:
-        te_status(app, "Spell panel disabled");
+        te_status(app, "Side panel hidden");
         break;
     }
 

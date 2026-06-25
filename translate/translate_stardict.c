@@ -1318,6 +1318,26 @@ static char *read_dict_entry(struct StarDictHandle *h, unsigned long off, unsign
 
     decoded = decode_dict_entry(raw, size, h->sametypesequence[0] ? h->sametypesequence : NULL);
     free(raw);
+
+    if (decoded && decoded[0] && !sd_type_has_markup((unsigned char)(h->sametypesequence[0] ? h->sametypesequence[0] : 0)))
+    {
+        const char *lt = strchr(decoded, '<');
+
+        if (lt)
+        {
+            int i;
+
+            for (i = 1; lt[i] && i < 64; i++)
+            {
+                if (lt[i] == '>')
+                {
+                    strip_markup_inplace(decoded);
+                    break;
+                }
+            }
+        }
+    }
+
     return decoded;
 }
 
@@ -1501,19 +1521,25 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
 {
     const char *p = NULL;
     const char *word_start = NULL;
-    char word_buf[SD_CACHE_KEY_MAX];
-    char tmp_err[64];
     char *out_buf = NULL;
     size_t out_cap = 0;
     size_t out_len = 0;
-    char *single = NULL;
-    int word_idx;
     int word_count;
     size_t wl;
     int got_any;
     int has_ws;
+    char tmp_err[64];
     char *whole = NULL;
+    char *tokens_buf = NULL;
+    char *phrase = NULL;
+    int n_tokens = 0;
+    int t;
+    int adv;
+    const int tok_stride = SD_CACHE_KEY_MAX;
+    const int phrase_size = SD_CACHE_KEY_MAX * 4;
     int lead;
+    int j;
+    int label_len;
 
     if (err && err_size > 0)
         err[0] = '\0';
@@ -1541,8 +1567,6 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
     if (!has_ws)
         return lookup_single(h, src, err, err_size);
 
-    /* Phrase-first: try whole source as single key before splitting into per-word lookups */
-
     tmp_err[0] = '\0';
 
     whole = lookup_single(h, src, tmp_err, sizeof(tmp_err));
@@ -1550,13 +1574,29 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
     if (whole)
         return whole;
 
-    got_any = 0;
-    word_count = 0;
+    tokens_buf = (char *)malloc((size_t)SD_MAX_WORDS_PER_LOOKUP * (size_t)tok_stride);
+    phrase = (char *)malloc((size_t)phrase_size);
+
+    if (!tokens_buf || !phrase)
+    {
+        if (tokens_buf)
+            free(tokens_buf);
+
+        if (phrase)
+            free(phrase);
+
+        if (err && err_size > 0)
+            snprintf(err, (size_t)err_size, "out of memory");
+
+        return NULL;
+    }
+
     p = src;
 
-    while (*p && word_count < SD_MAX_WORDS_PER_LOOKUP)
+    while (*p && n_tokens < SD_MAX_WORDS_PER_LOOKUP)
     {
-        /* skip leading whitespace */
+        char *slot;
+
         while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
             p++;
 
@@ -1573,48 +1613,136 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
         if (wl == 0)
             continue;
 
-        if (wl >= sizeof(word_buf))
-            wl = sizeof(word_buf) - 1;
+        if ((int)wl >= tok_stride)
+            wl = (size_t)(tok_stride - 1);
 
-        memcpy(word_buf, word_start, wl);
+        slot = tokens_buf + (size_t)n_tokens * (size_t)tok_stride;
 
-        word_buf[wl] = '\0';
+        memcpy(slot, word_start, wl);
+        slot[wl] = '\0';
 
-        /* Strip trailing punctuation common in selections: . , ; : ! ? but only if it leaves a non-empty word */
+        /* strip trailing punctuation */
         while (wl > 1)
         {
-            char c = word_buf[wl - 1];
+            char c = slot[wl - 1];
 
             if (c == '.' || c == ',' || c == ';' || c == ':' ||
                 c == '!' || c == '?' || c == ')' || c == ']' ||
                 c == '"' || c == '\'')
-                word_buf[--wl] = '\0';
+                slot[--wl] = '\0';
             else
                 break;
         }
 
-        /* Leading punctuation */
+        /* strip leading punctuation */
         lead = 0;
 
-        while (word_buf[lead] == '(' || word_buf[lead] == '[' ||
-               word_buf[lead] == '"' || word_buf[lead] == '\'')
+        while (slot[lead] == '(' || slot[lead] == '[' || slot[lead] == '"' || slot[lead] == '\'')
             lead++;
 
         if (lead > 0)
         {
-            memmove(word_buf, word_buf + lead, wl - lead + 1);
+            memmove(slot, slot + lead, wl - lead + 1);
             wl -= lead;
         }
 
-        if (!word_buf[0])
-            continue;
+        if (slot[0])
+            n_tokens++;
+    }
 
-        if (word_idx = 0, word_count > 0)
+    got_any = 0;
+    word_count = 0;
+
+    for (t = 0; t < n_tokens; t += adv)
+    {
+        int max_window;
+        int w;
+        char *single = NULL;
+        char tmp_err[64];
+        int matched_len = 0;
+        char *tok_t = tokens_buf + (size_t)t * (size_t)tok_stride;
+
+        tmp_err[0] = '\0';
+        adv = 1;
+        single = NULL;
+
+        max_window = n_tokens - t;
+
+        if (max_window > 4)
+            max_window = 4;
+
+        for (w = max_window; w >= 2 && !single; w--)
+        {
+            int j;
+            size_t plen = 0;
+
+            phrase[0] = '\0';
+
+            for (j = 0; j < w; j++)
+            {
+                const char *tok_j = tokens_buf + (size_t)(t + j) * (size_t)tok_stride;
+                size_t tlen;
+
+                if (j > 0)
+                {
+                    if (plen + 1 >= (size_t)phrase_size)
+                    {
+                        plen = 0;
+                        break;
+                    }
+
+                    phrase[plen++] = ' ';
+                }
+
+                tlen = strlen(tok_j);
+
+                if (plen + tlen + 1 >= (size_t)phrase_size)
+                {
+                    plen = 0;
+                    break;
+                }
+
+                memcpy(phrase + plen, tok_j, tlen);
+
+                plen += tlen;
+                phrase[plen] = '\0';
+            }
+
+            if (plen == 0)
+                continue;
+
+            tmp_err[0] = '\0';
+            single = lookup_single(h, phrase, tmp_err, sizeof(tmp_err));
+
+            if (single)
+            {
+                matched_len = w;
+                adv = w;
+                break;
+            }
+        }
+
+        /* Fall back to single-word lookup */
+        if (!single)
+        {
+            tmp_err[0] = '\0';
+            single = lookup_single(h, tok_t, tmp_err, sizeof(tmp_err));
+
+            if (single)
+                matched_len = 1;
+        }
+
+        /* Emit the line: "label: definition" or "label: [not found]" */
+        if (word_count > 0)
         {
             out_buf = str_append(out_buf, &out_cap, &out_len, "\n", 1);
 
             if (!out_buf)
             {
+                free(single);
+                free(tokens_buf);
+                free(phrase);
+
                 if (err && err_size > 0)
                     snprintf(err, (size_t)err_size, "out of memory");
 
@@ -1622,45 +1750,76 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
             }
         }
 
-        out_buf = str_append(out_buf, &out_cap, &out_len, word_buf, (int)wl);
+        /* Label = either the matched phrase or just the first token */
+        label_len = (matched_len > 0 ? matched_len : 1);
 
-        if (!out_buf)
+        for (j = 0; j < label_len; j++)
         {
-            if (err && err_size > 0)
-                snprintf(err, (size_t)err_size, "out of memory");
+            const char *tok_j = tokens_buf + (size_t)(t + j) * (size_t)tok_stride;
 
-            return NULL;
+            if (j > 0)
+            {
+                out_buf = str_append(out_buf, &out_cap, &out_len, " ", 1);
+
+                if (!out_buf)
+                {
+                    free(single);
+                    free(tokens_buf);
+                    free(phrase);
+
+                    if (err && err_size > 0)
+                        snprintf(err, (size_t)err_size, "out of memory");
+
+                    return NULL;
+                }
+            }
+
+            out_buf = str_append(out_buf, &out_cap, &out_len, tok_j, -1);
+
+            if (!out_buf)
+            {
+                free(single);
+                free(tokens_buf);
+                free(phrase);
+
+                if (err && err_size > 0)
+                    snprintf(err, (size_t)err_size, "out of memory");
+
+                return NULL;
+            }
         }
 
         out_buf = str_append(out_buf, &out_cap, &out_len, ": ", 2);
 
         if (!out_buf)
         {
+            free(single);
+            free(tokens_buf);
+            free(phrase);
+
             if (err && err_size > 0)
                 snprintf(err, (size_t)err_size, "out of memory");
 
             return NULL;
         }
 
-        tmp_err[0] = '\0';
-        single = lookup_single(h, word_buf, tmp_err, sizeof(tmp_err));
-
         if (single)
         {
-            /* Replaces internal newlines with " | " to keep one line per word in joined output */
-            char *s = NULL;
-            const char *prev = single;
+            char *s;
+            const char *prev_p = single;
 
             for (s = single; *s; s++)
             {
                 if (*s == '\n')
                 {
                     *s = '\0';
-                    out_buf = str_append(out_buf, &out_cap, &out_len, prev, -1);
+                    out_buf = str_append(out_buf, &out_cap, &out_len, prev_p, -1);
 
                     if (!out_buf)
                     {
                         free(single);
+                        free(tokens_buf);
+                        free(phrase);
 
                         if (err && err_size > 0)
                             snprintf(err, (size_t)err_size, "out of memory");
@@ -1673,6 +1832,8 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
                     if (!out_buf)
                     {
                         free(single);
+                        free(tokens_buf);
+                        free(phrase);
 
                         if (err && err_size > 0)
                             snprintf(err, (size_t)err_size, "out of memory");
@@ -1680,17 +1841,18 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
                         return NULL;
                     }
 
-                    prev = s + 1;
+                    prev_p = s + 1;
                 }
             }
-
-            if (*prev)
+            if (*prev_p)
             {
-                out_buf = str_append(out_buf, &out_cap, &out_len, prev, -1);
+                out_buf = str_append(out_buf, &out_cap, &out_len, prev_p, -1);
 
                 if (!out_buf)
                 {
                     free(single);
+                    free(tokens_buf);
+                    free(phrase);
 
                     if (err && err_size > 0)
                         snprintf(err, (size_t)err_size, "out of memory");
@@ -1709,6 +1871,9 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
 
             if (!out_buf)
             {
+                free(tokens_buf);
+                free(phrase);
+
                 if (err && err_size > 0)
                     snprintf(err, (size_t)err_size, "out of memory");
 
@@ -1719,6 +1884,9 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
         word_count++;
     }
 
+    free(tokens_buf);
+    free(phrase);
+
     if (!out_buf)
     {
         if (err && err_size > 0)
@@ -1727,7 +1895,6 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
         return NULL;
     }
 
-    /* If no word resolved, treat the whole call as a failure so the caller can pass the message through to the user */
     if (!got_any)
     {
         if (err && err_size > 0)

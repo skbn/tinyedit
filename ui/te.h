@@ -183,9 +183,13 @@ typedef struct
     int show_tabs;
     int show_translate;
     int show_spell;
-    int spell_panel_mode;    /* 0 = spell checker, 1 = translator */
+    int spell_panel_mode;    /* -1=hidden, 0=spell, 1=translate, 2=dict */
     int tabs_panel_active;   /* Navigation mode in tabs panel */
     int tabs_panel_selected; /* Currently selected tab in panel */
+
+    char *dict_result;
+    char dict_word[128];
+    int dict_scroll;
 
     char status[256];
     char cfg_path[512];

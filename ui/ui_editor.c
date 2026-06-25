@@ -28,6 +28,7 @@
 #include "ui_editor_helper.h"
 #include "ui_setup.h"
 #include "ui_spell.h"
+#include "ui_dict.h"
 #include "ui_glyph_picker.h"
 #include "ui_mouse.h"
 #include "ui_assist.h"
@@ -101,13 +102,14 @@ static const char *HELP_LINES[] =
         "    Alt+W            Close current tab",
         "",
         "  Spell:",
-        "    Alt+S            Toggle spell panel",
+        "    Alt+S            Toggle spell/dict panel",
         "    Alt+H            Toggle spell checker",
         "    Alt+P            Spell check word under cursor",
 #ifdef HAVE_TRANSLATE
         "    Alt+R            Translate selected text",
         "    Ctrl+T           Toggle translator",
         "    Alt+B            Exchange languages",
+        "    Alt+D            Toggle line numbers / dict panel",
 #endif
 #ifdef HAVE_MYTHES
         "    Alt+A            Thesaurus lookup for word under cursor",
@@ -2524,6 +2526,21 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_PPAGE:
+#ifdef HAVE_TRANSLATE_STARDICT
+        if (app->spell_panel_mode == 2 && app->dict_result && app->dict_result[0])
+        {
+            int i;
+            int rows = 4;
+
+            for (i = 0; i < rows; i++)
+            {
+                if (!ui_dict_scroll_up(app))
+                    break;
+            }
+
+            return 1;
+        }
+#endif
         ed_block_clear(te_app_get_editor(app));
 
         if (soft)
@@ -2537,6 +2554,21 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_NPAGE:
+#ifdef HAVE_TRANSLATE_STARDICT
+        if (app->spell_panel_mode == 2 && app->dict_result && app->dict_result[0])
+        {
+            int i;
+            int rows = 4;
+
+            for (i = 0; i < rows; i++)
+            {
+                if (!ui_dict_scroll_down(app))
+                    break;
+            }
+
+            return 1;
+        }
+#endif
         ed_block_clear(te_app_get_editor(app));
 
         if (soft)
@@ -2740,6 +2772,11 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
         return 1;
 
     case KEY_ALT('D'):
+#ifdef HAVE_TRANSLATE
+        if (app->translate_active)
+            return 1; /* Disabled when translate is active */
+#endif
+
         te_app_set_show_line_numbers(app, !te_app_get_show_line_numbers(app));
         te_status(app, "Line numbers: %s", te_app_get_show_line_numbers(app) ? "ON" : "OFF");
         return 1;
@@ -2748,6 +2785,13 @@ static int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int b
     {
         app->hard_wrap = !app->hard_wrap;
         ed_set_hard_wrap(te_app_get_editor(app), app->hard_wrap);
+
+        /* Ensure cursor stays within visible area when dict panel is active */
+#ifdef HAVE_TRANSLATE_STARDICT
+        if (app->spell_panel_mode == 2)
+            ed_ensure_visible(te_app_get_editor(app));
+#endif
+
         return 1;
     }
 
@@ -3065,7 +3109,11 @@ static void redraw_editor(TeApp *app)
 
 #ifdef HAVE_HUNSPELL
     ui_spell_draw_panel(app);
-#endif /* HAVE_HUNSPELL */
+#endif
+
+#ifdef HAVE_TRANSLATE_STARDICT
+    ui_dict_draw_panel(app);
+#endif
 
     te_draw_statusbar(app);
 

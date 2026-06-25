@@ -266,6 +266,14 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
             win->h = panel_h;
             win->visible = (spell_panel_mode == 0);
         }
+        else if (win->type == WIN_DICT)
+        {
+            win->x = tab_w;
+            win->y = screen_h - panel_h - 1;
+            win->w = screen_w - tab_w;
+            win->h = panel_h;
+            win->visible = (spell_panel_mode == 2);
+        }
     }
 }
 

@@ -10,6 +10,7 @@
  */
 
 #include "ui_translate.h"
+#include "ui_dict.h"
 #include "te.h"
 
 #include <stdio.h>
@@ -421,6 +422,33 @@ int ui_translate_action(TeApp *app)
     if (!result)
     {
         te_status(app, "Translate failed: %s", err[0] ? err : "(unknown)");
+        free(src);
+        return 1;
+    }
+
+    if (app->cfg.translate_backend == TRANSLATE_BACKEND_STARDICT)
+    {
+        char header[128];
+        int n = (int)strlen(src);
+
+        if (n > (int)sizeof(header) - 1)
+            n = (int)sizeof(header) - 1;
+
+        memcpy(header, src, (size_t)n);
+        header[n] = '\0';
+
+        /* trim trailing whitespace for clean header */
+        while (n > 0 && (header[n - 1] == ' ' || header[n - 1] == '\n' || header[n - 1] == '\r' || header[n - 1] == '\t'))
+            header[--n] = '\0';
+
+        ui_dict_set_result(app, header, result);
+
+        if (app->spell_panel_mode != 2 && app->translate_active)
+            app->spell_panel_mode = 2;
+
+        te_status(app, "Dictionary: %d line(s) (Alt+Up/Down to scroll)", (int)(strlen(result) ? 1 : 0));
+
+        free(result);
         free(src);
         return 1;
     }

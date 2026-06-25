@@ -75,6 +75,7 @@ TeApp *te_app_new(void)
     wm_add_window(app->wm, WIN_EDITOR, 20, 1, COLS - 20, LINES - 1);
     wm_add_window(app->wm, WIN_TRANSLATE, 20, LINES - SPELL_PANEL_HEIGHT - 1, COLS - 20, SPELL_PANEL_HEIGHT);
     wm_add_window(app->wm, WIN_SPELL, 20, LINES - SPELL_PANEL_HEIGHT - 1, COLS - 20, SPELL_PANEL_HEIGHT);
+    wm_add_window(app->wm, WIN_DICT, 20, LINES - SPELL_PANEL_HEIGHT - 1, COLS - 20, SPELL_PANEL_HEIGHT);
 
     app->tab_cap = 8;
     app->tabs = (TeTab **)calloc(app->tab_cap, sizeof(TeTab *));
@@ -93,9 +94,13 @@ TeApp *te_app_new(void)
     app->show_tabs = 1;
     app->show_translate = 0;
     app->show_spell = 0;
-    app->spell_panel_mode = -1; /* -1 = hidden, 0 = spell checker, 1 = translator */
+    app->spell_panel_mode = -1; /* -1=hidden, 0=spell, 1=translate, 2=dict */
     app->tabs_panel_active = 0;
     app->tabs_panel_selected = 0;
+
+    app->dict_result = NULL;
+    app->dict_word[0] = '\0';
+    app->dict_scroll = 0;
     app->hard_wrap = 0;
     app->wrap_col = 75;
 
@@ -161,6 +166,12 @@ void te_app_free(TeApp *app)
     {
         free(app->search.rows);
         app->search.rows = NULL;
+    }
+
+    if (app->dict_result)
+    {
+        free(app->dict_result);
+        app->dict_result = NULL;
     }
 
     if (app->search.cols)
@@ -566,9 +577,7 @@ void te_draw_titlebar(TeApp *app)
         if (app->translate_active && app->translate_handle)
             snprintf(tr_buf, sizeof(tr_buf), "TR [%s]->[%s] ", app->cfg.translate_from_lang, app->cfg.translate_to_lang);
 #endif
-        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT",
-                 sp_buf, hy_buf, tr_buf,
-                 info.insert_mode ? "INS" : "OVR");
+        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", sp_buf, hy_buf, tr_buf, info.insert_mode ? "INS" : "OVR");
     }
     else
     {

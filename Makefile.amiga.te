@@ -140,6 +140,9 @@ UI_OBJS    += $(OBJDIR)/ui_thes.o
 endif
 ifeq ($(USE_TRANSLATE),1)
 UI_OBJS    += $(OBJDIR)/ui_translate.o
+ifeq ($(USE_STARDICT),1)
+UI_OBJS    += $(OBJDIR)/ui_dict.o
+endif
 endif
 
 # spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
@@ -532,6 +535,10 @@ endif
 ifeq ($(USE_TRANSLATE),1)
 $(OBJDIR)/ui_translate.o: $(UIDIR)/ui_translate.c $(UIDIR)/ui_translate.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
+ifeq ($(USE_STARDICT),1)
+$(OBJDIR)/ui_dict.o: $(UIDIR)/ui_dict.c $(UIDIR)/ui_dict.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+endif
 endif
 
 # Translator objects (only if USE_TRANSLATE=1)
@@ -591,6 +598,9 @@ clean:
 clean-ft:
 	rm -f $(FT_OBJS) $(ZLIB_OBJS) $(PNG_OBJS)
 
+clean-all: clean clean-ft
+
+.PHONY: all clean clean-ft clean-all prep prep-min unprep tinyedit
 clean-all: clean clean-ft
 
 .PHONY: all clean clean-ft clean-all prep prep-min unprep tinyedit

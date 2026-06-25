@@ -22,6 +22,7 @@ typedef enum
     WIN_TABLIST,
     WIN_TRANSLATE,
     WIN_SPELL,
+    WIN_DICT,
     WIN_FILEBROWSER,
     WIN_HELP,
     WIN_CUSTOM
