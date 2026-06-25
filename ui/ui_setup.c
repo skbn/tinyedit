@@ -277,27 +277,7 @@ static const SetupField st_fields[] =
 /* Get tinyedit base directory (platform-specific) */
 static void get_tinyedit_base_dir(char *buf, size_t bufsz)
 {
-    char *home = NULL;
-
-#if defined(PLATFORM_WIN32)
-    home = getenv("APPDATA");
-
-    if (home && home[0])
-        snprintf(buf, bufsz, "%s\\tinyedit", home);
-    else
-        snprintf(buf, bufsz, "tinyedit");
-
-#elif defined(PLATFORM_AMIGA)
-    snprintf(buf, bufsz, "ENVARC:tinyedit");
-#else
-
-    home = getenv("HOME");
-
-    if (home && home[0])
-        snprintf(buf, bufsz, "%s/.tinyedit", home);
-    else
-        snprintf(buf, bufsz, ".tinyedit");
-#endif
+    port_get_config_dir(buf, bufsz);
 }
 
 /* Format a field value into buf for display */

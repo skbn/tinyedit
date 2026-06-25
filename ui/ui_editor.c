@@ -29,6 +29,7 @@
 #include "ui_setup.h"
 #include "ui_spell.h"
 #include "ui_dict.h"
+#include "ui_dict_picker.h"
 #include "ui_glyph_picker.h"
 #include "ui_mouse.h"
 #include "ui_assist.h"
@@ -107,6 +108,7 @@ static const char *HELP_LINES[] =
         "    Alt+P            Spell check word under cursor",
 #ifdef HAVE_TRANSLATE
         "    Alt+R            Translate selected text",
+        "    Alt+M            Dictionary popup (pick translation)",
         "    Ctrl+T           Toggle translator",
         "    Alt+B            Exchange languages",
         "    Alt+D            Toggle line numbers / dict panel",
@@ -2227,6 +2229,14 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         ui_translate_action(app);
         return 1;
     }
+
+#ifdef HAVE_TRANSLATE_STARDICT
+    if (ch == KEY_ALT('M'))
+    {
+        ui_dict_picker(app);
+        return 1;
+    }
+#endif
 #endif
 
     return 0;
@@ -2836,6 +2846,21 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         return 1;
 
     case CTRL('U'):
+#ifdef HAVE_TRANSLATE_STARDICT
+        if (app->spell_panel_mode == 2 && app->dict_result && app->dict_result[0])
+        {
+            int i;
+            int rows = 4;
+
+            for (i = 0; i < rows; i++)
+            {
+                if (!ui_dict_scroll_up(app))
+                    break;
+            }
+
+            return 1;
+        }
+#endif
         if (soft)
         {
             soft_move_pgup_visual(app, width, body_rows);
@@ -2847,6 +2872,21 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
         return 1;
 
     case CTRL('D'):
+#ifdef HAVE_TRANSLATE_STARDICT
+        if (app->spell_panel_mode == 2 && app->dict_result && app->dict_result[0])
+        {
+            int i;
+            int rows = 4;
+
+            for (i = 0; i < rows; i++)
+            {
+                if (!ui_dict_scroll_down(app))
+                    break;
+            }
+
+            return 1;
+        }
+#endif
         if (soft)
         {
             soft_move_pgdn_visual(app, width, body_rows);

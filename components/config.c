@@ -18,6 +18,7 @@
 #include <errno.h>
 #include "config.h"
 #include "../core/charset.h"
+#include "../core/portable.h"
 
 static void strip_trailing(char *s)
 {
@@ -1212,15 +1213,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fclose(out);
 
     /* Replace original file with temporary file */
-    if (remove(path) != 0 && errno != ENOENT)
+    if (pf_atomic_rename(tmp_path, path) != 0)
     {
-        remove(tmp_path);
-        return -1;
-    }
-
-    if (rename(tmp_path, path) != 0)
-    {
-        remove(tmp_path);
+        pf_remove_file(tmp_path);
         return -1;
     }
 

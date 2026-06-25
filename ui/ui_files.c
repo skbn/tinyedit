@@ -16,6 +16,7 @@
 #include "te.h"
 #include "ui_files.h"
 #include "../core/keys.h"
+#include "../core/portable.h"
 
 /* Per-platform directory listing */
 #ifdef PLATFORM_WIN32
@@ -541,7 +542,7 @@ static FileEnt *load_dir(const char *dir, int *out_n)
 
         snprintf(full, sizeof(full), "%s/%s", dir, e->d_name);
 
-        if (stat(full, &st) == 0 && S_ISDIR(st.st_mode))
+        if (pf_is_directory(full))
             ents[n].is_dir = 1;
 
         ents[n].name = strdup(e->d_name);

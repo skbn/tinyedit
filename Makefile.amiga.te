@@ -142,6 +142,7 @@ ifeq ($(USE_TRANSLATE),1)
 UI_OBJS    += $(OBJDIR)/ui_translate.o
 ifeq ($(USE_STARDICT),1)
 UI_OBJS    += $(OBJDIR)/ui_dict.o
+UI_OBJS    += $(OBJDIR)/ui_dict_picker.o
 endif
 endif
 
@@ -441,7 +442,7 @@ TEFLAGS = $(CFLAGS) -I$(HERE) -I$(COREDIR) -I$(COMPDIR) -I$(UIDIR) $(FTINC)
 $(OBJDIR)/charset.o: $(COREDIR)/charset.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
-$(OBJDIR)/clipboard.o: $(COREDIR)/clipboard.c | $(OBJDIR)
+$(OBJDIR)/clipboard.o: $(COREDIR)/clipboard.c $(COREDIR)/clipboard.h $(COREDIR)/portable.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 $(OBJDIR)/keys.o: $(COREDIR)/keys.c | $(OBJDIR)
@@ -537,6 +538,8 @@ $(OBJDIR)/ui_translate.o: $(UIDIR)/ui_translate.c $(UIDIR)/ui_translate.h | $(OB
 	$(CC) $(TEFLAGS) -c $< -o $@
 ifeq ($(USE_STARDICT),1)
 $(OBJDIR)/ui_dict.o: $(UIDIR)/ui_dict.c $(UIDIR)/ui_dict.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+$(OBJDIR)/ui_dict_picker.o: $(UIDIR)/ui_dict_picker.c $(UIDIR)/ui_dict_picker.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 endif
 endif

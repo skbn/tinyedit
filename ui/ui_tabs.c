@@ -96,6 +96,8 @@ void ui_tabs_draw_panel(TeApp *app)
     if (app->active_tab >= max_h)
         scroll_offset = app->active_tab - max_h + 1;
 
+    standend();
+
     /* Draw panel background */
     attron(COLOR_PAIR(COL_NORMAL));
 

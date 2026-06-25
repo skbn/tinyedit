@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "clipboard.h"
+#include "portable.h"
 
 #ifdef PLATFORM_WIN32
 #include <windows.h>
@@ -536,7 +537,7 @@ static int try_copy_cmd(const char *cmd, const char *data)
     if (fwrite(data, 1, len, tmp_fp) != len)
     {
         fclose(tmp_fp);
-        unlink(tmp_file);
+        pf_remove_file(tmp_file);
         return -1;
     }
 
@@ -553,7 +554,7 @@ static int try_copy_cmd(const char *cmd, const char *data)
     {
         reset_prog_mode();
         refresh();
-        unlink(tmp_file);
+        pf_remove_file(tmp_file);
         return -1;
     }
 
@@ -574,7 +575,7 @@ static int try_copy_cmd(const char *cmd, const char *data)
     reset_prog_mode();
     refresh();
 
-    unlink(tmp_file);
+    pf_remove_file(tmp_file);
 
     return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
 }

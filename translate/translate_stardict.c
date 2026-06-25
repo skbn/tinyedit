@@ -73,6 +73,7 @@ struct StarDictHandle
     SdEntry *entries;
     int entry_count;
     int use_64bit_offsets;
+
     /* Synonyms (.syn). NULL if dictionary has no .syn or it failed to load. The reader treats absence as "no synonyms" silently */
     char *syn_buf;
     long syn_buf_size;
@@ -1613,7 +1614,6 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
                 matched_len = 1;
         }
 
-        /* Emit the line: "label: definition" or "label: [not found]" */
         if (word_count > 0)
         {
             out_buf = str_append(out_buf, &out_cap, &out_len, "\n", 1);
@@ -1631,7 +1631,21 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
             }
         }
 
-        /* Label = either the matched phrase or just the first token */
+        /* Header: "=== label ===\n" */
+        out_buf = str_append(out_buf, &out_cap, &out_len, "=== ", 4);
+
+        if (!out_buf)
+        {
+            free(single);
+            free(tokens_buf);
+            free(phrase);
+
+            if (err && err_size > 0)
+                snprintf(err, (size_t)err_size, "out of memory");
+
+            return NULL;
+        }
+
         label_len = (matched_len > 0 ? matched_len : 1);
 
         for (j = 0; j < label_len; j++)
@@ -1670,7 +1684,7 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
             }
         }
 
-        out_buf = str_append(out_buf, &out_cap, &out_len, ": ", 2);
+        out_buf = str_append(out_buf, &out_cap, &out_len, " ===\n", 5);
 
         if (!out_buf)
         {
@@ -1687,58 +1701,56 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
         if (single)
         {
             char *s;
-            const char *prev_p = single;
+            const char *line_start = single;
 
-            for (s = single; *s; s++)
+            for (s = single;; s++)
             {
-                if (*s == '\n')
+                if (*s == '\n' || *s == '\0')
                 {
-                    *s = '\0';
-                    out_buf = str_append(out_buf, &out_cap, &out_len, prev_p, -1);
+                    int llen = (int)(s - line_start);
+                    int lead = 0;
 
-                    if (!out_buf)
+                    while (llen > 0 && (line_start[llen - 1] == ' ' || line_start[llen - 1] == '\t' || line_start[llen - 1] == '\r'))
+                        llen--;
+
+                    while (lead < llen && (line_start[lead] == ' ' || line_start[lead] == '\t'))
+                        lead++;
+
+                    if (llen > lead)
                     {
-                        free(single);
-                        free(tokens_buf);
-                        free(phrase);
+                        out_buf = str_append(out_buf, &out_cap, &out_len, line_start + lead, llen - lead);
 
-                        if (err && err_size > 0)
-                            snprintf(err, (size_t)err_size, "out of memory");
+                        if (!out_buf)
+                        {
+                            free(single);
+                            free(tokens_buf);
+                            free(phrase);
 
-                        return NULL;
+                            if (err && err_size > 0)
+                                snprintf(err, (size_t)err_size, "out of memory");
+
+                            return NULL;
+                        }
+
+                        out_buf = str_append(out_buf, &out_cap, &out_len, "\n", 1);
+
+                        if (!out_buf)
+                        {
+                            free(single);
+                            free(tokens_buf);
+                            free(phrase);
+
+                            if (err && err_size > 0)
+                                snprintf(err, (size_t)err_size, "out of memory");
+
+                            return NULL;
+                        }
                     }
 
-                    out_buf = str_append(out_buf, &out_cap, &out_len, " | ", 3);
+                    if (*s == '\0')
+                        break;
 
-                    if (!out_buf)
-                    {
-                        free(single);
-                        free(tokens_buf);
-                        free(phrase);
-
-                        if (err && err_size > 0)
-                            snprintf(err, (size_t)err_size, "out of memory");
-
-                        return NULL;
-                    }
-
-                    prev_p = s + 1;
-                }
-            }
-            if (*prev_p)
-            {
-                out_buf = str_append(out_buf, &out_cap, &out_len, prev_p, -1);
-
-                if (!out_buf)
-                {
-                    free(single);
-                    free(tokens_buf);
-                    free(phrase);
-
-                    if (err && err_size > 0)
-                        snprintf(err, (size_t)err_size, "out of memory");
-
-                    return NULL;
+                    line_start = s + 1;
                 }
             }
 
@@ -1748,7 +1760,7 @@ char *translate_stardict_lookup(struct StarDictHandle *h, const char *src, char 
         }
         else
         {
-            out_buf = str_append(out_buf, &out_cap, &out_len, "[not found]", 11);
+            out_buf = str_append(out_buf, &out_cap, &out_len, "[not found]\n", 12);
 
             if (!out_buf)
             {

@@ -204,9 +204,7 @@ int main(int argc, char **argv)
     static char cfg_path_buf[512];
     const char *cfg_path = NULL;
     FILE *tty = NULL;
-    const char *home = NULL;
-    char dir_path[512];
-    const char *last_sep = NULL;
+    char cfg_dir[512];
 
     /* Locale init for wide-character ncursesw */
     ui_init_locale();
@@ -216,46 +214,12 @@ int main(int argc, char **argv)
     IFFParseBase = OpenLibrary("iffparse.library", 0L);
 #endif
 
-    /* Resolve config path - use ~/.tinyedit/ directory */
-#if defined(PLATFORM_WIN32)
-    home = getenv("APPDATA");
-
-    if (home && home[0])
-        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s\\tinyedit\\config", home);
-    else
-        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "tinyedit\\config");
-
-#elif defined(PLATFORM_AMIGA)
-    snprintf(cfg_path_buf, sizeof(cfg_path_buf), "ENVARC:tinyedit/config");
-#else
-
-    home = getenv("HOME");
-
-    if (home && home[0])
-        snprintf(cfg_path_buf, sizeof(cfg_path_buf), "%s/.tinyedit/config", home);
-    else
-        snprintf(cfg_path_buf, sizeof(cfg_path_buf), ".tinyedit/config");
-
-#endif
+    /* Resolve config path using portable config directory */
+    port_get_config_dir(cfg_dir, sizeof(cfg_dir));
+    pf_ensure_dir(cfg_dir);
+    pf_path_join(cfg_path_buf, sizeof(cfg_path_buf), cfg_dir, "config");
 
     cfg_path = cfg_path_buf;
-
-    /* Create config directory if it doesn't exist */
-#if defined(PLATFORM_WIN32)
-    last_sep = strrchr(cfg_path, '\\');
-#else
-    last_sep = strrchr(cfg_path, '/');
-#endif
-
-    if (last_sep)
-    {
-        size_t len = last_sep - cfg_path;
-
-        strncpy(dir_path, cfg_path, len);
-        dir_path[len] = '\0';
-
-        port_mkdir_one(dir_path);
-    }
 
     /* Load config (creates default file if missing) */
     te_cfg_load(&cfg, cfg_path);

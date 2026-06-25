@@ -20,6 +20,7 @@
 
 #include "portable.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -112,6 +113,419 @@ void port_get_config_dir(char *buf, size_t bufsz)
         snprintf(buf, bufsz, "%s/.tinyedit", home);
     else
         snprintf(buf, bufsz, ".tinyedit");
+#endif
+}
+
+/* Portable path existence test */
+int pf_path_exists(const char *path)
+{
+#if defined(PLATFORM_AMIGA)
+    BPTR lock;
+
+    if (!path || !path[0])
+        return 0;
+
+    lock = Lock((STRPTR)path, ACCESS_READ);
+
+    if (lock)
+    {
+        UnLock(lock);
+        return 1;
+    }
+
+    return 0;
+#elif defined(PLATFORM_WIN32)
+    DWORD attr;
+
+    if (!path || !path[0])
+        return 0;
+
+    attr = GetFileAttributesA(path);
+    return (attr != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+#else
+    struct stat st;
+
+    if (!path || !path[0])
+        return 0;
+
+    return (stat(path, &st) == 0) ? 1 : 0;
+#endif
+}
+
+/* Portable regular-file test */
+int pf_is_regular_file(const char *path)
+{
+#if defined(PLATFORM_AMIGA)
+    BPTR lock;
+    struct FileInfoBlock *fib;
+    int res = 0;
+
+    if (!path || !path[0])
+        return 0;
+
+    lock = Lock((STRPTR)path, ACCESS_READ);
+
+    if (!lock)
+        return 0;
+
+    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
+
+    if (fib)
+    {
+        if (Examine(lock, fib))
+            res = (fib->fib_DirEntryType < 0) ? 1 : 0;
+
+        FreeDosObject(DOS_FIB, fib);
+    }
+
+    UnLock(lock);
+    return res;
+#elif defined(PLATFORM_WIN32)
+    DWORD attr;
+
+    if (!path || !path[0])
+        return 0;
+
+    attr = GetFileAttributesA(path);
+
+    if (attr == INVALID_FILE_ATTRIBUTES)
+        return 0;
+
+    return (attr & FILE_ATTRIBUTE_DIRECTORY) ? 0 : 1;
+#else
+    struct stat st;
+
+    if (!path || !path[0])
+        return 0;
+
+    if (stat(path, &st) != 0)
+        return 0;
+
+    return S_ISREG(st.st_mode) ? 1 : 0;
+#endif
+}
+
+/* Portable recursive directory creation */
+int pf_mkdir_path(const char *path)
+{
+    char tmp[512];
+    char *p;
+    size_t len;
+
+    if (!path || !path[0])
+        return -1;
+
+    pf_safe_strncpy(tmp, path, sizeof(tmp));
+
+    len = strlen(tmp);
+
+    while (len > 1 && (tmp[len - 1] == '/' || tmp[len - 1] == '\\'))
+        tmp[--len] = '\0';
+
+    for (p = tmp + 1; *p; p++)
+    {
+        if (*p == '/' || *p == '\\')
+        {
+            *p = '\0';
+
+            if (!pf_path_exists(tmp))
+                port_mkdir_one(tmp);
+
+            *p = '/';
+        }
+    }
+
+    if (!pf_path_exists(tmp))
+        return port_mkdir_one(tmp);
+
+    return 0;
+}
+
+/* Portable ensure directory exists */
+int pf_ensure_dir(const char *path)
+{
+    if (pf_path_exists(path))
+        return 1;
+
+    return (pf_mkdir_path(path) == 0) ? 1 : 0;
+}
+
+/* Portable safe strncpy (always NUL-terminates) */
+void pf_safe_strncpy(char *dst, const char *src, size_t dstsize)
+{
+    size_t len;
+
+    if (dstsize == 0)
+        return;
+
+    if (!src)
+        src = "";
+
+    len = strlen(src);
+
+    if (len > dstsize - 1)
+        len = dstsize - 1;
+
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
+/* Portable path join */
+void pf_path_join(char *out, size_t outsize, const char *base, const char *sub)
+{
+    size_t blen;
+    char last;
+
+    if (outsize == 0)
+        return;
+
+    pf_safe_strncpy(out, base, outsize);
+    blen = strlen(out);
+    last = (blen > 0) ? out[blen - 1] : '\0';
+
+    if (last != '/' && last != ':' && last != '\\')
+    {
+        if (outsize - 1 - blen > 0)
+        {
+            out[blen] = '/';
+            out[blen + 1] = '\0';
+            blen++;
+        }
+    }
+
+    pf_safe_strncpy(out + blen, sub, outsize - blen);
+}
+
+/* Portable wildcard match (* and ?, case-insensitive) */
+int pf_wildmatch(const char *pat, const char *str)
+{
+    while (*pat)
+    {
+        if (*pat == '*')
+        {
+            while (*pat == '*')
+                pat++;
+
+            if (!*pat)
+                return 1;
+
+            while (*str)
+            {
+                if (pf_wildmatch(pat, str++))
+                    return 1;
+            }
+
+            return 0;
+        }
+
+        if (*pat == '?')
+        {
+            if (!*str)
+                return 0;
+
+            pat++;
+            str++;
+        }
+        else
+        {
+            if (toupper((unsigned char)*pat) != toupper((unsigned char)*str))
+                return 0;
+
+            pat++;
+            str++;
+        }
+    }
+
+    return (*str == '\0') ? 1 : 0;
+}
+
+/* Portable wildcard test */
+int pf_is_wildcard(const char *s)
+{
+    if (!s)
+        return 0;
+
+    while (*s)
+    {
+        if (*s == '*' || *s == '?')
+            return 1;
+
+        s++;
+    }
+
+    return 0;
+}
+
+/* Portable binary file copy */
+int pf_copy_file(const char *src, const char *dst)
+{
+    FILE *in = NULL;
+    FILE *out = NULL;
+    char buf[4096];
+    size_t n;
+
+    if (!src || !dst)
+        return 0;
+
+    in = fopen(src, "rb");
+
+    if (!in)
+        return 0;
+
+    out = fopen(dst, "wb");
+
+    if (!out)
+    {
+        fclose(in);
+        return 0;
+    }
+
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+    {
+        if (fwrite(buf, 1, n, out) != n)
+        {
+            fclose(out);
+            fclose(in);
+            return 0;
+        }
+    }
+
+    fclose(out);
+    fclose(in);
+
+    return 1;
+}
+
+/* Portable file move (rename, with copy+delete fallback) */
+int pf_move_file(const char *src, const char *dst)
+{
+    if (!src || !dst)
+        return 0;
+
+    if (pf_atomic_rename(src, dst) == 0)
+        return 1;
+
+    if (pf_copy_file(src, dst))
+    {
+        pf_remove_file(src);
+        return 1;
+    }
+
+    return 0;
+}
+
+/* Portable file size */
+long pf_get_file_size(const char *path)
+{
+#if defined(PLATFORM_WIN32)
+    WIN32_FILE_ATTRIBUTE_DATA info;
+    LARGE_INTEGER size;
+
+    if (!path || !path[0])
+        return -1;
+
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info))
+        return -1;
+
+    size.LowPart = info.nFileSizeLow;
+    size.HighPart = info.nFileSizeHigh;
+
+    return (long)size.QuadPart;
+#elif defined(PLATFORM_AMIGA)
+    BPTR lock;
+    struct FileInfoBlock *fib;
+    long res = -1;
+
+    if (!path || !path[0])
+        return -1;
+
+    lock = Lock((STRPTR)path, ACCESS_READ);
+
+    if (!lock)
+        return -1;
+
+    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
+
+    if (fib)
+    {
+        if (Examine(lock, fib) && fib->fib_DirEntryType < 0)
+            res = (long)fib->fib_Size;
+
+        FreeDosObject(DOS_FIB, fib);
+    }
+
+    UnLock(lock);
+    return res;
+#else
+    struct stat st;
+
+    if (!path || !path[0])
+        return -1;
+
+    if (stat(path, &st) != 0)
+        return -1;
+
+    return (long)st.st_size;
+#endif
+}
+
+/* Portable file modification time */
+long pf_get_file_mtime(const char *path)
+{
+#if defined(PLATFORM_WIN32)
+    WIN32_FILE_ATTRIBUTE_DATA info;
+
+    if (!path || !path[0])
+        return 0;
+
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info))
+        return 0;
+
+    {
+        FILETIME ft;
+        ULARGE_INTEGER ull;
+
+        ft = info.ftLastWriteTime;
+        ull.LowPart = ft.dwLowDateTime;
+        ull.HighPart = ft.dwHighDateTime;
+
+        return (long)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+    }
+#elif defined(PLATFORM_AMIGA)
+    BPTR lock;
+    struct FileInfoBlock *fib;
+    long res = 0;
+
+    if (!path || !path[0])
+        return 0;
+
+    lock = Lock((STRPTR)path, ACCESS_READ);
+
+    if (!lock)
+        return 0;
+
+    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
+
+    if (fib)
+    {
+        if (Examine(lock, fib) && fib->fib_DirEntryType < 0)
+            res = (long)fib->fib_Date.ds_Days * 24 * 60 * 60 + (long)fib->fib_Date.ds_Minute * 60 + (long)fib->fib_Date.ds_Tick / 50;
+
+        FreeDosObject(DOS_FIB, fib);
+    }
+
+    UnLock(lock);
+    return res;
+#else
+    struct stat st;
+
+    if (!path || !path[0])
+        return 0;
+
+    if (stat(path, &st) != 0)
+        return 0;
+
+    return (long)st.st_mtime;
 #endif
 }
 

@@ -501,6 +501,7 @@ void te_draw_titlebar(TeApp *app)
     int avail;
     TeTab *tab = NULL;
 
+    standend();
     attron(COLOR_PAIR(COL_TITLEBAR));
 
     move(0, 0);
@@ -608,7 +609,10 @@ void te_draw_statusbar(TeApp *app)
     TeTab *tab = NULL;
 
     y = LINES - 1;
+
+    standend();
     attron(COLOR_PAIR(COL_STATUS));
+
     move(y, 0);
 
     for (x = 0; x < COLS; x++)

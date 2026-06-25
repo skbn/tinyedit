@@ -95,6 +95,7 @@ ifeq ($(USE_TRANSLATE),1)
 UI_OBJS += $(OBJDIR)/ui_translate.o
 ifeq ($(USE_STARDICT),1)
 UI_OBJS += $(OBJDIR)/ui_dict.o
+UI_OBJS += $(OBJDIR)/ui_dict_picker.o
 endif
 endif
 
@@ -248,6 +249,8 @@ $(OBJDIR)/ui_translate.o: $(UIDIR)/ui_translate.c $(UIDIR)/ui_translate.h | $(OB
 ifeq ($(USE_STARDICT),1)
 $(OBJDIR)/ui_dict.o: $(UIDIR)/ui_dict.c $(UIDIR)/ui_dict.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+$(OBJDIR)/ui_dict_picker.o: $(UIDIR)/ui_dict_picker.c $(UIDIR)/ui_dict_picker.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 endif
 endif
 
@@ -261,7 +264,7 @@ $(OBJDIR)/charset.o: $(COREDIR)/charset.c $(COREDIR)/charset.h $(COREDIR)/utf8.h
 $(OBJDIR)/keys.o: $(COREDIR)/keys.c $(COREDIR)/keys.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/clipboard.o: $(COREDIR)/clipboard.c $(COREDIR)/clipboard.h | $(OBJDIR)
+$(OBJDIR)/clipboard.o: $(COREDIR)/clipboard.c $(COREDIR)/clipboard.h $(COREDIR)/portable.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/search.o: $(COREDIR)/search.c $(COREDIR)/search.h | $(OBJDIR)
