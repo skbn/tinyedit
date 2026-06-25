@@ -43,6 +43,12 @@ To compile with thesaurus support (optional):
 - Arch Linux: `sudo pacman -S libmythes`
 - FreeBSD: `doas pkg install mythes`
 
+To compile with translator support (optional):
+- Debian/Ubuntu: `sudo apt install libcurl4-openssl-dev`
+- Arch Linux: `sudo pacman -S curl`
+- FreeBSD: `doas pkg install curl`
+- macOS: `brew install curl`
+
 Dictionaries, hyphenation patterns and thesaurus data:
 - Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
 - Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us hyphen-es hyphen-en mythes-es mythes-en`
@@ -56,6 +62,21 @@ make -f Makefile.unix USE_HUNSPELL=1
 Or combine with hyphenation and thesaurus:
 ```bash
 make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1
+```
+
+Or with translator support (HTTP backends + StarDict-compatible offline dictionary):
+```bash
+make -f Makefile.unix USE_TRANSLATE=1 USE_STARDICT=1
+```
+
+Or with all features:
+```bash
+make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1 USE_TRANSLATE=1 USE_STARDICT=1
+```
+
+To compile with native spell checker (spellchecker/ like AmigaOS):
+```bash
+make -f Makefile.unix.static
 ```
 
 ### Windows (MinGW)
@@ -110,6 +131,8 @@ The AmigaOS version includes native implementations for:
 
 These are pure implementations designed for AmigaOS with LRU cache, no C++ dependencies
 
+**Note**: Online translator support on AmigaOS requires AmiSSL for HTTPS connections
+
 Tested Freetype fonts:
 
 Symbola.ttf
@@ -140,6 +163,12 @@ Dictionary location:
 - **AmigaOS**: Place .aff and .dic files in `ENVARC:tinyedit/dictionaries` directory
 - **Windows**: Place files in the directory configured in Setup (default: program directory)
 - **Unix/*nix**: Place files in the directory configured in Setup (default: `/usr/share/hunspell` or similar)
+
+StarDict-compatible dictionaries for offline lookup:
+- Download from https://stardict.uber.space/ (Wayback mirror of original archive)
+- Or from http://download.huzheng.org/ (original archive)
+- Or from https://freedict.org/downloads/ (CC-licensed bilinguals)
+- Place .ifo, .idx, and .dict files in the dictionary directory configured in Setup
 
 The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA
 ```
@@ -410,14 +439,15 @@ Each tab maintains its own editing state, undo history and cursor position
 
 ## Spell Checker and Translator Panel
 
-tinyedit includes a spell checker panel and a translator panel (placeholder for future implementation):
+tinyedit includes a spell checker panel and a translator panel:
 
 - **Spell Checker**: Verifies spelling of words in document using Hunspell (*nix) or native implementation (AmigaOS/Windows)
 - **Panel information**: Shows if the current word is correct or incorrect, and provides suggestions for misspelled words
 - **Custom dictionary**: Allows adding custom words that are saved to a custom dict file
-- **Translator Panel**: Placeholder for future translation functionality (not yet implemented)
+- **Translator**: Supports online translation via HTTP backends (MyMemory, LibreTranslate, Lingva) and offline dictionary lookup
+- **StarDict-compatible offline dictionary**: Pure C implementation compatible with StarDict dictionary format (.ifo, .idx, .dict files), no external dependencies
 
-The panel can be toggled to show spell checker or translator interface
+The panel can be toggled to show spell checker, translator, or dictionary interface (Alt+S cycles between them)
 
 ## Glyph Picker
 

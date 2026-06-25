@@ -43,6 +43,12 @@ Para compilar con soporte de tesauro (opcional):
 - Arch Linux: `sudo pacman -S libmythes`
 - FreeBSD: `doas pkg install mythes`
 
+Para compilar con soporte de traductor (opcional):
+- Debian/Ubuntu: `sudo apt install libcurl4-openssl-dev`
+- Arch Linux: `sudo pacman -S curl`
+- FreeBSD: `doas pkg install curl`
+- macOS: `brew install curl`
+
 Diccionarios, patrones de guiones y datos de tesauro:
 - Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
 - Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us hyphen-es hyphen-en mythes-es mythes-en`
@@ -56,6 +62,21 @@ make -f Makefile.unix USE_HUNSPELL=1
 O combinar con guiones y tesauro:
 ```bash
 make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1
+```
+
+O con soporte de traductor (backends HTTP + diccionario offline compatible con StarDict):
+```bash
+make -f Makefile.unix USE_TRANSLATE=1 USE_STARDICT=1
+```
+
+O con todas las características:
+```bash
+make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1 USE_TRANSLATE=1 USE_STARDICT=1
+```
+
+Para compilar con corrector ortográfico nativo (spellchecker/ como AmigaOS):
+```bash
+make -f Makefile.unix.static
 ```
 
 ### Windows (MinGW)
@@ -110,6 +131,8 @@ La versión AmigaOS incluye implementaciones nativas para:
 
 Estas son implementaciones puras diseñadas para AmigaOS con caché LRU, sin dependencias de C++
 
+**Nota**: El soporte de traductor online en AmigaOS requiere AmiSSL para conexiones HTTPS
+
 Fuentes Freetype probadas:
 
 Symbola.ttf
@@ -140,6 +163,12 @@ Ubicación de diccionarios:
 - **AmigaOS**: Coloca los archivos .aff y .dic en el directorio `ENVARC:tinyedit/dictionaries`
 - **Windows**: Coloca los archivos en el directorio configurado en Setup (por defecto: directorio del programa)
 - **Unix/*nix**: Coloca los archivos en el directorio configurado en Setup (por defecto: `/usr/share/hunspell` o similar)
+
+Diccionarios compatibles con StarDict para búsqueda offline:
+- Descarga de https://stardict.uber.space/ (mirror Wayback del archivo original)
+- O de http://download.huzheng.org/ (archivo original)
+- O de https://freedict.org/downloads/ (bilingües con licencia CC)
+- Coloca los archivos .ifo, .idx y .dict en el directorio de diccionarios configurado en Setup
 
 El ejecutable es grande, pero no necesitas ninguna librería. Está optimizado para RTG y también funciona con OCS, ECS, o AGA
 ```
@@ -410,14 +439,15 @@ Cada pestaña mantiene su propio estado de edición, historial de deshacer y pos
 
 ## Panel de Corrector Ortográfico y Traductor
 
-tinyedit incluye un panel de corrector ortográfico y un panel de traductor (placeholder para implementación futura):
+tinyedit incluye un panel de corrector ortográfico y un panel de traductor:
 
 - **Corrector Ortográfico**: Verifica la ortografía de palabras en el documento usando Hunspell (*nix) o implementación nativa (AmigaOS/Windows)
 - **Información del panel**: Muestra si la palabra actual es correcta o incorrecta, y proporciona sugerencias para palabras mal escritas
 - **Diccionario personalizado**: Permite añadir palabras personalizadas que se guardan en un archivo custom dict
-- **Panel de Traductor**: Placeholder para funcionalidad de traducción futura (aún no implementado)
+- **Traductor**: Soporta traducción online vía backends HTTP (MyMemory, LibreTranslate, Lingva) y búsqueda de diccionario offline
+- **Diccionario offline compatible con StarDict**: Implementación pura en C compatible con el formato de diccionario StarDict (archivos .ifo, .idx, .dict), sin dependencias externas
 
-El panel puede alternarse para mostrar la interfaz del corrector ortográfico o del traductor
+El panel puede alternarse para mostrar la interfaz del corrector ortográfico, traductor o diccionario (Alt+S cicla entre ellos)
 
 ## Selector de Caracteres (Glyph Picker)
 
