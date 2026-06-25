@@ -21,15 +21,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include "../core/portable.h"
 
 #if defined(PLATFORM_AMIGA)
 #include <dos/dos.h>
 #include <proto/dos.h>
-#elif defined(_WIN32)
-#include <windows.h>
-#else
-#include <dirent.h>
-#include <sys/stat.h>
 #endif
 
 #if defined(PLATFORM_AMIGA)
@@ -54,7 +50,6 @@ typedef struct
     unsigned long size;
 } SdEntry;
 
-/* Synonym entry: word in syn_buf points to a word, target_idx is an index into the main entries[] array */
 typedef struct
 {
     char *word;
@@ -344,148 +339,6 @@ static int has_ifo_suffix(const char *path)
             (path[n - 1] == 'o' || path[n - 1] == 'O'));
 }
 
-/* Is path a directory? */
-static int is_directory(const char *path)
-{
-#if defined(PLATFORM_AMIGA)
-    BPTR lock;
-    struct FileInfoBlock *fib = NULL;
-    int result = 0;
-
-    lock = Lock((STRPTR)path, ACCESS_READ);
-
-    if (!lock)
-        return 0;
-
-    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
-
-    if (fib)
-    {
-        if (Examine(lock, fib))
-            result = (fib->fib_DirEntryType > 0);
-
-        FreeDosObject(DOS_FIB, fib);
-    }
-
-    Close(lock);
-    return result;
-#elif defined(_WIN32)
-    DWORD attrs = GetFileAttributesA(path);
-
-    return (attrs != INVALID_FILE_ATTRIBUTES) && (attrs & FILE_ATTRIBUTE_DIRECTORY);
-#else
-    struct stat st;
-
-    if (stat(path, &st) != 0)
-        return 0;
-
-    return S_ISDIR(st.st_mode);
-#endif
-}
-
-/* Find first .ifo file in directory, returns path or error */
-static int find_ifo_in_dir(const char *dir, char *out, int out_size)
-{
-#if defined(PLATFORM_AMIGA)
-    BPTR lock;
-    struct FileInfoBlock *fib = NULL;
-    int found = 0;
-
-    lock = Lock((STRPTR)dir, ACCESS_READ);
-
-    if (!lock)
-        return -1;
-
-    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
-
-    if (!fib)
-    {
-        Close(lock);
-        return -1;
-    }
-
-    if (Examine(lock, fib))
-    {
-        while (ExNext(lock, fib))
-        {
-            if (fib->fib_DirEntryType < 0 && has_ifo_suffix(fib->fib_FileName))
-            {
-                int n = strlen(dir);
-
-                /* Insert '/' if dir doesn't end in separator */
-                char sep = (n > 0 && (dir[n - 1] == '/' || dir[n - 1] == ':')) ? '\0' : '/';
-
-                if (sep)
-                    snprintf(out, (size_t)out_size, "%s/%s", dir, fib->fib_FileName);
-                else
-                    snprintf(out, (size_t)out_size, "%s%s", dir, fib->fib_FileName);
-
-                found = 1;
-                break;
-            }
-        }
-    }
-
-    FreeDosObject(DOS_FIB, fib);
-    Close(lock);
-
-    return found ? 0 : -1;
-#elif defined(_WIN32)
-    char pattern[1024];
-    HANDLE hFind;
-    WIN32_FIND_DATAA fd;
-    int found = 0;
-
-    if (snprintf(pattern, sizeof(pattern), "%s\\*", dir) >= (int)sizeof(pattern))
-        return -1;
-
-    hFind = FindFirstFileA(pattern, &fd);
-
-    if (hFind != INVALID_HANDLE_VALUE)
-    {
-        do
-        {
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && has_ifo_suffix(fd.cFileName))
-            {
-                snprintf(out, (size_t)out_size, "%s\\%s", dir, fd.cFileName);
-
-                found = 1;
-                break;
-            }
-        } while (FindNextFileA(hFind, &fd));
-
-        FindClose(hFind);
-    }
-
-    return found ? 0 : -1;
-#else
-    DIR *d = NULL;
-    struct dirent *de = NULL;
-    int found = 0;
-
-    d = opendir(dir);
-
-    if (!d)
-        return -1;
-
-    while ((de = readdir(d)) != NULL)
-    {
-        if (de->d_name[0] == '.')
-            continue;
-
-        if (has_ifo_suffix(de->d_name))
-        {
-            snprintf(out, (size_t)out_size, "%s/%s", dir, de->d_name);
-            found = 1;
-            break;
-        }
-    }
-
-    closedir(d);
-    return found ? 0 : -1;
-#endif
-}
-
 static void derive_sibling(const char *ifo_path, const char *new_ext, char *out, int out_size)
 {
     int n = (int)strlen(ifo_path);
@@ -549,6 +402,7 @@ int translate_stardict_open(const char *path, const char *from, const char *to, 
     int syn_count;
     unsigned char *sp = NULL;
     unsigned char *send = NULL;
+    int n;
 
     *out = NULL;
 
@@ -570,15 +424,42 @@ int translate_stardict_open(const char *path, const char *from, const char *to, 
 
         ifo_path[sizeof(ifo_path) - 1] = '\0';
     }
-    else if (is_directory(path))
+    else if (pf_is_directory(path))
     {
-        if (find_ifo_in_dir(path, ifo_path, sizeof(ifo_path)) != 0)
+        PfDir *d = pf_dir_open(path);
+        const char *name = NULL;
+
+        if (!d)
         {
+            if (err && err_size > 0)
+                snprintf(err, (size_t)err_size, "cannot open directory %s", path);
+
+            return -1;
+        }
+
+        name = pf_dir_next(d);
+        while (name && !has_ifo_suffix(name))
+            name = pf_dir_next(d);
+
+        if (!name)
+        {
+            pf_dir_close(d);
+
             if (err && err_size > 0)
                 snprintf(err, (size_t)err_size, "no .ifo file found in directory %s", path);
 
             return -1;
         }
+
+        n = (int)strlen(path);
+        char sep = (n > 0 && (path[n - 1] == '/' || path[n - 1] == ':')) ? '\0' : '/';
+
+        if (sep)
+            snprintf(ifo_path, sizeof(ifo_path), "%s/%s", path, name);
+        else
+            snprintf(ifo_path, sizeof(ifo_path), "%s%s", path, name);
+
+        pf_dir_close(d);
     }
     else
     {

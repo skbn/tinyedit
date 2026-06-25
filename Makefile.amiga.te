@@ -556,7 +556,7 @@ $(OBJDIR)/json_utils.o: $(HERE)translate/json_utils.c $(HERE)translate/json_util
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 ifeq ($(USE_STARDICT),1)
-$(OBJDIR)/translate_stardict.o: $(HERE)translate/translate_stardict.c $(HERE)translate/translate_stardict.h | $(OBJDIR)
+$(OBJDIR)/translate_stardict.o: $(HERE)translate/translate_stardict.c $(HERE)translate/translate_stardict.h $(COREDIR)/portable.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 endif
 endif

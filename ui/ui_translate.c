@@ -408,15 +408,10 @@ int ui_translate_action(TeApp *app)
     te_status(app, "Translating %s -> %s...", from_lang, to_lang);
     refresh();
 
-    /* Show popup to indicate translation is in progress */
-    ui_popup_info("Translating", "Please wait...");
-
     err[0] = '\0';
     detected[0] = '\0';
 
     result = translate_text((TranslateHandle *)app->translate_handle, from_lang, to_lang, src, detected, sizeof(detected), err, sizeof(err));
-
-    /* Redraw screen to clear the popup */
     refresh();
 
     if (!result)

@@ -11,7 +11,8 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 - Spell checker with native implementation (AmigaOS/Windows) or Hunspell integration (*nix)
 - Hyphenation with native implementation (AmigaOS/Windows) or libhyphen (*nix)
 - Thesaurus with native implementation (AmigaOS/Windows) or libmythes (*nix)
-- Translator panel (placeholder for future implementation)
+- Translator panel with online support and StarDict-compatible offline dictionary
+- Mouse support (works in terminal, SSH and remote sessions)
 - Configurable colors and fonts
 - Auto-wrap and hard-wrap modes
 - Undo/redo support
@@ -23,9 +24,18 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 ## Compilation
 
 ### Linux/BSD/macOS
+
+To compile with external libraries (Hunspell, libhyphen, libmythes, libcurl):
 ```bash
 make -f Makefile.unix
 ```
+
+To compile with native implementations (without installing external libraries):
+```bash
+make -f Makefile.unix.static
+```
+
+Native implementations include spell checker, hyphenation, thesaurus and offline dictionary (StarDict-compatible), but require libcurl for online translator.
 
 To compile with Hunspell spell checker (optional):
 - Debian/Ubuntu: `sudo apt install libhunspell-dev`

@@ -11,7 +11,8 @@ Editor de texto ligero para AmigaOS, Linux y Windows usando ncurses
 - Corrector ortográfico con implementación nativa (AmigaOS/Windows) o integración Hunspell (*nix)
 - Guiones (hyphenation) con implementación nativa (AmigaOS/Windows) o libhyphen (*nix)
 - Tesauro (thesaurus) con implementación nativa (AmigaOS/Windows) o libmythes (*nix)
-- Panel de traductor (placeholder para implementación futura)
+- Panel de traductor con soporte online y diccionario offline compatible con StarDict
+- Soporte de ratón (funciona en terminal, SSH y sesiones remotas)
 - Colores y fuentes configurables
 - Modos auto-wrap y hard-wrap
 - Soporte deshacer/rehacer
@@ -23,9 +24,18 @@ Editor de texto ligero para AmigaOS, Linux y Windows usando ncurses
 ## Compilación
 
 ### Linux/BSD/macOS
+
+Para compilar con las librerías externas (Hunspell, libhyphen, libmythes, libcurl):
 ```bash
 make -f Makefile.unix
 ```
+
+Para compilar con las implementaciones propias (sin instalar librerías externas):
+```bash
+make -f Makefile.unix.static
+```
+
+Las implementaciones propias incluyen corrector ortográfico, guiones, tesauro y diccionario offline (compatible con StarDict), pero requieren libcurl para el traductor online.
 
 Para compilar con corrector ortográfico Hunspell (opcional):
 - Debian/Ubuntu: `sudo apt install libhunspell-dev`
