@@ -8,7 +8,6 @@
  * the Free Software Foundation, either version 2 of the License, or
  * (at your option) any later version.
  */
-
 /* ncursesw_win32.c - ncursesw for Windows using GDI (own window like Amiga) */
 
 #ifdef PLATFORM_WIN32
@@ -359,7 +358,9 @@ static void draw_glyph_te(int cx, int cy, int cell_w, unsigned int cp)
 
     /* Center glyph horizontally if narrower than cell */
     x = cx;
+
     TE_MeasureText(s_te_dc, utf8, 1, &metrics);
+
     if (metrics.width > 0 && metrics.width < cell_w)
         x = cx + (cell_w - metrics.width) / 2;
 
@@ -986,8 +987,7 @@ static unsigned short read_be16(const unsigned char *p)
 /* Read big-endian 32-bit value from buffer */
 static unsigned long read_be32(const unsigned char *p)
 {
-    return ((unsigned long)p[0] << 24) | ((unsigned long)p[1] << 16) |
-           ((unsigned long)p[2] << 8) | (unsigned long)p[3];
+    return ((unsigned long)p[0] << 24) | ((unsigned long)p[1] << 16) | ((unsigned long)p[2] << 8) | (unsigned long)p[3];
 }
 
 /* Convert UTF-16BE string to UTF-8. Returns number of bytes written (excluding NUL) */
@@ -1011,9 +1011,12 @@ static int utf16be_to_utf8(const unsigned char *src, int src_len, char *dst, int
         {
             if (i + 3 >= src_len)
                 break;
+
             unsigned short low = (unsigned short)((src[i + 2] << 8) | src[i + 3]);
+
             if (low < 0xDC00 || low > 0xDFFF)
                 break;
+
             cp = 0x10000UL + (((unsigned long)(wc - 0xD800)) << 10) + (low - 0xDC00);
             src_adv = 4;
         }
@@ -1030,12 +1033,14 @@ static int utf16be_to_utf8(const unsigned char *src, int src_len, char *dst, int
         {
             if (dst_pos + 1 >= dst_sz)
                 break;
+
             dst[dst_pos++] = (char)cp;
         }
         else if (cp < 0x800)
         {
             if (dst_pos + 2 >= dst_sz)
                 break;
+
             dst[dst_pos++] = (char)(0xC0 | (cp >> 6));
             dst[dst_pos++] = (char)(0x80 | (cp & 0x3F));
         }
@@ -1043,6 +1048,7 @@ static int utf16be_to_utf8(const unsigned char *src, int src_len, char *dst, int
         {
             if (dst_pos + 3 >= dst_sz)
                 break;
+
             dst[dst_pos++] = (char)(0xE0 | (cp >> 12));
             dst[dst_pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
             dst[dst_pos++] = (char)(0x80 | (cp & 0x3F));
@@ -1051,6 +1057,7 @@ static int utf16be_to_utf8(const unsigned char *src, int src_len, char *dst, int
         {
             if (dst_pos + 4 >= dst_sz)
                 break;
+
             dst[dst_pos++] = (char)(0xF0 | (cp >> 18));
             dst[dst_pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
             dst[dst_pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
@@ -1068,11 +1075,10 @@ static int utf16be_to_utf8(const unsigned char *src, int src_len, char *dst, int
     return dst_pos;
 }
 
-/* Extract the font family name (nameID 1) from a TTF/OTF file.
- * Returns 0 on success, -1 on failure */
+/* Extract the font family name (nameID 1) from a TTF/OTF file */
 int win32_get_font_family_name(const char *path, char *out, int out_sz)
 {
-    FILE *fp;
+    FILE *fp = NULL;
     unsigned char header[12];
     unsigned short num_tables;
     unsigned long name_offset = 0;
@@ -1080,6 +1086,9 @@ int win32_get_font_family_name(const char *path, char *out, int out_sz)
     int i;
     unsigned char *name_table = NULL;
     int found = -1;
+    unsigned short count;
+    unsigned short string_offset;
+    const unsigned char *record = NULL;
 
     if (!path || !out || out_sz < 1)
         return -1;
@@ -1087,6 +1096,7 @@ int win32_get_font_family_name(const char *path, char *out, int out_sz)
     out[0] = '\0';
 
     fp = fopen(path, "rb");
+
     if (!fp)
         return -1;
 
@@ -1148,84 +1158,87 @@ int win32_get_font_family_name(const char *path, char *out, int out_sz)
 
     fclose(fp);
 
-    {
-        unsigned short count = read_be16(name_table + 2);
-        unsigned short string_offset = read_be16(name_table + 4);
-        const unsigned char *record = name_table + 6;
+    count = read_be16(name_table + 2);
+    string_offset = read_be16(name_table + 4);
+    record = name_table + 6;
 
-        for (i = 0; i < count && found < 0; i++)
+    for (i = 0; i < count && found < 0; i++)
+    {
+        unsigned short platform_id = read_be16(record);
+        unsigned short encoding_id = read_be16(record + 2);
+        unsigned short language_id = read_be16(record + 4);
+        unsigned short name_id = read_be16(record + 6);
+        unsigned short length = read_be16(record + 8);
+        unsigned short offset = read_be16(record + 10);
+
+        if (name_id == 1 && platform_id == 3 && encoding_id == 1 && language_id == 0x0409)
+        {
+            if ((unsigned long)string_offset + offset + length <= name_length)
+            {
+                utf16be_to_utf8(name_table + string_offset + offset, length, out, out_sz);
+                found = 0;
+            }
+        }
+
+        record += 12;
+    }
+
+    if (found < 0)
+    {
+        record = name_table + 6;
+
+        for (i = 0; i < count; i++)
         {
             unsigned short platform_id = read_be16(record);
-            unsigned short encoding_id = read_be16(record + 2);
-            unsigned short language_id = read_be16(record + 4);
             unsigned short name_id = read_be16(record + 6);
             unsigned short length = read_be16(record + 8);
             unsigned short offset = read_be16(record + 10);
 
-            if (name_id == 1 && platform_id == 3 && encoding_id == 1 && language_id == 0x0409)
+            if (name_id == 1 && platform_id == 3)
             {
                 if ((unsigned long)string_offset + offset + length <= name_length)
                 {
                     utf16be_to_utf8(name_table + string_offset + offset, length, out, out_sz);
                     found = 0;
+                    break;
                 }
             }
 
             record += 12;
         }
+    }
 
-        if (found < 0)
+    if (found < 0)
+    {
+        record = name_table + 6;
+
+        for (i = 0; i < count; i++)
         {
-            record = name_table + 6;
-            for (i = 0; i < count; i++)
+            unsigned short platform_id = read_be16(record);
+            unsigned short name_id = read_be16(record + 6);
+            unsigned short length = read_be16(record + 8);
+            unsigned short offset = read_be16(record + 10);
+
+            if (name_id == 1 && platform_id == 1)
             {
-                unsigned short platform_id = read_be16(record);
-                unsigned short name_id = read_be16(record + 6);
-                unsigned short length = read_be16(record + 8);
-                unsigned short offset = read_be16(record + 10);
-
-                if (name_id == 1 && platform_id == 3)
+                if ((unsigned long)string_offset + offset + length <= name_length)
                 {
-                    if ((unsigned long)string_offset + offset + length <= name_length)
-                    {
-                        utf16be_to_utf8(name_table + string_offset + offset, length, out, out_sz);
-                        found = 0;
-                        break;
-                    }
+                    int j;
+
+                    for (j = 0; j < length && j < out_sz - 1; j++)
+                        out[j] = (char)name_table[string_offset + offset + j];
+
+                    if (j < out_sz)
+                        out[j] = '\0';
+                    else if (out_sz > 0)
+                        out[out_sz - 1] = '\0';
+
+                    found = 0;
+                    break;
                 }
-
-                record += 12;
             }
-        }
 
-        if (found < 0)
-        {
-            record = name_table + 6;
-            for (i = 0; i < count; i++)
-            {
-                unsigned short platform_id = read_be16(record);
-                unsigned short name_id = read_be16(record + 6);
-                unsigned short length = read_be16(record + 8);
-                unsigned short offset = read_be16(record + 10);
-
-                if (name_id == 1 && platform_id == 1)
-                {
-                    if ((unsigned long)string_offset + offset + length <= name_length)
-                    {
-                        int j;
-                        for (j = 0; j < length && j < out_sz - 1; j++)
-                            out[j] = (char)name_table[string_offset + offset + j];
-                        if (j < out_sz)
-                            out[j] = '\0';
-                        else if (out_sz > 0)
-                            out[out_sz - 1] = '\0';
-                        found = 0;
-                        break;
-                    }
-                }
-
-                record += 12;
-            }
+            record += 12;
         }
     }
 
@@ -1233,11 +1246,10 @@ int win32_get_font_family_name(const char *path, char *out, int out_sz)
     return found;
 }
 
-/* Add a TTF/OTF font file to the Windows session. Call before initscr().
- * Returns 0 on success, -1 on failure */
+/* Add a TTF/OTF font file to the Windows session. Call before initscr() */
 int win32_add_font_file(const char *path)
 {
-    wchar_t *wpath;
+    wchar_t *wpath = NULL;
     int count;
 
     if (!path || !path[0])
@@ -1260,15 +1272,16 @@ int win32_add_font_file(const char *path)
     }
 
     count = AddFontResourceExW(wpath, FR_PRIVATE, 0);
+
     fprintf(stderr, "[win32_add_font_file] AddFontResourceExW returned %d\n", count);
+
     free(wpath);
 
     if (count <= 0)
-    {
         fprintf(stderr, "[win32_add_font_file] GDI rejected font, will still try FreeType\n");
-    }
 
     strncpy(s_added_fonts[s_added_font_count], path, MAX_PATH - 1);
+
     s_added_fonts[s_added_font_count][MAX_PATH - 1] = '\0';
     s_added_font_count++;
 
@@ -1573,6 +1586,8 @@ static void render_all(void)
 
                 for (u = 0; u < run_len; u++)
                 {
+                    unsigned int draw_cp;
+
                     cc = CELL(stdscr, r, actual_pos);
                     wc = (wchar_t)cc->ch;
                     cx = actual_pos * fw;
@@ -1586,43 +1601,43 @@ static void render_all(void)
                     }
 
                     /* Use full 32-bit codepoint if available */
+                    draw_cp = cc->full_cp ? (unsigned int)cc->full_cp : (unsigned int)wc;
+
+                    /* wide glyph: 2-cell allocation */
+                    is_wide = is_wide_cp(draw_cp);
+
+                    /* clear background (1 or 2 cells) */
+                    rect.left = cx;
+                    rect.top = cy;
+                    rect.right = cx + (is_wide ? 2 * fw : fw);
+                    rect.bottom = cy + fh;
+
+                    hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
+
+                    FillRect(hMemDC, &rect, hBrush);
+                    DeleteObject(hBrush);
+
+                    /* render glyph centered in cell */
+                    if (draw_cp >= 0x20)
                     {
-                        unsigned int draw_cp = cc->full_cp ? (unsigned int)cc->full_cp : (unsigned int)wc;
+                        int cell_w_pixels = is_wide ? 2 * fw : fw;
 
-                        /* wide glyph: 2-cell allocation */
-                        is_wide = is_wide_cp(draw_cp);
-
-                        /* clear background (1 or 2 cells) */
-                        rect.left = cx;
-                        rect.top = cy;
-                        rect.right = cx + (is_wide ? 2 * fw : fw);
-                        rect.bottom = cy + fh;
-
-                        hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
-                        FillRect(hMemDC, &rect, hBrush);
-                        DeleteObject(hBrush);
-
-                        /* render glyph centered in cell */
-                        if (draw_cp >= 0x20)
-                        {
-                            int cell_w_pixels = is_wide ? 2 * fw : fw;
-
-                            if (s_use_te && s_te_dc)
-                                draw_glyph_te(cx, cy, cell_w_pixels, draw_cp);
-                            else
-                            {
-                                wchar_t buf[2];
-                                int wlen = cp_to_utf16(draw_cp, buf);
-                                draw_glyph_in_cell(cx, cy, cell_w_pixels, buf, wlen);
-                            }
-                        }
-
-                        /* advance past trailing cell for wide glyphs */
-                        if (is_wide)
-                            actual_pos += 2;
+                        if (s_use_te && s_te_dc)
+                            draw_glyph_te(cx, cy, cell_w_pixels, draw_cp);
                         else
-                            actual_pos++;
+                        {
+                            wchar_t buf[2];
+                            int wlen = cp_to_utf16(draw_cp, buf);
+
+                            draw_glyph_in_cell(cx, cy, cell_w_pixels, buf, wlen);
+                        }
                     }
+
+                    /* advance past trailing cell for wide glyphs */
+                    if (is_wide)
+                        actual_pos += 2;
+                    else
+                        actual_pos++;
                 }
             }
             else
@@ -1634,6 +1649,7 @@ static void render_all(void)
                 rect.bottom = rect.top + fh;
 
                 hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
+
                 FillRect(hMemDC, &rect, hBrush);
                 DeleteObject(hBrush);
 
@@ -1648,6 +1664,7 @@ static void render_all(void)
     }
 
     free(text_buf);
+
     s_shadow_dirty = 0;
 
     /* draw cursor as a rectangle border */
@@ -1732,6 +1749,7 @@ static void render_all(void)
         int cursor_w = fw;
         int draw_x_cell = cx_cell;
         int trailing_x_cell = -1; /* -1 = none */
+        RECT rc;
 
         /* cursor width: 2*fw on wide glyph, fw otherwise */
         if (stdscr && stdscr->cells)
@@ -1759,12 +1777,9 @@ static void render_all(void)
         cx = draw_x_cell * fw;
         cy = cy_cell * fh;
 
-        /* XOR block cursor: inverts whatever is under it so text/emojis
-         * remain visible instead of being painted over by the cursor color */
-        {
-            RECT rc = {cx, cy, cx + cursor_w, cy + fh};
-            InvertRect(hMemDC, &rc);
-        }
+        /* XOR block cursor preserves underlying text */
+        rc = {cx, cy, cx + cursor_w, cy + fh};
+        InvertRect(hMemDC, &rc);
 
         /* dirty the cursor cells so next render repaints under it */
         if (s_shadow)
@@ -1819,6 +1834,9 @@ WINDOW *initscr(void)
     RECT rect;
     HBRUSH hBrush;
     TEXTMETRIC tm;
+    HDC tmpDC;
+    HDC tmpMemDC;
+    HFONT tmpFont;
 
     /* Register window class */
     wc.style = CS_HREDRAW | CS_VREDRAW;
@@ -1842,44 +1860,39 @@ WINDOW *initscr(void)
     fh = s_win_font_size;
     fb = 12;
 
-    /* Measure the requested font to get accurate cell metrics before
-     * creating the window. This is essential for TTF fonts where the
-     * default 8x16 metrics do not match the actual font */
+    /* Measure requested font for accurate cell metrics */
+
+    tmpDC = GetDC(NULL);
+    tmpMemDC = tmpDC ? CreateCompatibleDC(tmpDC) : NULL;
+    tmpFont = tmpMemDC ? CreateFont(s_win_font_size, 0, 0, 0, FW_NORMAL,
+                                    FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                    DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN,
+                                    TEXT(win_font_name))
+                       : NULL;
+
+    if (tmpFont && tmpMemDC)
     {
-        HDC tmpDC = GetDC(NULL);
-        HDC tmpMemDC = tmpDC ? CreateCompatibleDC(tmpDC) : NULL;
-        HFONT tmpFont = tmpMemDC ? CreateFont(s_win_font_size, 0, 0, 0, FW_NORMAL,
-                                              FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                              DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN,
-                                              TEXT(win_font_name))
-                                 : NULL;
+        SelectObject(tmpMemDC, tmpFont);
 
-        if (tmpFont && tmpMemDC)
+        if (GetTextMetrics(tmpMemDC, &tm))
         {
-            SelectObject(tmpMemDC, tmpFont);
-
-            if (GetTextMetrics(tmpMemDC, &tm))
-            {
-                fw = tm.tmAveCharWidth;
-                fh = tm.tmHeight;
-                fb = tm.tmAscent;
-            }
+            fw = tm.tmAveCharWidth;
+            fh = tm.tmHeight;
+            fb = tm.tmAscent;
         }
-
-        if (tmpFont)
-            DeleteObject(tmpFont);
-
-        if (tmpMemDC)
-            DeleteDC(tmpMemDC);
-
-        if (tmpDC)
-            ReleaseDC(NULL, tmpDC);
     }
 
-    /* Create FreeType renderer if TTF files are configured.
-     * If it succeeds, override the GDI metrics with the actual font metrics
-     * so the window and bitmap are sized correctly for the chosen font */
+    if (tmpFont)
+        DeleteObject(tmpFont);
+
+    if (tmpMemDC)
+        DeleteDC(tmpMemDC);
+
+    if (tmpDC)
+        ReleaseDC(NULL, tmpDC);
+
+    /* Create FreeType renderer and override GDI metrics with actual font metrics */
     if (s_added_font_count > 0)
     {
         int i;
@@ -2004,6 +2017,7 @@ WINDOW *initscr(void)
 
     /* Create font */
     fprintf(stderr, "[win32_init_screen] CreateFont size=%dx%d name=%s\n", fw, fh, win_font_name);
+
     hFont = CreateFont(fh, fw, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, TEXT(win_font_name));
 
     s_hfont_is_stock = 0;
@@ -2538,8 +2552,7 @@ int mvwaddch(WINDOW *win, int y, int x, const chtype ch)
     return waddch(win, ch);
 }
 
-/* Write a full 32-bit Unicode codepoint (needed on Windows where wchar_t is 16-bit).
- * Stores the truncated value in ch for width/ncurses compat and the full codepoint in full_cp */
+/* Write full 32-bit Unicode codepoint on Windows (wchar_t is 16-bit) */
 int waddch32(WINDOW *win, unsigned long cp)
 {
     int r, c;
@@ -2632,6 +2645,7 @@ int waddch32(WINDOW *win, unsigned long cp)
             wscrl(win, 1);
         }
     }
+
     return OK;
 }
 
@@ -2725,6 +2739,7 @@ static int utf8_decode_one(const unsigned char *p, int max, wchar_t *out, int *c
     /* malformed: emit as Latin-1 */
     *out = (wchar_t)b0;
     *consumed = 1;
+
     return -1;
 }
 
@@ -2755,6 +2770,7 @@ int waddnstr(WINDOW *win, const char *str, int n)
 
         i += consumed;
     }
+
     return OK;
 }
 

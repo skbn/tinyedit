@@ -1,5 +1,5 @@
 /*
- * te_rastport.c -- Glyph rendering with FreeType for tinyedit
+ * tinyedit - Text editor for AmigaOS
  *
  * Copyright (C) 2026 Tanausú M. 39:190/101@amiganet 2:341/207@fidonet
  *

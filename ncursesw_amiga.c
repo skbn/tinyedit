@@ -45,8 +45,6 @@
 #include "te_rastport.h"
 #include "te_rastport.h"
 
-/* Global state */
-
 WINDOW *stdscr = NULL;
 WINDOW *curscr = NULL;
 int LINES = 25;
@@ -534,6 +532,7 @@ static void render_cell(int row, int col, chtype ch, int attrs)
 
     /* Clear cell bg over the actual visual extent (1 or 2 cells) */
     saved = ami_rp->FgPen;
+
     SetAPen(ami_rp, ami_rp->BgPen);
     RectFill(ami_rp, x, y, x + cell_w - 1, y + fh - 1);
     SetAPen(ami_rp, saved);
@@ -589,7 +588,7 @@ void amiga_force_redraw()
 static void render_all()
 {
     int r, c;
-    Cell *cell;
+    Cell *cell = NULL;
     int last_pair = -1;
     int last_attrs = -1;
     UBYTE saved;
@@ -698,6 +697,7 @@ static void render_all()
 
             /* One wide RectFill for whole run background (includes trailing cells) */
             saved = ami_rp->FgPen;
+
             SetAPen(ami_rp, ami_rp->BgPen);
             RectFill(ami_rp, x, y, rx, y + fh - 1);
             SetAPen(ami_rp, saved);
@@ -752,8 +752,6 @@ static void render_all()
                         /* TRAILING cells already painted by lead glyph's wide bitmap */
                         if (wc == TE_CELL_WIDE_TRAILING)
                             continue;
-
-                        /* Outer run RectFill already cleared background (no per-cell RectFill needed) */
 
                         /* ANSI mode + block glyph: draw directly (no font) */
                         if (s_ansi_mode && is_block_glyph(wc))
@@ -855,6 +853,7 @@ static void render_all()
         int cursor_w = fw;
         int draw_x_cell = cx_cell;
         int trailing_x_cell = -1; /* -1 = none */
+        UBYTE old_dm;
 
         /* Determine cursor visual width: LEAD (2*fw) or TRAILING (2*fw at col-1) */
         if (stdscr && stdscr->cells)
@@ -882,15 +881,13 @@ static void render_all()
         cx = bx + draw_x_cell * fw;
         cy = by + cy_cell * fh;
 
-        /* XOR block cursor: inverts whatever is under it so text/emojis
-         * remain visible instead of being painted over by the cursor pen */
-        {
-            UBYTE old_dm = ami_rp->DrawMode;
-            SetDrMd(ami_rp, COMPLEMENT);
-            SetAPen(ami_rp, 0xFF); /* full pen: invert every bit */
-            RectFill(ami_rp, cx, cy, cx + cursor_w - 1, cy + fh - 1);
-            SetDrMd(ami_rp, old_dm);
-        }
+        /* XOR block cursor preserves underlying text */
+        old_dm = ami_rp->DrawMode;
+
+        SetDrMd(ami_rp, COMPLEMENT);
+        SetAPen(ami_rp, 0xFF); /* full pen: invert every bit */
+        RectFill(ami_rp, cx, cy, cx + cursor_w - 1, cy + fh - 1);
+        SetDrMd(ami_rp, old_dm);
 
         /* Force next render to redraw under cursor (mark both halves of wide pair) */
         if (s_shadow)
@@ -1920,7 +1917,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
         else
         {
             /* Cleanup edge cases when overwriting existing wide glyphs */
-            /* Case A: writing on TRAILING -> lead at col-1 orphaned, replace with space */
+            /* Overwrite TRAILING leaves LEAD orphaned */
             if (w->_curx > 0)
             {
                 Cell *cur = CELL(w, w->_cury, w->_curx);
@@ -1933,7 +1930,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
                 }
             }
 
-            /* Case B: writing NARROW into LEAD -> trailing at col+1 orphaned, replace with space */
+            /* Overwrite LEAD leaves TRAILING orphaned */
             if (cw == 1 && w->_curx + 1 < w->_maxx)
             {
                 Cell *nxt = CELL(w, w->_cury, w->_curx + 1);
@@ -1945,7 +1942,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
                 }
             }
 
-            /* Case C: writing WIDE whose trailing slot was LEAD -> cell at curx+2 orphaned, replace with space */
+            /* Writing WIDE whose trailing slot was LEAD -> cell at curx+2 orphaned, replace with space */
             if (cw == 2 && w->_curx + 2 < w->_maxx)
             {
                 Cell *thd = CELL(w, w->_cury, w->_curx + 2);
@@ -2273,8 +2270,6 @@ int assume_default_colors(int fg, int bg)
 
     return OK;
 }
-
-/* Amiga-specific extensions */
 
 /* Set cursor outline pen (0..255), returns previous pen */
 int amiga_set_cursor_pen(int pen)
@@ -2620,8 +2615,6 @@ int amiga_reload_ttf(const char *font_path, int new_size)
     return 1;
 }
 
-/* Keyboard input */
-
 /* Pending bytes from MapRawKey() (dead-key + vowel can generate multiple Latin-1 bytes) */
 static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 {
@@ -2634,7 +2627,6 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
         return ERR;
 
     /* Modified arrows must be checked before bare-arrow switch below */
-    /* Ctrl+Shift takes priority over Shift or Ctrl alone */
     if ((qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) && (qual & IEQUALIFIER_CONTROL))
     {
         if (code == 0x4C)
@@ -2747,37 +2739,13 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
     if ((qual & IEQUALIFIER_RCOMMAND) && code == 0x34) /* 0x34 = V */
         return 0x16;
 
-    /* Map printable via MapRawKey
-     *
-     * Alt handling is keymap-dependent and tricky:
-     *   - On English/US layouts Alt is typically a "meta" modifier
-     *     (Alt+letter sends ESC+letter to apps), and the keymap does
-     *     NOT map Alt+key to any character
-     *   - On Spanish (and many other non-English) layouts, Alt is the
-     *     ONLY way to type characters like @ # | \ [ ] { } EUR - the
-     *     keymap maps Alt+2 -> @, Alt+1 -> |, Alt+E -> €, etc
-     *
-     * So we MUST try MapRawKey with the original qualifiers first
-     * If that yields a different printable result from the bare-key
-     * mapping, Alt was needed to TYPE the character: emit those bytes
-     * directly. If both yield the same byte, Alt was a meta modifier:
-     * fall through to the "ESC + bare" convention
-     *
-     * MapRawKey can return MORE THAN ONE byte (dead-key composition,
-     * multibyte locale output). Extra bytes are queued and drained on
-     * subsequent wgetch() calls
-     *
-     * Per AmigaOS keymap.library autodoc, for IDCMP_RAWKEY events
-     * im->IAddress is a POINTER TO POINTER to the dead-key prefix
-     * data. Without dereferencing it MapRawKey loses dead-key state
-     * and accent composition (´+a -> á, ¨+u -> ü) silently fails */
+    /* Map printable via MapRawKey */
     memset(&ie, 0, sizeof(ie));
 
     ie.ie_Class = IECLASS_RAWKEY;
     ie.ie_Code = code;
 
-    /* COMMAND qualifiers are always stripped (they're for the app's
-     * own use, never produce text). ALT is kept on the first pass */
+    /* Strip command qualifiers, keep Alt on first pass */
     ie.ie_Qualifier = qual & ~(IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND);
 
     if (iaddr)
@@ -2787,18 +2755,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
     actual = MapRawKey(&ie, (STRPTR)buf, (LONG)sizeof(buf), NULL);
 
-    /* When Alt is pressed, decide between:
-     *   - chord  (returns KEY_ALT(letter))  for letters; the keymap
-     *            may produce a character, nothing, or something
-     *            different -- we ignore it because the user expects
-     *            Alt+letter to be a hotkey
-     *   - text   (passes the keymap's result through)  for everything
-     *            else, so Alt+2='@', Alt+1='|', Alt+e='€', dead-key
-     *            composition, etc. all keep working
-     *
-     * The base key (without Alt) is queried with a second MapRawKey:
-     * if it's a single A-Z letter we return the chord. Otherwise we
-     * fall through to the original Alt-modified result */
+    /* Alt+letter returns KEY_ALT, else pass keymap text through */
     if (qual & (IEQUALIFIER_LALT | IEQUALIFIER_RALT))
     {
         struct InputEvent ie2;
@@ -2819,10 +2776,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
         if (actual2 == 1 && ((buf2[0] >= 'a' && buf2[0] <= 'z') || (buf2[0] >= 'A' && buf2[0] <= 'Z')))
         {
-            /* Pure Alt+letter chord. Normalise case so callers write
-             * KEY_ALT('L') uniformly (matches the editor's case
-             * labels). Shift+Alt produces KEY_SHIFT('L') for
-             * secondary commands (e.g. Shift+Alt+V sort) */
+            /* Normalise Alt+letter chords to KEY_ALT / KEY_SHIFT */
             int letter = (int)buf2[0];
             int shift = (qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) != 0;
 
@@ -2834,10 +2788,6 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
             return KEY_ALT(letter);
         }
-
-        /* Not a letter -- the keymap is the authority. Fall through
-         * to the Alt-modified result (which gives '@', '|', '€', dead
-         * keys etc) */
     }
 
     if (actual <= 0)
@@ -2873,9 +2823,7 @@ int wgetch(WINDOW *w)
     if (!ami_win)
         return ERR;
 
-    /* Drain any extra bytes from a previous MapRawKey() call. This is
-     * what makes dead-key sequences (´+a = á, ¨+u = ü, ...) work when
-     * the keymap returns multiple bytes at once */
+    /* Drain queued bytes from previous MapRawKey() call */
     if (s_key_queue_pos < s_key_queue_len)
     {
         key = (int)s_key_queue[s_key_queue_pos++];
@@ -2921,11 +2869,7 @@ int wgetch(WINDOW *w)
         qual = imsg->Qualifier;
         iaddr = imsg->IAddress;
 
-        /* DEAD KEYS: for IDCMP_RAWKEY, IAddress points to dead-key prefix
-         * data that becomes invalid after ReplyMsg. We MUST call
-         * MapRawKey (inside xlat_rawkey) BEFORE replying the message,
-         * otherwise dead-key sequences (accented chars: á é í ó ú ñ ...)
-         * cannot be composed */
+        /* Translate raw key before ReplyMsg for dead-key data */
         if (cls == IDCMP_RAWKEY)
             key = xlat_rawkey(code, qual, iaddr);
 

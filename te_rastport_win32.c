@@ -1,9 +1,12 @@
 /*
- * te_rastport_win32.c - FreeType text rendering for Windows GDI
+ * tinyedit - Text editor for AmigaOS
  *
- * Windows counterpart of te_rastport.c. Loads a chain of TrueType/OpenType
- * fonts and renders UTF-8 text with automatic fallback so emojis and CJK
- * display when the primary monospace font lacks them.
+ * Copyright (C) 2026 Tanausú M. 39:190/101@amiganet 2:341/207@fidonet
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
  */
 
 #ifdef PLATFORM_WIN32
@@ -163,16 +166,18 @@ static unsigned int te_hash_cp_style(ULONG cp, unsigned char style)
 
 struct TERenderContext *TE_ContextCreate(void)
 {
-    struct TERenderContext *dc;
+    struct TERenderContext *dc = NULL;
     FT_Error err;
 
     dc = (struct TERenderContext *)malloc(sizeof(*dc));
+
     if (!dc)
         return NULL;
 
     memset(dc, 0, sizeof(*dc));
 
     err = FT_Init_FreeType(&dc->library);
+
     if (err)
     {
         free(dc);
@@ -224,6 +229,7 @@ static int te_set_face_size(struct TEFont *fnt)
         {
             int sz = (int)fnt->face->available_sizes[i].height;
             int diff = abs(sz - (int)fnt->pointSize);
+
             if (diff < bestDiff)
             {
                 bestDiff = diff;
@@ -232,10 +238,12 @@ static int te_set_face_size(struct TEFont *fnt)
         }
 
         err = FT_Select_Size(fnt->face, best);
+
         return (err == 0);
     }
 
     err = FT_Set_Char_Size(fnt->face, 0, (FT_F26Dot6)(fnt->pointSize * 64), TE_DPI, TE_DPI);
+
     return (err == 0);
 }
 
@@ -250,6 +258,7 @@ static void te_compute_scale(struct TEFont *fnt)
     if (!FT_IS_SCALABLE(fnt->face) && fnt->face->num_fixed_sizes > 0)
     {
         int cellH = (int)(fnt->face->size->metrics.height >> 6);
+
         if (cellH > 0 && cellH != (int)fnt->pointSize)
         {
             fnt->scaleNum = (int)fnt->pointSize;
@@ -279,6 +288,7 @@ static void te_compute_metrics(struct TEFont *fnt)
     if (!FT_IS_SCALABLE(fnt->face) && fnt->face->num_fixed_sizes > 0)
     {
         int cellH = (int)(fnt->face->size->metrics.height >> 6);
+
         if (asc <= 0)
         {
             asc = cellH;
@@ -302,7 +312,7 @@ static void te_compute_metrics(struct TEFont *fnt)
 
 LONG TE_FontAdd(struct TERenderContext *dc, const char *fontPath, LONG pointSize, ULONG flags)
 {
-    struct TEFont *fnt;
+    struct TEFont *fnt = NULL;
     FT_Error err;
 
     if (!dc || !fontPath || pointSize <= 0)
@@ -315,6 +325,7 @@ LONG TE_FontAdd(struct TERenderContext *dc, const char *fontPath, LONG pointSize
     memset(fnt, 0, sizeof(*fnt));
 
     err = FT_New_Face(dc->library, fontPath, 0, &fnt->face);
+
     if (err || !fnt->face)
     {
         fnt->face = NULL;
@@ -323,6 +334,7 @@ LONG TE_FontAdd(struct TERenderContext *dc, const char *fontPath, LONG pointSize
     }
 
     strncpy(fnt->path, fontPath, TE_PATH_MAX - 1);
+
     fnt->path[TE_PATH_MAX - 1] = '\0';
     fnt->pointSize = pointSize;
     fnt->flags = flags;
@@ -331,6 +343,7 @@ LONG TE_FontAdd(struct TERenderContext *dc, const char *fontPath, LONG pointSize
     {
         FT_Done_Face(fnt->face);
         fnt->face = NULL;
+
         TE_DEBUG_WARN("TE_FontAdd: te_set_face_size failed for '%s'", fontPath);
         return 0;
     }
@@ -348,15 +361,15 @@ LONG TE_FontAdd(struct TERenderContext *dc, const char *fontPath, LONG pointSize
 
 void TE_FontRemove(struct TERenderContext *dc, const char *fontPath, LONG pointSize)
 {
-    int i, j;
+    int i;
+    int j;
 
     if (!dc || !fontPath)
         return;
 
     for (i = 0; i < dc->numFonts; i++)
     {
-        if (dc->fonts[i].pointSize == pointSize &&
-            strcmp(dc->fonts[i].path, fontPath) == 0)
+        if (dc->fonts[i].pointSize == pointSize && strcmp(dc->fonts[i].path, fontPath) == 0)
         {
             if (dc->fonts[i].face)
                 FT_Done_Face(dc->fonts[i].face);
@@ -390,6 +403,7 @@ void TE_FontFlush(struct TERenderContext *dc)
     }
 
     memset(dc->fonts, 0, sizeof(dc->fonts));
+
     dc->numFonts = 0;
     dc->metrics_valid = 0;
 }
@@ -464,6 +478,7 @@ void TE_SetTabWidth(struct TERenderContext *dc, ULONG nSpaces)
 
     if (nSpaces < 1)
         nSpaces = 1;
+
     if (nSpaces > 16)
         nSpaces = 16;
 
@@ -500,12 +515,15 @@ static void te_cache_flush(struct TERenderContext *dc)
     for (i = 0; i < TE_HASH_BUCKETS; i++)
     {
         struct TEGlyph *g = dc->buckets[i];
+
         while (g)
         {
             struct TEGlyph *next = g->next;
+
             te_glyph_free(g);
             g = next;
         }
+
         dc->buckets[i] = NULL;
     }
 }
@@ -538,6 +556,7 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
             if (bm->pixel_mode == FT_PIXEL_MODE_MONO)
             {
                 const unsigned char *srow = bm->buffer + sy * bm->pitch;
+
                 for (x = 0; x < dstW; x++)
                 {
                     int sx = (int)(accumX >> 16);
@@ -553,35 +572,43 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
             else if (bm->pixel_mode == FT_PIXEL_MODE_GRAY)
             {
                 const unsigned char *srow = bm->buffer + sy * bm->pitch;
+
                 for (x = 0; x < dstW; x++)
                 {
                     int sx = (int)(accumX >> 16);
+
                     if (srow[sx] >= 128)
                         drow[x >> 3] |= (unsigned char)(0x80 >> (x & 7));
+
                     accumX += dx;
                 }
             }
             else if (bm->pixel_mode == FT_PIXEL_MODE_BGRA)
             {
                 const unsigned char *srow = bm->buffer + sy * bm->pitch;
+
                 for (x = 0; x < dstW; x++)
                 {
                     int sx = (int)(accumX >> 16);
                     const unsigned char *sp = srow + sx * 4;
+
                     if (sp[3] >= 128)
                         drow[x >> 3] |= (unsigned char)(0x80 >> (x & 7));
+
                     accumX += dx;
                 }
             }
 
             accumY += dy;
         }
+
         break;
     }
 
     case FMT_GRAY:
     {
         unsigned long accumY = 0;
+
         for (y = 0; y < dstH; y++)
         {
             int sy = (int)(accumY >> 16);
@@ -591,11 +618,13 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
             if (bm->pixel_mode == FT_PIXEL_MODE_MONO)
             {
                 const unsigned char *srow = bm->buffer + sy * bm->pitch;
+
                 for (x = 0; x < dstW; x++)
                 {
                     int sx = (int)(accumX >> 16);
                     int byte = sx >> 3;
                     int bit = 7 - (sx & 7);
+
                     drow[x] = (srow[byte] & (1 << bit)) ? 0xFF : 0;
                     accumX += dx;
                 }
@@ -603,9 +632,11 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
             else if (bm->pixel_mode == FT_PIXEL_MODE_GRAY)
             {
                 const unsigned char *srow = bm->buffer + sy * bm->pitch;
+
                 for (x = 0; x < dstW; x++)
                 {
                     int sx = (int)(accumX >> 16);
+
                     drow[x] = srow[sx];
                     accumX += dx;
                 }
@@ -613,10 +644,12 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
             else if (bm->pixel_mode == FT_PIXEL_MODE_BGRA)
             {
                 const unsigned char *srow = bm->buffer + sy * bm->pitch;
+
                 for (x = 0; x < dstW; x++)
                 {
                     int sx = (int)(accumX >> 16);
                     const unsigned char *sp = srow + sx * 4;
+
                     drow[x] = sp[3];
                     accumX += dx;
                 }
@@ -630,6 +663,7 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
     case FMT_RGBA:
     {
         unsigned long accumY = 0;
+
         for (y = 0; y < dstH; y++)
         {
             int sy = (int)(accumY >> 16);
@@ -639,6 +673,7 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
             if (bm->pixel_mode == FT_PIXEL_MODE_BGRA)
             {
                 const unsigned char *srow = bm->buffer + sy * bm->pitch;
+
                 for (x = 0; x < dstW; x++)
                 {
                     int sx = (int)(accumX >> 16);
@@ -656,10 +691,12 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
             else if (bm->pixel_mode == FT_PIXEL_MODE_GRAY)
             {
                 const unsigned char *srow = bm->buffer + sy * bm->pitch;
+
                 for (x = 0; x < dstW; x++)
                 {
                     int sx = (int)(accumX >> 16);
                     unsigned char *dp = drow + x * 4;
+
                     dp[0] = 0xFF;
                     dp[1] = 0xFF;
                     dp[2] = 0xFF;
@@ -670,6 +707,7 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
 
             accumY += dy;
         }
+
         break;
     }
 
@@ -680,9 +718,9 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
 
 static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *fnt, FT_UInt gi, ULONG cp)
 {
-    struct TEGlyph *g;
+    struct TEGlyph *g = NULL;
     FT_GlyphSlot slot;
-    FT_Bitmap *bm;
+    FT_Bitmap *bm = NULL;
     int format;
     int load_flags;
     int srcW, srcH, dstW, dstH, pitch;
@@ -715,6 +753,7 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
 
         if (dc->style & TE_STY_BOLD)
             FT_GlyphSlot_Embolden(slot);
+
         if (dc->style & TE_STY_ITALIC)
             FT_GlyphSlot_Oblique(slot);
 
@@ -755,6 +794,7 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
 
         if (dstW < 1)
             dstW = 1;
+
         if (dstH < 1)
             dstH = 1;
     }
@@ -776,6 +816,7 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
     }
 
     g = (struct TEGlyph *)malloc(sizeof(*g));
+
     if (!g)
         return NULL;
 
@@ -784,6 +825,7 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
     if (dstW > 0 && dstH > 0)
     {
         g->data = (unsigned char *)malloc((unsigned long)pitch * (unsigned long)dstH);
+
         if (!g->data)
         {
             free(g);
@@ -812,8 +854,8 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
 
 static struct TEGlyph *te_make_notfound(struct TERenderContext *dc)
 {
-    struct TEFont *primary;
-    struct TEGlyph *g;
+    struct TEFont *primary = NULL;
+    struct TEGlyph *g = NULL;
     int w, h, pitch;
     int x, y;
 
@@ -821,28 +863,34 @@ static struct TEGlyph *te_make_notfound(struct TERenderContext *dc)
         return NULL;
 
     primary = &dc->fonts[0];
+
     if (!primary->face)
         return NULL;
 
     h = primary->height;
+
     if (h <= 0)
         h = (int)primary->pointSize;
 
     w = (h * 3) / 5;
+
     if (w < 4)
         w = 4;
+
     if (h < 6)
         h = 6;
 
     pitch = ((w + 15) >> 4) * 2;
 
     g = (struct TEGlyph *)malloc(sizeof(*g));
+
     if (!g)
         return NULL;
 
     memset(g, 0, sizeof(*g));
 
     g->data = (unsigned char *)malloc((unsigned long)pitch * (unsigned long)h);
+
     if (!g->data)
     {
         free(g);
@@ -878,10 +926,10 @@ static struct TEGlyph *te_make_notfound(struct TERenderContext *dc)
 
 static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
 {
-    struct TEGlyph *g;
-    struct TEGlyph *first_g;
-    struct TEFont *fnt;
-    struct TEFont *first_fnt;
+    struct TEGlyph *g = NULL;
+    struct TEGlyph *first_g = NULL;
+    struct TEFont *fnt = NULL;
+    struct TEFont *first_fnt = NULL;
     FT_UInt gi = 0;
     FT_UInt first_gi = 0;
     unsigned int h;
@@ -910,6 +958,7 @@ static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
             continue;
 
         gi = FT_Get_Char_Index(dc->fonts[i].face, (FT_ULong)cp);
+
         if (gi != 0)
         {
             fnt = &dc->fonts[i];
@@ -923,16 +972,13 @@ static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
     first_fnt = fnt;
     first_gi = gi;
     first_g = te_make_glyph(dc, first_fnt, first_gi, cp);
+
     if (!first_g)
         return NULL;
 
-    /* For supplementary-plane codepoints (emoji), prefer a font that gives us
-     * real RGBA colour. Some NotoColorEmoji variants render as grayscale only,
-     * so try the next fallback fonts until we find a colour glyph */
+    /* Prefer an RGBA colour font for supplementary-plane emoji */
     if (cp > 0xFFFF && first_g->format != FMT_RGBA)
-    {
         want_color = 1;
-    }
 
     if (want_color)
     {
@@ -942,13 +988,16 @@ static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
                 continue;
 
             gi = FT_Get_Char_Index(dc->fonts[i].face, (FT_ULong)cp);
+
             if (gi == 0)
                 continue;
 
             g = te_make_glyph(dc, &dc->fonts[i], gi, cp);
+
             if (g && g->format == FMT_RGBA)
             {
                 te_glyph_free(first_g);
+
                 first_g = NULL;
                 fnt = &dc->fonts[i];
                 break;
@@ -967,11 +1016,7 @@ static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
     }
 
     if (cp > 0xFFFF)
-        fprintf(stderr, "[te_get_glyph] cp=U+%04lX font=%s gi=%u w=%d h=%d format=%d\n",
-                (unsigned long)cp,
-                fnt->path ? fnt->path : "?",
-                (unsigned int)gi,
-                g->width, g->height, g->format);
+        fprintf(stderr, "[te_get_glyph] cp=U+%04lX font=%s gi=%u w=%d h=%d format=%d\n", (unsigned long)cp, fnt->path ? fnt->path : "?", (unsigned int)gi, g->width, g->height, g->format);
 
     g->next = dc->buckets[h];
     dc->buckets[h] = g;
@@ -981,7 +1026,7 @@ static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
 
 static struct TEGlyph *te_get_notfound(struct TERenderContext *dc)
 {
-    struct TEGlyph *g;
+    struct TEGlyph *g = NULL;
     unsigned int h;
 
     h = te_hash_cp_style(TE_NOTFOUND_CP, 0);
@@ -993,6 +1038,7 @@ static struct TEGlyph *te_get_notfound(struct TERenderContext *dc)
     }
 
     g = te_make_notfound(dc);
+
     if (!g)
         return NULL;
 
@@ -1037,6 +1083,7 @@ static void te_win_draw_glyph(struct TERenderContext *dc, HDC hdc, struct TEGlyp
 
     /* Build a 32-bit BGRA DIB (Windows native order) */
     memset(&bmi, 0, sizeof(bmi));
+
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bmi.bmiHeader.biWidth = gw;
     bmi.bmiHeader.biHeight = -gh; /* top-down */
@@ -1045,100 +1092,103 @@ static void te_win_draw_glyph(struct TERenderContext *dc, HDC hdc, struct TEGlyp
     bmi.bmiHeader.biCompression = BI_RGB;
 
     hbm = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
-    if (!hbm || !bits)
-        goto cleanup;
 
-    buf = (unsigned char *)bits;
-
-    if (g->format == FMT_MONO)
+    if (hbm && bits)
     {
-        for (y = 0; y < gh; y++)
+        buf = (unsigned char *)bits;
+
+        if (g->format == FMT_MONO)
         {
-            const unsigned char *srow = g->data + (unsigned long)y * (unsigned long)g->pitch;
-            unsigned char *drow = buf + (unsigned long)y * gw * 4;
-
-            for (x = 0; x < gw; x++)
+            for (y = 0; y < gh; y++)
             {
-                int byte = x >> 3;
-                int bit = 7 - (x & 7);
-                unsigned char on = (unsigned char)((srow[byte] >> bit) & 1);
+                const unsigned char *srow = g->data + (unsigned long)y * (unsigned long)g->pitch;
+                unsigned char *drow = buf + (unsigned long)y * gw * 4;
 
-                drow[x * 4 + 0] = on ? fb : bb;
-                drow[x * 4 + 1] = on ? fg : bg;
-                drow[x * 4 + 2] = on ? fr : br;
-                drow[x * 4 + 3] = 0xFF;
+                for (x = 0; x < gw; x++)
+                {
+                    int byte = x >> 3;
+                    int bit = 7 - (x & 7);
+                    unsigned char on = (unsigned char)((srow[byte] >> bit) & 1);
+
+                    drow[x * 4 + 0] = on ? fb : bb;
+                    drow[x * 4 + 1] = on ? fg : bg;
+                    drow[x * 4 + 2] = on ? fr : br;
+                    drow[x * 4 + 3] = 0xFF;
+                }
             }
         }
-    }
-    else if (g->format == FMT_GRAY)
-    {
-        for (y = 0; y < gh; y++)
+        else if (g->format == FMT_GRAY)
         {
-            const unsigned char *srow = g->data + (unsigned long)y * (unsigned long)g->pitch;
-            unsigned char *drow = buf + (unsigned long)y * gw * 4;
-
-            for (x = 0; x < gw; x++)
+            for (y = 0; y < gh; y++)
             {
-                unsigned char a = srow[x];
-                drow[x * 4 + 0] = te_blend8(fb, bb, a);
-                drow[x * 4 + 1] = te_blend8(fg, bg, a);
-                drow[x * 4 + 2] = te_blend8(fr, br, a);
-                drow[x * 4 + 3] = 0xFF;
+                const unsigned char *srow = g->data + (unsigned long)y * (unsigned long)g->pitch;
+                unsigned char *drow = buf + (unsigned long)y * gw * 4;
+
+                for (x = 0; x < gw; x++)
+                {
+                    unsigned char a = srow[x];
+
+                    drow[x * 4 + 0] = te_blend8(fb, bb, a);
+                    drow[x * 4 + 1] = te_blend8(fg, bg, a);
+                    drow[x * 4 + 2] = te_blend8(fr, br, a);
+                    drow[x * 4 + 3] = 0xFF;
+                }
             }
         }
-    }
-    else /* FMT_RGBA */
-    {
-        for (y = 0; y < gh; y++)
+        else /* FMT_RGBA */
         {
-            const unsigned char *srow = g->data + (unsigned long)y * (unsigned long)g->pitch;
-            unsigned char *drow = buf + (unsigned long)y * gw * 4;
-
-            for (x = 0; x < gw; x++)
+            for (y = 0; y < gh; y++)
             {
-                const unsigned char *sp = srow + x * 4;
-                unsigned char a = sp[3];
+                const unsigned char *srow = g->data + (unsigned long)y * (unsigned long)g->pitch;
+                unsigned char *drow = buf + (unsigned long)y * gw * 4;
 
-                drow[x * 4 + 0] = te_blend8(sp[2], bb, a);
-                drow[x * 4 + 1] = te_blend8(sp[1], bg, a);
-                drow[x * 4 + 2] = te_blend8(sp[0], br, a);
-                drow[x * 4 + 3] = 0xFF;
+                for (x = 0; x < gw; x++)
+                {
+                    const unsigned char *sp = srow + x * 4;
+                    unsigned char a = sp[3];
+
+                    drow[x * 4 + 0] = te_blend8(sp[2], bb, a);
+                    drow[x * 4 + 1] = te_blend8(sp[1], bg, a);
+                    drow[x * 4 + 2] = te_blend8(sp[0], br, a);
+                    drow[x * 4 + 3] = 0xFF;
+                }
             }
+        }
+
+        memDC = CreateCompatibleDC(hdc);
+
+        if (memDC)
+        {
+            oldBmp = (HBITMAP)SelectObject(memDC, hbm);
+
+            {
+                BLENDFUNCTION blend;
+                blend.BlendOp = AC_SRC_OVER;
+                blend.BlendFlags = 0;
+                blend.SourceConstantAlpha = 255;
+                blend.AlphaFormat = 0;
+
+                if (g->format == FMT_RGBA)
+                    BitBlt(hdc, dx, dy, gw, gh, memDC, 0, 0, SRCCOPY);
+                else
+                    AlphaBlend(hdc, dx, dy, gw, gh, memDC, 0, 0, gw, gh, blend);
+            }
+
+            SelectObject(memDC, oldBmp);
         }
     }
 
-    memDC = CreateCompatibleDC(hdc);
-    if (!memDC)
-        goto cleanup;
-
-    oldBmp = (HBITMAP)SelectObject(memDC, hbm);
-
-    /* Use AlphaBlend for proper alpha. Source is premultiplied (we blended into bg). AC_SRC_ALPHA is ignored for 32-bit? Actually we want opaque copy of blended result */
-    {
-        BLENDFUNCTION blend;
-        blend.BlendOp = AC_SRC_OVER;
-        blend.BlendFlags = 0;
-        blend.SourceConstantAlpha = 255;
-        blend.AlphaFormat = 0;
-
-        if (g->format == FMT_RGBA)
-            BitBlt(hdc, dx, dy, gw, gh, memDC, 0, 0, SRCCOPY);
-        else
-            AlphaBlend(hdc, dx, dy, gw, gh, memDC, 0, 0, gw, gh, blend);
-    }
-
-    SelectObject(memDC, oldBmp);
-
-cleanup:
     if (memDC)
         DeleteDC(memDC);
+
     if (hbm)
         DeleteObject(hbm);
 }
 
 void TE_RenderText(struct TERenderContext *dc, HDC hdc, int x, int y, const char *utf8, ULONG maxChars)
 {
-    const unsigned char *p, *end;
+    const unsigned char *p = NULL;
+    const unsigned char *end = NULL;
     ULONG count = 0;
     int penX, penY;
 
@@ -1155,7 +1205,7 @@ void TE_RenderText(struct TERenderContext *dc, HDC hdc, int x, int y, const char
     {
         ULONG cp;
         int consumed = 0;
-        struct TEGlyph *g;
+        struct TEGlyph *g = NULL;
 
         if (maxChars != (ULONG)-1 && count >= maxChars)
             break;
@@ -1180,9 +1230,11 @@ void TE_RenderText(struct TERenderContext *dc, HDC hdc, int x, int y, const char
         }
 
         g = te_get_glyph(dc, cp);
+
         if (!g)
         {
             g = te_get_glyph(dc, TE_REPLACEMENT_CP);
+
             if (!g)
                 g = te_get_notfound(dc);
         }
@@ -1196,6 +1248,7 @@ void TE_RenderText(struct TERenderContext *dc, HDC hdc, int x, int y, const char
         {
             /* Use primary font's M advance as monospace cell width */
             int cellW = dc->metrics_width > 0 ? dc->metrics_width : g->advance;
+
             penX += cellW;
         }
         else
@@ -1220,16 +1273,19 @@ static void te_recompute_metrics(struct TERenderContext *dc)
         return;
 
     primary = &dc->fonts[0];
+
     if (!primary->face)
         return;
 
     te_set_face_size(primary);
 
     gi = FT_Get_Char_Index(primary->face, 'M');
+
     if (gi && FT_Load_Glyph(primary->face, gi, FT_LOAD_DEFAULT) == 0)
     {
         slot = primary->face->glyph;
         advance = (int)(slot->metrics.horiAdvance >> 6);
+
         if (advance <= 0)
             advance = (int)(primary->face->size->metrics.max_advance >> 6);
     }
@@ -1261,7 +1317,8 @@ void TE_GetMetrics(struct TERenderContext *dc, struct TEGlyphMetrics *out)
 
 void TE_MeasureText(struct TERenderContext *dc, const char *utf8, LONG maxChars, struct TEGlyphMetrics *out)
 {
-    const unsigned char *p, *end;
+    const unsigned char *p = NULL;
+    const unsigned char *end = NULL;
     LONG count = 0;
     int width = 0;
     int cellW;
@@ -1281,7 +1338,7 @@ void TE_MeasureText(struct TERenderContext *dc, const char *utf8, LONG maxChars,
     {
         ULONG cp;
         int consumed = 0;
-        struct TEGlyph *g;
+        struct TEGlyph *g = NULL;
 
         if (maxChars >= 0 && count >= maxChars)
             break;
@@ -1296,6 +1353,7 @@ void TE_MeasureText(struct TERenderContext *dc, const char *utf8, LONG maxChars,
             continue;
 
         g = te_get_glyph(dc, cp);
+
         if (!g)
             g = te_get_notfound(dc);
 
@@ -1316,7 +1374,8 @@ void TE_MeasureText(struct TERenderContext *dc, const char *utf8, LONG maxChars,
 
 void TE_GetCharOffsets(struct TERenderContext *dc, const char *utf8, LONG maxChars, LONG *arrayout)
 {
-    const unsigned char *p, *end;
+    const unsigned char *p = NULL;
+    const unsigned char *end = NULL;
     LONG count = 0;
     int x = 0;
     int cellW;
@@ -1336,7 +1395,7 @@ void TE_GetCharOffsets(struct TERenderContext *dc, const char *utf8, LONG maxCha
     {
         ULONG cp;
         int consumed = 0;
-        struct TEGlyph *g;
+        struct TEGlyph *g = NULL;
 
         if (maxChars >= 0 && count >= maxChars)
             break;
@@ -1353,6 +1412,7 @@ void TE_GetCharOffsets(struct TERenderContext *dc, const char *utf8, LONG maxCha
             continue;
 
         g = te_get_glyph(dc, cp);
+
         if (!g)
             g = te_get_notfound(dc);
 
