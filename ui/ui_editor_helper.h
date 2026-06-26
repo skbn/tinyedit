@@ -25,11 +25,15 @@ void soft_reset_viewport_to_cursor(TeApp *app, int width);
 int editor_eff_wrap(const TeApp *app);
 char *wrap_paste_text(TeApp *app, const char *utf8, int col);
 
+/* Left margin for editor body with line numbers */
+int editor_body_offset(const TeApp *app, int line_count);
+
 /* Function key implementations */
 int search_prev(TeApp *app);
 int search_next(TeApp *app);
 int replace(TeApp *app);
 int do_search(TeApp *app);
+int do_search_in_files(TeApp *app);
 int replace_current(TeApp *app);
 int replace_all(TeApp *app);
 int insert_file(TeApp *app);
@@ -52,5 +56,11 @@ int wcswidth(const wchar_t *wcs, size_t n);
 
 /* Visual width in display columns: wide glyphs=2, normal=1, control=1 */
 int wcs_vwidth(const wchar_t *s, int n);
+
+/* Visual width with tab-stop support */
+int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width);
+
+/* Draw wide string with tab expansion */
+void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_width);
 
 #endif /* UI_EDITOR_HELPER_H */

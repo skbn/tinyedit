@@ -17,6 +17,7 @@
 #include "wm.h"
 #include "ui_dict.h"
 #include "../components/config.h"
+#include "../core/utf8.h"
 
 static int count_lines(const char *text)
 {
@@ -87,17 +88,73 @@ static int copy_line(const char *src, char *out, int max_bytes)
     return n;
 }
 
+/* Truncate UTF-8 string to max_cols display columns, appending "..." if needed */
+static char *truncate_utf8_cols(const char *s, int max_cols)
+{
+    wchar_t *w = NULL;
+    char *out = NULL;
+    int wlen;
+    int width;
+    int i;
+
+    if (!s || !*s || max_cols <= 0)
+        return NULL;
+
+    w = utf8_to_wcs(s, &wlen);
+
+    if (!w)
+        return NULL;
+
+    width = wcswidth(w, wlen);
+
+    if (width <= max_cols)
+    {
+        out = wcs_to_utf8(w, wlen);
+
+        free(w);
+        return out;
+    }
+
+    if (max_cols < 3)
+        max_cols = 3;
+
+    for (i = wlen; i > 0; i--)
+    {
+        if (wcswidth(w, i) <= max_cols - 3)
+            break;
+    }
+
+    w[i] = L'.';
+    w[i + 1] = L'.';
+    w[i + 2] = L'.';
+    w[i + 3] = L'\0';
+
+    out = wcs_to_utf8(w, (int)wcslen(w));
+
+    free(w);
+    return out;
+}
+
 void ui_dict_draw_panel(TeApp *app)
 {
     TeWindow *win = NULL;
-    int x, y;
+    int x;
+    int y;
+    int w;
+    int h;
+    int j;
+    int row;
     int content_rows;
     int line_idx;
     const char *p = NULL;
     char line_buf[512];
     char title[160];
+    char ind[40];
     int total;
     int x_pos;
+    int title_max;
+    char *title_disp = NULL;
+    const char *prefix = "[Dictionary]";
 
     if (!app)
         return;
@@ -110,36 +167,110 @@ void ui_dict_draw_panel(TeApp *app)
     if (!win || !win->visible)
         return;
 
-    standend();
-    attron(COLOR_PAIR(COL_NORMAL));
+    x = win->x;
+    y = win->y;
+    w = win->w;
+    h = win->h;
 
-    /* Clear panel */
-    for (y = 0; y < win->h; y++)
+    /* Prepare indicator first so we know how much room the title has */
+    content_rows = DICT_PANEL_ROWS;
+
+    ind[0] = '\0';
+
+    if (content_rows > 0 && app->dict_result && app->dict_result[0])
     {
-        for (x = 0; x < win->w; x++)
-            mvaddch(win->y + y, win->x + x, ' ');
+        total = count_lines(app->dict_result);
+
+        if (total > content_rows)
+        {
+            int below = (app->dict_scroll + content_rows < total);
+            int above = (app->dict_scroll > 0);
+
+            if (above && below)
+                snprintf(ind, sizeof(ind), " [%d/%d] PgUp/PgDn", app->dict_scroll + 1, total);
+            else if (above)
+                snprintf(ind, sizeof(ind), " [%d/%d] PgUp", app->dict_scroll + 1, total);
+            else
+                snprintf(ind, sizeof(ind), " [%d/%d] PgDn", app->dict_scroll + 1, total);
+        }
     }
 
-    /* Title */
+    /* Title: keep the prefix, truncate only the word part */
+    title_max = w - 3;
+
+    if (ind[0])
+        title_max = w - (int)strlen(ind) - 3;
+
+    if (title_max < 12)
+        title_max = 12;
+
+    if (app->dict_word[0] && title_max > 12 + 1 + 3)
+    {
+        int word_max = title_max - 12 - 1;
+        char *trunc_word = truncate_utf8_cols(app->dict_word, word_max);
+
+        if (trunc_word)
+        {
+            snprintf(title, sizeof(title), "%s %s", prefix, trunc_word);
+            free(trunc_word);
+        }
+        else
+        {
+            snprintf(title, sizeof(title), "%s %s", prefix, app->dict_word);
+        }
+    }
+    else
+    {
+        snprintf(title, sizeof(title), "%s", prefix);
+    }
+
+    title_disp = truncate_utf8_cols(title, title_max);
+
+    /* Title bar in titlebar color */
+    standend();
     attron(COLOR_PAIR(COL_TITLEBAR));
 
-    if (app->dict_word[0])
-        snprintf(title, sizeof(title), "[Dictionary] %s", app->dict_word);
+    for (j = 0; j < w; j++)
+        mvaddch(y, x + j, ' ');
+
+    if (title_disp)
+    {
+        mvaddstr(y, x + 1, title_disp);
+        free(title_disp);
+    }
     else
-        snprintf(title, sizeof(title), "[Dictionary]");
+    {
+        mvaddstr(y, x + 1, title);
+    }
 
-    mvaddstr(win->y, win->x + 1, title);
+    /* Scroll indicator on the title bar (titlebar color) */
+    if (ind[0])
+    {
+        x_pos = x + w - (int)strlen(ind) - 1;
 
-    attron(COLOR_PAIR(COL_NORMAL));
-
-    content_rows = win->h - 1;
+        if (x_pos > x + 1)
+            mvaddstr(y, x_pos, ind);
+    }
 
     if (content_rows <= 0)
+    {
+        standend();
         return;
+    }
+
+    /* Content area in normal colors */
+    standend();
+
+    for (row = 1; row < h; row++)
+    {
+        for (j = 0; j < w; j++)
+            mvaddch(y + row, x + j, ' ');
+    }
 
     if (!app->dict_result || !app->dict_result[0])
     {
-        mvaddstr(win->y + 1, win->x + 1, "Select text and press Alt+R (backend must be STARDICT)");
+        mvaddstr(y + 1, x + 1, "Select text and press Alt+R (backend must be STARDICT)");
+        standend();
         return;
     }
 
@@ -150,7 +281,7 @@ void ui_dict_draw_panel(TeApp *app)
 
     for (line_idx = 0; line_idx < content_rows && *p; line_idx++)
     {
-        int limit = win->w - 2;
+        int limit = w - 2;
 
         if (limit < 1)
             limit = 1;
@@ -159,7 +290,7 @@ void ui_dict_draw_panel(TeApp *app)
             limit = (int)sizeof(line_buf) - 1;
 
         copy_line(p, line_buf, limit + 1);
-        mvaddstr(win->y + 1 + line_idx, win->x + 1, line_buf);
+        mvaddstr(y + 1 + line_idx, x + 1, line_buf);
 
         while (*p && *p != '\n')
             p++;
@@ -168,32 +299,7 @@ void ui_dict_draw_panel(TeApp *app)
             p++;
     }
 
-    /* Scroll indicator */
-
-    total = count_lines(app->dict_result);
-
-    if (total > content_rows)
-    {
-        char ind[32];
-        int below = (app->dict_scroll + content_rows < total);
-        int above = (app->dict_scroll > 0);
-
-        if (above && below)
-            snprintf(ind, sizeof(ind), " [%d/%d] PgUp/PgDn", app->dict_scroll + 1, total);
-        else if (above)
-            snprintf(ind, sizeof(ind), " [%d/%d] PgUp", app->dict_scroll + 1, total);
-        else
-            snprintf(ind, sizeof(ind), " [%d/%d] PgDn", app->dict_scroll + 1, total);
-
-        attron(COLOR_PAIR(COL_TITLEBAR));
-
-        x_pos = win->x + win->w - (int)strlen(ind) - 1;
-
-        if (x_pos > win->x + 1)
-            mvaddstr(win->y, x_pos, ind);
-
-        attron(COLOR_PAIR(COL_NORMAL));
-    }
+    standend();
 }
 
 void ui_dict_set_result(TeApp *app, const char *word_or_phrase, const char *text)
@@ -283,7 +389,7 @@ int ui_dict_scroll_down(TeApp *app)
     if (!win)
         return 0;
 
-    content_rows = win->h - 1;
+    content_rows = DICT_PANEL_ROWS;
 
     if (content_rows <= 0)
         return 0;

@@ -25,6 +25,7 @@
 #include "ncursesw_win32.h"
 #include "core/utf8.h"
 #include "ui/ui_mouse.h"
+#include "te_rastport_win32.h"
 
 /* Sentinel value for trailing cells of wide glyphs (same as amiga_te) */
 #define WIN32_CELL_WIDE_TRAILING 0x0000FFFEUL
@@ -65,12 +66,24 @@ static int s_keypad = 1;
 static int s_nodelay = 0;
 static int s_cursor_vis = 1;
 
+static int s_tab_size = 4; /* visual tab stop width, configurable via set_tabsize() */
+
 /* Ungetch buffer */
 static int s_ungetch = ERR;
 
 /* Font configuration */
 #define WIN_FONT_NAME_MAX 256
 static char win_font_name[WIN_FONT_NAME_MAX] = "Consolas";
+
+/* Added TTF files (loaded via AddFontResourceEx) */
+#define WIN32_ADDED_FONTS_MAX 16
+static char s_added_fonts[WIN32_ADDED_FONTS_MAX][MAX_PATH];
+static int s_added_font_count = 0;
+static int s_win_font_size = 16;
+
+/* FreeType-based renderer context (when TTF fonts are configured) */
+static struct TERenderContext *s_te_dc = NULL;
+static int s_use_te = 0;
 
 /* Cursor border color (0..15) */
 static int s_cursor_color = COLOR_WHITE;
@@ -304,6 +317,55 @@ static void draw_glyph_in_cell(int cx, int cy, int cell_w, const wchar_t *buf, i
     TextOutW(hMemDC, draw_x, cy, buf, len);
 }
 
+/* Draw a single codepoint using the FreeType renderer, centered in the cell */
+static void draw_glyph_te(int cx, int cy, int cell_w, unsigned int cp)
+{
+    char utf8[8];
+    int len = 0;
+    struct TEGlyphMetrics metrics;
+    int x;
+
+    if (!s_te_dc)
+        return;
+
+    /* Encode codepoint to UTF-8 */
+    if (cp < 0x80)
+    {
+        utf8[0] = (char)cp;
+        len = 1;
+    }
+    else if (cp < 0x800)
+    {
+        utf8[0] = (char)(0xC0 | (cp >> 6));
+        utf8[1] = (char)(0x80 | (cp & 0x3F));
+        len = 2;
+    }
+    else if (cp < 0x10000)
+    {
+        utf8[0] = (char)(0xE0 | (cp >> 12));
+        utf8[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        utf8[2] = (char)(0x80 | (cp & 0x3F));
+        len = 3;
+    }
+    else
+    {
+        utf8[0] = (char)(0xF0 | (cp >> 18));
+        utf8[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        utf8[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        utf8[3] = (char)(0x80 | (cp & 0x3F));
+        len = 4;
+    }
+    utf8[len] = '\0';
+
+    /* Center glyph horizontally if narrower than cell */
+    x = cx;
+    TE_MeasureText(s_te_dc, utf8, 1, &metrics);
+    if (metrics.width > 0 && metrics.width < cell_w)
+        x = cx + (cell_w - metrics.width) / 2;
+
+    TE_RenderText(s_te_dc, hMemDC, x, cy + fb, utf8, 1);
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     PAINTSTRUCT ps;
@@ -330,14 +392,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             int key = (int)wParam;
             int is_control_key = 0;
 
-            /* Alt+letter -> KEY_ALT */
+            /* Alt+letter -> KEY_ALT; Shift+Alt+letter -> KEY_SHIFT */
             if ((GetKeyState(VK_MENU) & 0x8000) && ((key >= 'A' && key <= 'Z') || (key >= 'a' && key <= 'z')))
             {
+                int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
                 /* normalize to uppercase */
                 if (key >= 'a' && key <= 'z')
                     key = key - 'a' + 'A';
 
-                key = KEY_ALT(key);
+                if (shift)
+                    key = KEY_SHIFT(key);
+                else
+                    key = KEY_ALT(key);
+
                 is_control_key = 1;
             }
             else
@@ -349,8 +417,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 {
                     int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
                     int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                    int alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
 
-                    if (ctrl && shift)
+                    if (alt)
+                        key = KEY_ALT_UP;
+                    else if (ctrl && shift)
                         key = KEY_CSUP;
                     else if (ctrl)
                         key = KEY_CUP;
@@ -366,8 +437,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 {
                     int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
                     int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                    int alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
 
-                    if (ctrl && shift)
+                    if (alt)
+                        key = KEY_ALT_DOWN;
+                    else if (ctrl && shift)
                         key = KEY_CSDOWN;
                     else if (ctrl)
                         key = KEY_CDOWN;
@@ -383,8 +457,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 {
                     int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
                     int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                    int alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
 
-                    if (ctrl && shift)
+                    if (alt)
+                        key = KEY_ALT_LEFT;
+                    else if (ctrl && shift)
                         key = KEY_CSLEFT;
                     else if (ctrl)
                         key = KEY_CLEFT;
@@ -400,8 +477,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 {
                     int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
                     int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                    int alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
 
-                    if (ctrl && shift)
+                    if (alt)
+                        key = KEY_ALT_RIGHT;
+                    else if (ctrl && shift)
                         key = KEY_CSRIGHT;
                     else if (ctrl)
                         key = KEY_CRIGHT;
@@ -770,6 +850,7 @@ static void clear_cells(WINDOW *win)
     {
         cells[i].ch = ' ';
         cells[i].attrs = win->attrs;
+        cells[i].full_cp = 0;
     }
 }
 
@@ -809,29 +890,48 @@ static void apply_colors(int pair, attr_t attrs)
 
     SetTextColor(hMemDC, s_rgb_map[fg_idx]);
     SetBkColor(hMemDC, s_rgb_map[bg_idx]);
+
+    if (s_use_te && s_te_dc)
+    {
+        TE_SetColorRGB(s_te_dc,
+                       (ULONG)((s_rgb_map[fg_idx] >> 16) & 0xFF) |
+                           ((ULONG)((s_rgb_map[fg_idx] >> 8) & 0xFF) << 8) |
+                           ((ULONG)(s_rgb_map[fg_idx] & 0xFF) << 16),
+                       (ULONG)((s_rgb_map[bg_idx] >> 16) & 0xFF) |
+                           ((ULONG)((s_rgb_map[bg_idx] >> 8) & 0xFF) << 8) |
+                           ((ULONG)(s_rgb_map[bg_idx] & 0xFF) << 16));
+    }
 }
 
 /* Render a single cell to the memory DC */
-static void render_cell(int row, int col, chtype ch, attr_t attrs)
+static void render_cell(int row, int col, Cell *cell)
 {
     RECT rect;
     HBRUSH hBrush;
     wchar_t buf[2];
     int pair;
     int cell_w = fw; /* width of the area to repaint -- fw or 2*fw */
-    chtype draw_ch = ch;
+    unsigned int draw_cp;
+    chtype ch;
+    attr_t attrs;
 
-    if (!hMemDC || row < 0 || row >= LINES || col < 0 || col >= COLS)
+    if (!hMemDC || row < 0 || row >= LINES || col < 0 || col >= COLS || !cell)
         return;
+
+    ch = cell->ch;
+    attrs = cell->attrs;
 
     /* trailing cell belongs to the lead glyph, nothing to draw */
     if (ch == WIN32_CELL_WIDE_TRAILING)
         return;
 
+    /* Use full 32-bit codepoint if available; otherwise fall back to ch */
+    draw_cp = cell->full_cp ? (unsigned int)cell->full_cp : (unsigned int)ch;
+
     /* wide glyph: allocate 2 cells */
     if (stdscr && stdscr->cells)
     {
-        if (is_wide_cp((unsigned int)ch))
+        if (is_wide_cp(draw_cp))
             cell_w = 2 * fw;
     }
 
@@ -849,10 +949,15 @@ static void render_cell(int row, int col, chtype ch, attr_t attrs)
     DeleteObject(hBrush);
 
     /* render glyph centered in cell, surrogate-pair aware */
-    if (draw_ch >= 0x20)
+    if (draw_cp >= 0x20)
     {
-        int wlen = cp_to_utf16((unsigned int)draw_ch, buf);
-        draw_glyph_in_cell(rect.left, rect.top, cell_w, buf, wlen);
+        if (s_use_te && s_te_dc)
+            draw_glyph_te(rect.left, rect.top, cell_w, draw_cp);
+        else
+        {
+            int wlen = cp_to_utf16(draw_cp, buf);
+            draw_glyph_in_cell(rect.left, rect.top, cell_w, buf, wlen);
+        }
     }
 }
 
@@ -861,6 +966,334 @@ void win32_force_redraw(void)
 {
     s_shadow_dirty = 1;
     render_all();
+}
+
+/* Set font height used by initscr (6..96). Call before initscr() */
+int win32_set_font_size(int size)
+{
+    if (size >= 6 && size <= 96)
+        s_win_font_size = size;
+
+    return 0;
+}
+
+/* Read big-endian 16-bit value from buffer */
+static unsigned short read_be16(const unsigned char *p)
+{
+    return (unsigned short)((p[0] << 8) | p[1]);
+}
+
+/* Read big-endian 32-bit value from buffer */
+static unsigned long read_be32(const unsigned char *p)
+{
+    return ((unsigned long)p[0] << 24) | ((unsigned long)p[1] << 16) |
+           ((unsigned long)p[2] << 8) | (unsigned long)p[3];
+}
+
+/* Convert UTF-16BE string to UTF-8. Returns number of bytes written (excluding NUL) */
+static int utf16be_to_utf8(const unsigned char *src, int src_len, char *dst, int dst_sz)
+{
+    int i;
+    int dst_pos = 0;
+
+    for (i = 0; i < src_len; i += 2)
+    {
+        unsigned short wc;
+        unsigned long cp;
+        int src_adv = 2;
+
+        if (i + 1 >= src_len)
+            break;
+
+        wc = (unsigned short)((src[i] << 8) | src[i + 1]);
+
+        if (wc >= 0xD800 && wc <= 0xDBFF)
+        {
+            if (i + 3 >= src_len)
+                break;
+            unsigned short low = (unsigned short)((src[i + 2] << 8) | src[i + 3]);
+            if (low < 0xDC00 || low > 0xDFFF)
+                break;
+            cp = 0x10000UL + (((unsigned long)(wc - 0xD800)) << 10) + (low - 0xDC00);
+            src_adv = 4;
+        }
+        else if (wc >= 0xDC00 && wc <= 0xDFFF)
+        {
+            continue;
+        }
+        else
+        {
+            cp = wc;
+        }
+
+        if (cp < 0x80)
+        {
+            if (dst_pos + 1 >= dst_sz)
+                break;
+            dst[dst_pos++] = (char)cp;
+        }
+        else if (cp < 0x800)
+        {
+            if (dst_pos + 2 >= dst_sz)
+                break;
+            dst[dst_pos++] = (char)(0xC0 | (cp >> 6));
+            dst[dst_pos++] = (char)(0x80 | (cp & 0x3F));
+        }
+        else if (cp < 0x10000)
+        {
+            if (dst_pos + 3 >= dst_sz)
+                break;
+            dst[dst_pos++] = (char)(0xE0 | (cp >> 12));
+            dst[dst_pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            dst[dst_pos++] = (char)(0x80 | (cp & 0x3F));
+        }
+        else
+        {
+            if (dst_pos + 4 >= dst_sz)
+                break;
+            dst[dst_pos++] = (char)(0xF0 | (cp >> 18));
+            dst[dst_pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+            dst[dst_pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            dst[dst_pos++] = (char)(0x80 | (cp & 0x3F));
+        }
+
+        i += src_adv - 2;
+    }
+
+    if (dst_pos < dst_sz)
+        dst[dst_pos] = '\0';
+    else if (dst_sz > 0)
+        dst[dst_sz - 1] = '\0';
+
+    return dst_pos;
+}
+
+/* Extract the font family name (nameID 1) from a TTF/OTF file.
+ * Returns 0 on success, -1 on failure */
+int win32_get_font_family_name(const char *path, char *out, int out_sz)
+{
+    FILE *fp;
+    unsigned char header[12];
+    unsigned short num_tables;
+    unsigned long name_offset = 0;
+    unsigned long name_length = 0;
+    int i;
+    unsigned char *name_table = NULL;
+    int found = -1;
+
+    if (!path || !out || out_sz < 1)
+        return -1;
+
+    out[0] = '\0';
+
+    fp = fopen(path, "rb");
+    if (!fp)
+        return -1;
+
+    if (fread(header, 1, sizeof(header), fp) != sizeof(header))
+    {
+        fclose(fp);
+        return -1;
+    }
+
+    num_tables = read_be16(header + 4);
+
+    for (i = 0; i < num_tables; i++)
+    {
+        unsigned char entry[16];
+        char tag[5];
+
+        if (fread(entry, 1, sizeof(entry), fp) != sizeof(entry))
+            break;
+
+        tag[0] = (char)entry[0];
+        tag[1] = (char)entry[1];
+        tag[2] = (char)entry[2];
+        tag[3] = (char)entry[3];
+        tag[4] = '\0';
+
+        if (strcmp(tag, "name") == 0)
+        {
+            name_offset = read_be32(entry + 8);
+            name_length = read_be32(entry + 12);
+            break;
+        }
+    }
+
+    if (name_offset == 0 || name_length == 0)
+    {
+        fclose(fp);
+        return -1;
+    }
+
+    if (fseek(fp, (long)name_offset, SEEK_SET) != 0)
+    {
+        fclose(fp);
+        return -1;
+    }
+
+    name_table = (unsigned char *)malloc((size_t)name_length);
+    if (!name_table)
+    {
+        fclose(fp);
+        return -1;
+    }
+
+    if (fread(name_table, 1, (size_t)name_length, fp) != (size_t)name_length)
+    {
+        free(name_table);
+        fclose(fp);
+        return -1;
+    }
+
+    fclose(fp);
+
+    {
+        unsigned short count = read_be16(name_table + 2);
+        unsigned short string_offset = read_be16(name_table + 4);
+        const unsigned char *record = name_table + 6;
+
+        for (i = 0; i < count && found < 0; i++)
+        {
+            unsigned short platform_id = read_be16(record);
+            unsigned short encoding_id = read_be16(record + 2);
+            unsigned short language_id = read_be16(record + 4);
+            unsigned short name_id = read_be16(record + 6);
+            unsigned short length = read_be16(record + 8);
+            unsigned short offset = read_be16(record + 10);
+
+            if (name_id == 1 && platform_id == 3 && encoding_id == 1 && language_id == 0x0409)
+            {
+                if ((unsigned long)string_offset + offset + length <= name_length)
+                {
+                    utf16be_to_utf8(name_table + string_offset + offset, length, out, out_sz);
+                    found = 0;
+                }
+            }
+
+            record += 12;
+        }
+
+        if (found < 0)
+        {
+            record = name_table + 6;
+            for (i = 0; i < count; i++)
+            {
+                unsigned short platform_id = read_be16(record);
+                unsigned short name_id = read_be16(record + 6);
+                unsigned short length = read_be16(record + 8);
+                unsigned short offset = read_be16(record + 10);
+
+                if (name_id == 1 && platform_id == 3)
+                {
+                    if ((unsigned long)string_offset + offset + length <= name_length)
+                    {
+                        utf16be_to_utf8(name_table + string_offset + offset, length, out, out_sz);
+                        found = 0;
+                        break;
+                    }
+                }
+
+                record += 12;
+            }
+        }
+
+        if (found < 0)
+        {
+            record = name_table + 6;
+            for (i = 0; i < count; i++)
+            {
+                unsigned short platform_id = read_be16(record);
+                unsigned short name_id = read_be16(record + 6);
+                unsigned short length = read_be16(record + 8);
+                unsigned short offset = read_be16(record + 10);
+
+                if (name_id == 1 && platform_id == 1)
+                {
+                    if ((unsigned long)string_offset + offset + length <= name_length)
+                    {
+                        int j;
+                        for (j = 0; j < length && j < out_sz - 1; j++)
+                            out[j] = (char)name_table[string_offset + offset + j];
+                        if (j < out_sz)
+                            out[j] = '\0';
+                        else if (out_sz > 0)
+                            out[out_sz - 1] = '\0';
+                        found = 0;
+                        break;
+                    }
+                }
+
+                record += 12;
+            }
+        }
+    }
+
+    free(name_table);
+    return found;
+}
+
+/* Add a TTF/OTF font file to the Windows session. Call before initscr().
+ * Returns 0 on success, -1 on failure */
+int win32_add_font_file(const char *path)
+{
+    wchar_t *wpath;
+    int count;
+
+    if (!path || !path[0])
+        return 0;
+
+    fprintf(stderr, "[win32_add_font_file] path=%s\n", path);
+
+    if (s_added_font_count >= WIN32_ADDED_FONTS_MAX)
+    {
+        fprintf(stderr, "[win32_add_font_file] too many fonts\n");
+        return -1;
+    }
+
+    wpath = utf8_to_wcs(path, NULL);
+
+    if (!wpath)
+    {
+        fprintf(stderr, "[win32_add_font_file] utf8_to_wcs failed\n");
+        return -1;
+    }
+
+    count = AddFontResourceExW(wpath, FR_PRIVATE, 0);
+    fprintf(stderr, "[win32_add_font_file] AddFontResourceExW returned %d\n", count);
+    free(wpath);
+
+    if (count <= 0)
+    {
+        fprintf(stderr, "[win32_add_font_file] GDI rejected font, will still try FreeType\n");
+    }
+
+    strncpy(s_added_fonts[s_added_font_count], path, MAX_PATH - 1);
+    s_added_fonts[s_added_font_count][MAX_PATH - 1] = '\0';
+    s_added_font_count++;
+
+    return 0;
+}
+
+/* Remove all font files added by win32_add_font_file() */
+void win32_clear_font_files(void)
+{
+    int i;
+
+    for (i = 0; i < s_added_font_count; i++)
+    {
+        wchar_t *wpath = utf8_to_wcs(s_added_fonts[i], NULL);
+
+        if (wpath)
+        {
+            RemoveFontResourceExW(wpath, FR_PRIVATE, 0);
+            free(wpath);
+        }
+
+        s_added_fonts[i][0] = '\0';
+    }
+
+    s_added_font_count = 0;
 }
 
 /* Fill s_dirty_row[] for row r; returns 1 if anything needs redrawing */
@@ -890,7 +1323,7 @@ static int compute_dirty_row(int r)
         for (c = 0; c < cols; c++)
         {
             Cell *cc = CELL(stdscr, r, c);
-            int d = (cc->ch != row_sh[c].ch) || (cc->attrs != row_sh[c].attrs);
+            int d = (cc->ch != row_sh[c].ch) || (cc->attrs != row_sh[c].attrs) || (cc->full_cp != row_sh[c].full_cp);
 
             s_dirty_tmp[c] = (unsigned char)d;
             any |= d;
@@ -1077,7 +1510,7 @@ static void render_all(void)
                 }
 
                 /* codepoints >= U+10000 need surrogate pairs -> per-cell path */
-                if (cc->ch >= 0x10000)
+                if (cc->full_cp || cc->ch >= 0x10000)
                 {
                     run_has_wide = 1;
                     break;
@@ -1116,6 +1549,10 @@ static void render_all(void)
                 }
             }
 
+            /* FreeType renderer draws per glyph so it can pick the right fallback font */
+            if (s_use_te && s_te_dc)
+                run_has_wide = 1;
+
             if (run_pair != last_pair || run_attrs != last_attrs)
             {
                 apply_colors(run_pair, run_attrs);
@@ -1148,34 +1585,44 @@ static void render_all(void)
                         continue;
                     }
 
-                    /* wide glyph: 2-cell allocation */
-                    is_wide = is_wide_cp((unsigned int)wc);
-
-                    /* clear background (1 or 2 cells) */
-                    rect.left = cx;
-                    rect.top = cy;
-                    rect.right = cx + (is_wide ? 2 * fw : fw);
-                    rect.bottom = cy + fh;
-
-                    hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
-                    FillRect(hMemDC, &rect, hBrush);
-                    DeleteObject(hBrush);
-
-                    /* render glyph centered in cell */
-                    if ((unsigned int)cc->ch >= 0x20)
+                    /* Use full 32-bit codepoint if available */
                     {
-                        wchar_t buf[2];
-                        int wlen = cp_to_utf16((unsigned int)cc->ch, buf);
-                        int cell_w_pixels = is_wide ? 2 * fw : fw;
+                        unsigned int draw_cp = cc->full_cp ? (unsigned int)cc->full_cp : (unsigned int)wc;
 
-                        draw_glyph_in_cell(cx, cy, cell_w_pixels, buf, wlen);
+                        /* wide glyph: 2-cell allocation */
+                        is_wide = is_wide_cp(draw_cp);
+
+                        /* clear background (1 or 2 cells) */
+                        rect.left = cx;
+                        rect.top = cy;
+                        rect.right = cx + (is_wide ? 2 * fw : fw);
+                        rect.bottom = cy + fh;
+
+                        hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
+                        FillRect(hMemDC, &rect, hBrush);
+                        DeleteObject(hBrush);
+
+                        /* render glyph centered in cell */
+                        if (draw_cp >= 0x20)
+                        {
+                            int cell_w_pixels = is_wide ? 2 * fw : fw;
+
+                            if (s_use_te && s_te_dc)
+                                draw_glyph_te(cx, cy, cell_w_pixels, draw_cp);
+                            else
+                            {
+                                wchar_t buf[2];
+                                int wlen = cp_to_utf16(draw_cp, buf);
+                                draw_glyph_in_cell(cx, cy, cell_w_pixels, buf, wlen);
+                            }
+                        }
+
+                        /* advance past trailing cell for wide glyphs */
+                        if (is_wide)
+                            actual_pos += 2;
+                        else
+                            actual_pos++;
                     }
-
-                    /* advance past trailing cell for wide glyphs */
-                    if (is_wide)
-                        actual_pos += 2;
-                    else
-                        actual_pos++;
                 }
             }
             else
@@ -1252,11 +1699,11 @@ static void render_all(void)
                     /* render from lead: trailing alone is a no-op in render_cell */
                     Cell *lead = CELL(stdscr, prev_y, b - 1);
 
-                    render_cell(prev_y, b - 1, lead->ch, lead->attrs);
+                    render_cell(prev_y, b - 1, lead);
                 }
                 else
                 {
-                    render_cell(prev_y, b, cb->ch, cb->attrs);
+                    render_cell(prev_y, b, cb);
                 }
             }
         }
@@ -1312,24 +1759,12 @@ static void render_all(void)
         cx = draw_x_cell * fw;
         cy = cy_cell * fh;
 
-        hPen = CreatePen(PS_SOLID, 1, s_rgb_map[s_cursor_color]);
-        oldPen = SelectObject(hMemDC, hPen);
-
-        /* four sides of the cursor rectangle */
-        MoveToEx(hMemDC, cx, cy, NULL);
-
-        LineTo(hMemDC, cx + cursor_w - 1, cy);
-        MoveToEx(hMemDC, cx, cy + fh - 1, NULL);
-        LineTo(hMemDC, cx + cursor_w - 1, cy + fh - 1);
-
-        MoveToEx(hMemDC, cx, cy, NULL);
-        LineTo(hMemDC, cx, cy + fh - 1);
-
-        MoveToEx(hMemDC, cx + cursor_w - 1, cy, NULL);
-        LineTo(hMemDC, cx + cursor_w - 1, cy + fh - 1);
-
-        SelectObject(hMemDC, oldPen);
-        DeleteObject(hPen);
+        /* XOR block cursor: inverts whatever is under it so text/emojis
+         * remain visible instead of being painted over by the cursor color */
+        {
+            RECT rc = {cx, cy, cx + cursor_w, cy + fh};
+            InvertRect(hMemDC, &rc);
+        }
 
         /* dirty the cursor cells so next render repaints under it */
         if (s_shadow)
@@ -1404,8 +1839,88 @@ WINDOW *initscr(void)
     COLS = 80;
     LINES = 25;
     fw = 8;
-    fh = 16;
+    fh = s_win_font_size;
     fb = 12;
+
+    /* Measure the requested font to get accurate cell metrics before
+     * creating the window. This is essential for TTF fonts where the
+     * default 8x16 metrics do not match the actual font */
+    {
+        HDC tmpDC = GetDC(NULL);
+        HDC tmpMemDC = tmpDC ? CreateCompatibleDC(tmpDC) : NULL;
+        HFONT tmpFont = tmpMemDC ? CreateFont(s_win_font_size, 0, 0, 0, FW_NORMAL,
+                                              FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                              DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN,
+                                              TEXT(win_font_name))
+                                 : NULL;
+
+        if (tmpFont && tmpMemDC)
+        {
+            SelectObject(tmpMemDC, tmpFont);
+
+            if (GetTextMetrics(tmpMemDC, &tm))
+            {
+                fw = tm.tmAveCharWidth;
+                fh = tm.tmHeight;
+                fb = tm.tmAscent;
+            }
+        }
+
+        if (tmpFont)
+            DeleteObject(tmpFont);
+
+        if (tmpMemDC)
+            DeleteDC(tmpMemDC);
+
+        if (tmpDC)
+            ReleaseDC(NULL, tmpDC);
+    }
+
+    /* Create FreeType renderer if TTF files are configured.
+     * If it succeeds, override the GDI metrics with the actual font metrics
+     * so the window and bitmap are sized correctly for the chosen font */
+    if (s_added_font_count > 0)
+    {
+        int i;
+        struct TEGlyphMetrics metrics;
+
+        if (s_te_dc)
+            TE_ContextRelease(s_te_dc);
+
+        s_te_dc = TE_ContextCreate();
+        s_use_te = 0;
+
+        if (s_te_dc)
+        {
+            TE_SetFlags(s_te_dc, TE_FLAG_ANTIALIAS | TE_FLAG_HIGHQUALITY | TE_FLAG_FIXEDWIDTH);
+            TE_SetTabWidth(s_te_dc, (ULONG)s_tab_size);
+
+            for (i = 0; i < s_added_font_count; i++)
+            {
+                if (TE_FontAdd(s_te_dc, s_added_fonts[i], (LONG)s_win_font_size, 0))
+                    fprintf(stderr, "[win32_init_screen] TE_FontAdd OK: %s\n", s_added_fonts[i]);
+                else
+                    fprintf(stderr, "[win32_init_screen] TE_FontAdd failed: %s\n", s_added_fonts[i]);
+            }
+
+            TE_GetMetrics(s_te_dc, &metrics);
+
+            if (metrics.width > 0 && metrics.height > 0)
+            {
+                s_use_te = 1;
+                fw = metrics.width;
+                fh = metrics.height;
+                fb = metrics.baseY;
+                fprintf(stderr, "[win32_init_screen] TE metrics fw=%d fh=%d fb=%d\n", fw, fh, fb);
+            }
+            else
+            {
+                TE_ContextRelease(s_te_dc);
+                s_te_dc = NULL;
+            }
+        }
+    }
 
     /* center on screen */
     scr_w = GetSystemMetrics(SM_CXSCREEN);
@@ -1488,9 +2003,19 @@ WINDOW *initscr(void)
     DeleteObject(hBrush);
 
     /* Create font */
+    fprintf(stderr, "[win32_init_screen] CreateFont size=%dx%d name=%s\n", fw, fh, win_font_name);
     hFont = CreateFont(fh, fw, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, TEXT(win_font_name));
 
     s_hfont_is_stock = 0;
+
+    if (!hFont)
+    {
+        fprintf(stderr, "[win32_init_screen] CreateFont failed\n");
+    }
+    else
+    {
+        fprintf(stderr, "[win32_init_screen] CreateFont OK\n");
+    }
 
     if (!hFont)
     {
@@ -1587,6 +2112,15 @@ int endwin(void)
     hDC = NULL;
     hWnd = NULL;
     s_hfont_is_stock = 0;
+
+    win32_clear_font_files();
+
+    if (s_te_dc)
+    {
+        TE_ContextRelease(s_te_dc);
+        s_te_dc = NULL;
+        s_use_te = 0;
+    }
 
     if (s_shadow)
     {
@@ -1801,6 +2335,7 @@ int wclrtobot(WINDOW *win)
         {
             CELL(win, r, c)->ch = ' ';
             CELL(win, r, c)->attrs = win->attrs;
+            CELL(win, r, c)->full_cp = 0;
         }
     }
 
@@ -1825,6 +2360,7 @@ int wclrtoeol(WINDOW *win)
     {
         CELL(win, r, c)->ch = ' ';
         CELL(win, r, c)->attrs = win->attrs;
+        CELL(win, r, c)->full_cp = 0;
     }
 
     return OK;
@@ -1885,10 +2421,47 @@ int waddch(WINDOW *win, const chtype ch)
         {
             Cell *prev = CELL(win, r, c - 1);
             prev->ch = ' ';
+            prev->full_cp = 0;
         }
     }
 
     wc = (wchar_t)ch_out;
+
+    /* Tab: advance to next tab stop, filling span cells with space */
+    if (ch_out == '\t')
+    {
+        int tab_w = s_tab_size - (c % s_tab_size);
+        int j;
+
+        if (c + tab_w > win->_maxx)
+            tab_w = win->_maxx - c;
+
+        for (j = 0; j < tab_w && c + j < win->_maxx; j++)
+        {
+            Cell *tab_cell = CELL(win, r, c + j);
+
+            tab_cell->ch = (j == 0) ? '\t' : ' ';
+            tab_cell->attrs = attrs;
+            tab_cell->full_cp = 0;
+        }
+
+        win->_curx += tab_w;
+
+        if (win->_curx >= win->_maxx)
+        {
+            win->_curx = 0;
+            win->_cury++;
+
+            if (win->_cury >= win->_maxy && (win->_flags & 2))
+            {
+                win->_cury = win->_maxy - 1;
+                wscrl(win, 1);
+            }
+        }
+
+        return OK;
+    }
+
     cw = is_wide_cp((unsigned int)ch_out) ? 2 : 1;
 
     /* Case B: narrow into lead -> orphan the trailing */
@@ -1900,6 +2473,7 @@ int waddch(WINDOW *win, const chtype ch)
         {
             nxt->ch = ' ';
             nxt->attrs = attrs;
+            nxt->full_cp = 0;
         }
     }
 
@@ -1912,12 +2486,14 @@ int waddch(WINDOW *win, const chtype ch)
         {
             thd->ch = ' ';
             thd->attrs = attrs;
+            thd->full_cp = 0;
         }
     }
 
     /* write lead cell */
     CELL(win, r, c)->ch = ch_out;
     CELL(win, r, c)->attrs = attrs;
+    CELL(win, r, c)->full_cp = 0;
     win->_curx++;
 
     /* write trailing cell for wide glyphs */
@@ -1927,6 +2503,7 @@ int waddch(WINDOW *win, const chtype ch)
 
         trail->ch = WIN32_CELL_WIDE_TRAILING;
         trail->attrs = attrs;
+        trail->full_cp = 0;
         win->_curx++;
     }
 
@@ -1959,6 +2536,111 @@ int mvwaddch(WINDOW *win, int y, int x, const chtype ch)
         return ERR;
 
     return waddch(win, ch);
+}
+
+/* Write a full 32-bit Unicode codepoint (needed on Windows where wchar_t is 16-bit).
+ * Stores the truncated value in ch for width/ncurses compat and the full codepoint in full_cp */
+int waddch32(WINDOW *win, unsigned long cp)
+{
+    int r, c;
+    chtype ch_out;
+    attr_t attrs;
+    int cw;
+
+    if (!win)
+        return ERR;
+
+    r = win->_cury;
+    c = win->_curx;
+
+    if (r < 0 || r >= win->_maxy || c < 0 || c >= win->_maxx)
+        return ERR;
+
+    attrs = win->attrs;
+    attrs &= ~A_COLOR;
+    attrs |= COLOR_PAIR(win->color_pair);
+
+    /* Reuse waddch's truncation for width/ncurses compatibility; then override full_cp */
+    ch_out = (chtype)(cp & A_CHARTEXT);
+
+    /* Case A: writing on TRAILING -> orphan the lead */
+    if (c > 0)
+    {
+        Cell *cur = CELL(win, r, c);
+
+        if (cur->ch == WIN32_CELL_WIDE_TRAILING)
+        {
+            Cell *prev = CELL(win, r, c - 1);
+            prev->ch = ' ';
+            prev->full_cp = 0;
+        }
+    }
+
+    cw = is_wide_cp((unsigned int)cp) ? 2 : 1;
+
+    /* Case B: narrow into lead -> orphan the trailing */
+    if (cw == 1 && c + 1 < win->_maxx)
+    {
+        Cell *nxt = CELL(win, r, c + 1);
+
+        if (nxt->ch == WIN32_CELL_WIDE_TRAILING)
+        {
+            nxt->ch = ' ';
+            nxt->attrs = attrs;
+            nxt->full_cp = 0;
+        }
+    }
+
+    /* Case C: wide over wide -> orphan the next trailing */
+    if (cw == 2 && c + 2 < win->_maxx)
+    {
+        Cell *thd = CELL(win, r, c + 2);
+
+        if (thd->ch == WIN32_CELL_WIDE_TRAILING)
+        {
+            thd->ch = ' ';
+            thd->attrs = attrs;
+            thd->full_cp = 0;
+        }
+    }
+
+    /* write lead cell */
+    CELL(win, r, c)->ch = ch_out;
+    CELL(win, r, c)->attrs = attrs;
+    CELL(win, r, c)->full_cp = cp;
+    win->_curx++;
+
+    /* write trailing cell for wide glyphs */
+    if (cw == 2)
+    {
+        Cell *trail = CELL(win, r, win->_curx);
+
+        trail->ch = WIN32_CELL_WIDE_TRAILING;
+        trail->attrs = attrs;
+        trail->full_cp = 0;
+        win->_curx++;
+    }
+
+    if (win->_curx >= win->_maxx)
+    {
+        win->_curx = 0;
+        win->_cury++;
+
+        if (win->_cury >= win->_maxy && (win->_flags & 2))
+        {
+            win->_cury = win->_maxy - 1;
+            wscrl(win, 1);
+        }
+    }
+    return OK;
+}
+
+int mvaddch32(int y, int x, unsigned long cp)
+{
+    if (wmove(stdscr, y, x) == ERR)
+        return ERR;
+
+    return waddch32(stdscr, cp);
 }
 
 chtype mvinch(int y, int x)
@@ -2179,6 +2861,35 @@ int mvwaddnwstr(WINDOW *win, int y, int x, const wchar_t *wstr, int n)
     return waddnwstr(win, wstr, n);
 }
 
+int mvwchgat(WINDOW *win, int y, int x, int n, attr_t attr, short color, const void *opts)
+{
+    int i;
+    (void)opts;
+
+    if (!win || y < 0 || y >= win->_maxy || x < 0 || x >= win->_maxx)
+        return ERR;
+
+    if (n < 0)
+        n = win->_maxx - x;
+
+    for (i = 0; i < n && (x + i) < win->_maxx; i++)
+    {
+        Cell *c = CELL(win, y, x + i);
+
+        c->attrs = (c->attrs & A_COLOR) | (attr & ~A_COLOR);
+
+        if (color >= 0)
+            c->attrs = (c->attrs & ~A_COLOR) | COLOR_PAIR(color);
+    }
+
+    return OK;
+}
+
+int mvchgat(int y, int x, int n, attr_t attr, short color, const void *opts)
+{
+    return mvwchgat(stdscr, y, x, n, attr, color, opts);
+}
+
 int printw(const char *fmt, ...)
 {
     va_list ap;
@@ -2272,6 +2983,9 @@ int wattron(WINDOW *win, int attrs)
 {
     if (!win)
         return ERR;
+
+    if (attrs & A_COLOR)
+        win->attrs &= ~A_COLOR;
 
     win->attrs |= (attr_t)attrs;
 
@@ -2738,6 +3452,18 @@ int curs_set(int visibility)
     return old;
 }
 
+int set_tabsize(int n)
+{
+    if (n < 1)
+        n = 1;
+
+    if (n > 16)
+        n = 16;
+
+    s_tab_size = n;
+    return OK;
+}
+
 int beep(void)
 {
     MessageBeep(MB_OK);
@@ -2994,6 +3720,7 @@ int wscrl(WINDOW *win, int n)
             {
                 CELL(win, r, c)->ch = CELL(win, r + n, c)->ch;
                 CELL(win, r, c)->attrs = CELL(win, r + n, c)->attrs;
+                CELL(win, r, c)->full_cp = CELL(win, r + n, c)->full_cp;
             }
         }
 
@@ -3003,6 +3730,7 @@ int wscrl(WINDOW *win, int n)
             {
                 CELL(win, r, c)->ch = ' ';
                 CELL(win, r, c)->attrs = win->attrs;
+                CELL(win, r, c)->full_cp = 0;
             }
         }
     }
@@ -3014,6 +3742,7 @@ int wscrl(WINDOW *win, int n)
             {
                 CELL(win, r, c)->ch = CELL(win, r + n, c)->ch;
                 CELL(win, r, c)->attrs = CELL(win, r + n, c)->attrs;
+                CELL(win, r, c)->full_cp = CELL(win, r + n, c)->full_cp;
             }
         }
 
@@ -3023,6 +3752,7 @@ int wscrl(WINDOW *win, int n)
             {
                 CELL(win, r, c)->ch = ' ';
                 CELL(win, r, c)->attrs = win->attrs;
+                CELL(win, r, c)->full_cp = 0;
             }
         }
     }
@@ -3132,6 +3862,8 @@ int resize_term(int nlines, int ncols)
 int win32_set_font_name(const char *font_name)
 {
     const char *src = (font_name && font_name[0]) ? font_name : "Consolas";
+
+    fprintf(stderr, "[win32_set_font_name] name=%s\n", src);
 
     strncpy(win_font_name, src, WIN_FONT_NAME_MAX - 1);
     win_font_name[WIN_FONT_NAME_MAX - 1] = '\0';

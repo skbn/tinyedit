@@ -221,7 +221,6 @@ static int color_by_name(const char *s, TeConfig *cfg)
     return -1;
 }
 
-/* Map pair name -> TE_COL_* index (1..9), or -1 */
 static int pair_by_name(const char *s)
 {
     if (strcasecmp(s, "NORMAL") == 0)
@@ -248,6 +247,15 @@ static int pair_by_name(const char *s)
     if (strcasecmp(s, "SPELLCURRENT") == 0)
         return COL_SPELL_CURRENT;
 
+    if (strcasecmp(s, "BRACKETMATCH") == 0)
+        return COL_BRACKET_MATCH;
+
+    if (strcasecmp(s, "CURRENTLINE") == 0)
+        return COL_CURRENT_LINE;
+
+    if (strcasecmp(s, "GUIDES") == 0)
+        return COL_GUIDE;
+
     return -1;
 }
 
@@ -262,8 +270,21 @@ void te_cfg_defaults(TeConfig *cfg)
 
     cfg->undo_levels = 50;
     cfg->autowrap_col = 75;
-    cfg->hard_wrap = 0;         /* soft-wrap by default */
-    cfg->show_line_numbers = 0; /* line numbers disabled by default */
+    cfg->tab_width = 4;          /* tab stop width: 4 visual columns by default */
+    cfg->hard_wrap = 0;          /* soft-wrap by default */
+    cfg->show_line_numbers = 0;  /* line numbers disabled by default */
+    cfg->show_whitespace = 0;    /* whitespace markers off by default */
+    cfg->show_brackets = 0;      /* bracket highlight off by default */
+    cfg->highlight_line = 0;     /* current line highlight off */
+    cfg->word_count = 0;         /* word count off */
+    cfg->autoclose = 0;          /* bracket auto-close off */
+    cfg->smart_indent = 0;       /* smart indent off */
+    cfg->autosave = 0;           /* auto-save off */
+    cfg->autosave_interval = 30; /* 30 seconds default if enabled */
+
+    cfg->ruler_col = 0;      /* column ruler off */
+    cfg->indent_guides = 0;  /* indent guides off */
+    cfg->wrap_indicator = 0; /* wrap indicator off */
     cfg->cursor_color = -1;
     cfg->default_bg_color = 0;
     cfg->mouse_enabled = 1; /* mouse enabled by default */
@@ -272,6 +293,9 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->assist_smart_quotes = 0;
     cfg->assist_auto_cap = 0;
     cfg->assist_repeat_check = 0;
+
+    /* Word movement: 0=standard, 1=vim-like (non-space blocks) */
+    cfg->word_move_mode = 0;
 
     /* Initialize color_map as identity mapping (pen 0=black, 1=red, etc) */
     for (i = 0; i < 16; i++)
@@ -412,6 +436,18 @@ void te_cfg_defaults(TeConfig *cfg)
     /* COL_SPELL_CURRENT (8) */
     cfg->color_fg[COL_SPELL_CURRENT] = 7;
     cfg->color_bg[COL_SPELL_CURRENT] = 5;
+
+    /* COL_BRACKET_MATCH (9) */
+    cfg->color_fg[COL_BRACKET_MATCH] = 0;
+    cfg->color_bg[COL_BRACKET_MATCH] = 3;
+
+    /* COL_CURRENT_LINE (10) */
+    cfg->color_fg[COL_CURRENT_LINE] = 7;
+    cfg->color_bg[COL_CURRENT_LINE] = 4;
+
+    /* COL_GUIDE (11) */
+    cfg->color_fg[COL_GUIDE] = 6;
+    cfg->color_bg[COL_GUIDE] = 0;
 }
 
 /* Load */
@@ -511,6 +547,16 @@ int te_cfg_load(TeConfig *cfg, const char *path)
             if (cfg->autowrap_col > 0 && cfg->autowrap_col < 20)
                 cfg->autowrap_col = 75;
         }
+        else if (strcasecmp(word, "TABWIDTH") == 0)
+        {
+            cfg->tab_width = atoi(rest);
+
+            if (cfg->tab_width < 1)
+                cfg->tab_width = 1;
+
+            if (cfg->tab_width > 16)
+                cfg->tab_width = 16;
+        }
         else if (strcasecmp(word, "HARDWRAP") == 0)
         {
             cfg->hard_wrap = parse_yesno(rest);
@@ -518,6 +564,62 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         else if (strcasecmp(word, "LINENUMBERS") == 0)
         {
             cfg->show_line_numbers = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "SHOWWHITESPACE") == 0)
+        {
+            cfg->show_whitespace = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "SHOWBRACKETS") == 0)
+        {
+            cfg->show_brackets = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "HIGHLIGHTLINE") == 0)
+        {
+            cfg->highlight_line = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "WORDCOUNT") == 0)
+        {
+            cfg->word_count = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "AUTOCLOSE") == 0)
+        {
+            cfg->autoclose = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "SMARTINDENT") == 0)
+        {
+            cfg->smart_indent = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "AUTOSAVE") == 0)
+        {
+            cfg->autosave = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "AUTOSAVEINTERVAL") == 0)
+        {
+            cfg->autosave_interval = atoi(rest);
+
+            if (cfg->autosave_interval < 5)
+                cfg->autosave_interval = 5;
+
+            if (cfg->autosave_interval > 3600)
+                cfg->autosave_interval = 3600;
+        }
+        else if (strcasecmp(word, "RULERCOL") == 0)
+        {
+            cfg->ruler_col = atoi(rest);
+
+            if (cfg->ruler_col < 0)
+                cfg->ruler_col = 0;
+
+            if (cfg->ruler_col > 500)
+                cfg->ruler_col = 500;
+        }
+        else if (strcasecmp(word, "INDENTGUIDES") == 0)
+        {
+            cfg->indent_guides = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "WRAPINDICATOR") == 0)
+        {
+            cfg->wrap_indicator = parse_yesno(rest);
         }
         else if (strcasecmp(word, "FONT") == 0)
         {
@@ -688,6 +790,10 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         else if (strcasecmp(word, "ASSIST_REPEAT_CHECK") == 0)
         {
             cfg->assist_repeat_check = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "WORD_MOVE_MODE") == 0)
+        {
+            cfg->word_move_mode = atoi(rest);
         }
         else if (strcasecmp(word, "COLORMAP") == 0)
         {
@@ -1056,8 +1162,20 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "CHARSET") == 0 ||
                 strcasecmp(word, "UNDOLEVELS") == 0 ||
                 strcasecmp(word, "AUTOWRAP") == 0 ||
+                strcasecmp(word, "TABWIDTH") == 0 ||
                 strcasecmp(word, "HARDWRAP") == 0 ||
                 strcasecmp(word, "LINENUMBERS") == 0 ||
+                strcasecmp(word, "SHOWWHITESPACE") == 0 ||
+                strcasecmp(word, "SHOWBRACKETS") == 0 ||
+                strcasecmp(word, "HIGHLIGHTLINE") == 0 ||
+                strcasecmp(word, "WORDCOUNT") == 0 ||
+                strcasecmp(word, "AUTOCLOSE") == 0 ||
+                strcasecmp(word, "SMARTINDENT") == 0 ||
+                strcasecmp(word, "AUTOSAVE") == 0 ||
+                strcasecmp(word, "AUTOSAVEINTERVAL") == 0 ||
+                strcasecmp(word, "RULERCOL") == 0 ||
+                strcasecmp(word, "INDENTGUIDES") == 0 ||
+                strcasecmp(word, "WRAPINDICATOR") == 0 ||
                 strcasecmp(word, "TTF_ENABLED") == 0 ||
                 strcasecmp(word, "TTF_FONT") == 0 ||
                 strcasecmp(word, "TTF_SIZE") == 0 ||
@@ -1102,8 +1220,20 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "CHARSET %s\n", cfg->charset);
     fprintf(out, "UNDOLEVELS %d\n", cfg->undo_levels);
     fprintf(out, "AUTOWRAP %d\n", cfg->autowrap_col);
+    fprintf(out, "TABWIDTH %d\n", cfg->tab_width);
     fprintf(out, "HARDWRAP %s\n", cfg->hard_wrap ? "YES" : "NO");
     fprintf(out, "LINENUMBERS %s\n", cfg->show_line_numbers ? "YES" : "NO");
+    fprintf(out, "SHOWWHITESPACE %s\n", cfg->show_whitespace ? "YES" : "NO");
+    fprintf(out, "SHOWBRACKETS %s\n", cfg->show_brackets ? "YES" : "NO");
+    fprintf(out, "HIGHLIGHTLINE %s\n", cfg->highlight_line ? "YES" : "NO");
+    fprintf(out, "WORDCOUNT %s\n", cfg->word_count ? "YES" : "NO");
+    fprintf(out, "AUTOCLOSE %s\n", cfg->autoclose ? "YES" : "NO");
+    fprintf(out, "SMARTINDENT %s\n", cfg->smart_indent ? "YES" : "NO");
+    fprintf(out, "AUTOSAVE %s\n", cfg->autosave ? "YES" : "NO");
+    fprintf(out, "AUTOSAVEINTERVAL %d\n", cfg->autosave_interval);
+    fprintf(out, "RULERCOL %d\n", cfg->ruler_col);
+    fprintf(out, "INDENTGUIDES %s\n", cfg->indent_guides ? "YES" : "NO");
+    fprintf(out, "WRAPINDICATOR %s\n", cfg->wrap_indicator ? "YES" : "NO");
 
     /* TTF settings */
     fprintf(out, "TTF_ENABLED %s\n", cfg->ttf_enabled ? "YES" : "NO");
@@ -1140,6 +1270,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "ASSIST_SMART_QUOTES %s\n", cfg->assist_smart_quotes ? "YES" : "NO");
     fprintf(out, "ASSIST_AUTO_CAP %s\n", cfg->assist_auto_cap ? "YES" : "NO");
     fprintf(out, "ASSIST_REPEAT_CHECK %s\n", cfg->assist_repeat_check ? "YES" : "NO");
+    fprintf(out, "WORD_MOVE_MODE %d\n", cfg->word_move_mode);
 
     /* Color pairs */
     fprintf(out, "COLOR NORMAL %s %s\n", color_name(cfg->color_fg[COL_NORMAL]), color_name(cfg->color_bg[COL_NORMAL]));
@@ -1150,6 +1281,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "COLOR BORDER %s %s\n", color_name(cfg->color_fg[COL_BORDER]), color_name(cfg->color_bg[COL_BORDER]));
     fprintf(out, "COLOR SEARCH %s %s\n", color_name(cfg->color_fg[COL_SEARCH_MATCH]), color_name(cfg->color_bg[COL_SEARCH_MATCH]));
     fprintf(out, "COLOR SPELLCURRENT %s %s\n", color_name(cfg->color_fg[COL_SPELL_CURRENT]), color_name(cfg->color_bg[COL_SPELL_CURRENT]));
+    fprintf(out, "COLOR BRACKETMATCH %s %s\n", color_name(cfg->color_fg[COL_BRACKET_MATCH]), color_name(cfg->color_bg[COL_BRACKET_MATCH]));
+    fprintf(out, "COLOR CURRENTLINE %s %s\n", color_name(cfg->color_fg[COL_CURRENT_LINE]), color_name(cfg->color_bg[COL_CURRENT_LINE]));
+    fprintf(out, "COLOR GUIDES %s %s\n", color_name(cfg->color_fg[COL_GUIDE]), color_name(cfg->color_bg[COL_GUIDE]));
 
     /* COLORMAP for Amiga */
     if (cfg->color_map_initialized)
@@ -1213,9 +1347,15 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fclose(out);
 
     /* Replace original file with temporary file */
-    if (pf_atomic_rename(tmp_path, path) != 0)
+    if (remove(path) != 0 && errno != ENOENT)
     {
-        pf_remove_file(tmp_path);
+        remove(tmp_path);
+        return -1;
+    }
+
+    if (rename(tmp_path, path) != 0)
+    {
+        remove(tmp_path);
         return -1;
     }
 

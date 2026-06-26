@@ -46,9 +46,6 @@ typedef struct
     int attrs;
 } Cell;
 
-/* Macro helper para acceder a celdas */
-#define CELL(win, r, c) (&(win)->cells[(r) * (win)->_maxx + (c)])
-
 typedef struct _win_st
 {
     int _cury, _curx; /* Cursor position */
@@ -175,7 +172,7 @@ extern int COLORS;
 #define KEY_EVENT 0x19B
 #define KEY_MAX 0x1FF
 
-/* Modifier-key codes returned by wgetch() (sit above KEY_MAX to avoid collision) */
+/* Modifier-key codes from wgetch() above KEY_MAX. See ui/ui_internal.h for cross-platform definitions */
 #ifndef KEY_ALT
 #define KEY_ALT(c) (0x800 + ((unsigned int)(c) & 0xFF))
 #endif
@@ -203,6 +200,13 @@ extern int COLORS;
 #endif
 #ifndef KEY_ARIGHT
 #define KEY_ARIGHT 0x7F6
+#endif
+
+#ifndef KEY_ALT_UP
+#define KEY_ALT_UP 0xA00
+#define KEY_ALT_DOWN 0xA01
+#define KEY_ALT_LEFT 0xA02
+#define KEY_ALT_RIGHT 0xA03
 #endif
 
 /* Shift+Arrow keycodes */
@@ -397,6 +401,10 @@ int mvaddnwstr(int y, int x, const wchar_t *wstr, int n);
 int mvwaddwstr(WINDOW *win, int y, int x, const wchar_t *wstr);
 int mvwaddnwstr(WINDOW *win, int y, int x, const wchar_t *wstr, int n);
 
+/* Attribute change */
+int mvchgat(int y, int x, int n, attr_t attr, short color, const void *opts);
+int mvwchgat(WINDOW *win, int y, int x, int n, attr_t attr, short color, const void *opts);
+
 /* Printf-style formatting */
 int printw(const char *fmt, ...);
 int wprintw(WINDOW *win, const char *fmt, ...);
@@ -449,8 +457,12 @@ int amiga_set_default_bg_color(int color);
 int amiga_set_font_name(const char *font_name);
 int amiga_set_ansi_font_name(const char *font_name);
 
-/* TrueType font support (via ttengine.library v6+): call BEFORE initscr(), falls back if unavailable */
+/* TrueType font support (ttengine.library v6+). Call BEFORE initscr() */
 int amiga_set_ttf(const char *ttf_file, int size, int antialias);
+
+/* Optional: register extra TTF fonts for missing codepoints */
+int amiga_add_ttf_fallback(const char *path, int size);
+void amiga_clear_ttf_fallbacks(void);
 int amiga_set_ttf_encoding(int use_utf8);
 int amiga_reload_ttf_size(int new_size);
 int amiga_reload_ttf(const char *font_path, int new_size);
@@ -516,6 +528,7 @@ int nonl();
 
 /* Cursor */
 int curs_set(int visibility);
+int set_tabsize(int n);
 
 /* Special chars */
 unsigned long getmouse();

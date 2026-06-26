@@ -28,6 +28,10 @@
 #include "../translate/translate.h"
 #endif
 
+#ifdef HAVE_TRANSLATE_STARDICT
+#include "ui_dict.h"
+#endif
+
 #ifdef HAVE_HUNSPELL
 #if defined(PLATFORM_AMIGA)
 #include "../spellchecker/spell.h"
@@ -75,7 +79,12 @@ TeApp *te_app_new(void)
     wm_add_window(app->wm, WIN_EDITOR, 20, 1, COLS - 20, LINES - 1);
     wm_add_window(app->wm, WIN_TRANSLATE, 20, LINES - SPELL_PANEL_HEIGHT - 1, COLS - 20, SPELL_PANEL_HEIGHT);
     wm_add_window(app->wm, WIN_SPELL, 20, LINES - SPELL_PANEL_HEIGHT - 1, COLS - 20, SPELL_PANEL_HEIGHT);
+
+#ifdef HAVE_TRANSLATE_STARDICT
+    wm_add_window(app->wm, WIN_DICT, 20, LINES - DICT_PANEL_HEIGHT - 1, COLS - 20, DICT_PANEL_HEIGHT);
+#else
     wm_add_window(app->wm, WIN_DICT, 20, LINES - SPELL_PANEL_HEIGHT - 1, COLS - 20, SPELL_PANEL_HEIGHT);
+#endif
 
     app->tab_cap = 8;
     app->tabs = (TeTab **)calloc(app->tab_cap, sizeof(TeTab *));
@@ -101,6 +110,8 @@ TeApp *te_app_new(void)
     app->dict_result = NULL;
     app->dict_word[0] = '\0';
     app->dict_scroll = 0;
+    app->bracket_match_row = -1;
+    app->bracket_match_col = -1;
     app->hard_wrap = 0;
     app->wrap_col = 75;
 
@@ -309,20 +320,6 @@ void te_app_switch_tab(TeApp *app, int index)
     app->active_tab = index;
 }
 
-/* Set raw bytes in active tab */
-void te_app_set_raw_bytes(TeApp *app, char *ptr, int len)
-{
-    TeTab *tab = NULL;
-
-    tab = te_app_get_active_tab(app);
-
-    if (!tab)
-        return;
-
-    tab->raw_bytes = ptr;
-    tab->raw_len = len;
-}
-
 /* Helper functions to access active tab data */
 Ed *te_app_get_editor(TeApp *app)
 {
@@ -346,30 +343,6 @@ const char *te_app_get_filename(TeApp *app)
         return "";
 
     return tab->filename;
-}
-
-char *te_app_get_raw_bytes(TeApp *app)
-{
-    TeTab *tab = NULL;
-
-    tab = te_app_get_active_tab(app);
-
-    if (!tab)
-        return NULL;
-
-    return tab->raw_bytes;
-}
-
-int te_app_get_raw_len(TeApp *app)
-{
-    TeTab *tab = NULL;
-
-    tab = te_app_get_active_tab(app);
-
-    if (!tab)
-        return 0;
-
-    return tab->raw_len;
 }
 
 int te_app_get_show_line_numbers(TeApp *app)
@@ -472,6 +445,9 @@ void te_init_colors(const TeConfig *cfg)
         init_pair(COL_BORDER, COLOR_CYAN, COLOR_BLACK);
         init_pair(COL_SEARCH_MATCH, COLOR_BLACK, COLOR_YELLOW);
         init_pair(COL_SPELL_CURRENT, COLOR_WHITE, COLOR_MAGENTA);
+        init_pair(COL_BRACKET_MATCH, COLOR_BLACK, COLOR_YELLOW);
+        init_pair(COL_CURRENT_LINE, COLOR_WHITE, COLOR_BLUE);
+        init_pair(COL_GUIDE, COLOR_CYAN, COLOR_BLACK);
     }
 }
 
@@ -543,6 +519,9 @@ void te_draw_titlebar(TeApp *app)
 
         if (avail < 0)
             avail = 0;
+
+        if (avail > (int)sizeof(truncated) - 4)
+            avail = (int)sizeof(truncated) - 4;
 
         strncpy(truncated, fn, avail);
 
@@ -637,6 +616,12 @@ void te_draw_statusbar(TeApp *app)
         {
             const char *fn = NULL;
             const char *last_slash = NULL;
+            char wc_str[32];
+
+            wc_str[0] = '\0';
+
+            if (app->cfg.word_count && tab->editor)
+                snprintf(wc_str, sizeof(wc_str), "  Words: %d", ed_word_count(tab->editor));
 
             if (tab->filename[0])
             {
@@ -647,11 +632,11 @@ void te_draw_statusbar(TeApp *app)
 
                 fn = last_slash ? last_slash + 1 : tab->filename;
 
-                snprintf(charset_info, sizeof(charset_info), "%s  View: %s  Save: %s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8");
+                snprintf(charset_info, sizeof(charset_info), "%s  View: %s  Save: %s%s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
             }
             else
             {
-                snprintf(charset_info, sizeof(charset_info), "View: %s  Save: %s", tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8");
+                snprintf(charset_info, sizeof(charset_info), "View: %s  Save: %s%s", tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
             }
         }
         else

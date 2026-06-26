@@ -16,7 +16,6 @@
 #include "../core/charset.h"
 
 #define TE_CFG_STR_MAX 256
-#define TE_CFG_COLOR_MAX 32 /* COL_* are 1..9; slot 0 unused */
 
 /* Color pairs */
 #define COL_NORMAL 1
@@ -27,6 +26,11 @@
 #define COL_BORDER 6
 #define COL_SEARCH_MATCH 7
 #define COL_SPELL_CURRENT 8
+#define COL_BRACKET_MATCH 9
+#define COL_CURRENT_LINE 10 /* Background for current line highlight (universal: works on any ncurses) */
+#define COL_GUIDE 11        /* Dim color for column ruler, indent guides, wrap indicator */
+
+#define TE_CFG_COLOR_MAX 64 /* COL_* are 1..9; slot 0 unused */
 
 typedef struct
 {
@@ -39,11 +43,45 @@ typedef struct
     /* Auto-wrap column; 0 = disabled (default 75) */
     int autowrap_col;
 
+    /* Number of visual columns for a tab character (tab stop width) */
+    int tab_width;
+
     /* 0=soft-wrap (visual only), 1=hard-wrap (CR inserted at autowrap_col) */
     int hard_wrap;
 
     /* Show line numbers: 0 = disabled, 1 = enabled */
     int show_line_numbers;
+
+    /* Show whitespace markers = paint tabs as "→" and trailing spaces as "·" */
+    int show_whitespace;
+
+    /* Bracket matching highlight. Same-line only for now */
+    int show_brackets;
+
+    /* Highlight current line: */
+    int highlight_line;
+
+    /* Word count in status bar: 0 = off, 1 = show "Words: N" */
+    int word_count;
+
+    /* Bracket auto-close: 0 = off, 1 = typing ( [ { " ' also inserts the matching close and leaves cursor between */
+    int autoclose;
+
+    /* Smart indent on Enter: 0 = off, 1 = new line copies the leading whitespace from the previous line */
+    int smart_indent;
+
+    /* Auto-save .swp file: 0 = off, 1 = every autosave_interval seconds write an atomic .swp copy next to the original */
+    int autosave;
+    int autosave_interval; /* in seconds, default 30 */
+
+    /* Column ruler: 0 = off, N > 0 = draw '|' at column N (only where text doesn't reach) */
+    int ruler_col;
+
+    /* Indent guides: 0 = off, 1 = '|' every tab_width spaces in leading whitespace */
+    int indent_guides;
+
+    /* Soft-wrap indicator: 0 = off, 1 = marker at end of continued sub-rows */
+    int wrap_indicator;
 
     /* UI font name (Amiga: "topaz.font"; unused on Linux) */
     char font[TE_CFG_STR_MAX];
@@ -118,6 +156,9 @@ typedef struct
     int assist_smart_quotes;
     int assist_auto_cap;
     int assist_repeat_check;
+
+    /* Word movement style: 0=standard (alnum+underscore), 1=vim-like (non-space blocks) */
+    int word_move_mode;
 
 } TeConfig;
 

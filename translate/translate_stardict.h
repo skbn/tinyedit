@@ -34,6 +34,12 @@ extern "C"
     /* Get dictionary name from .ifo */
     const char *translate_stardict_bookname(StarDictHandle *h);
 
+    /* Suggest up to max dictionary entries similar to word (caller frees each item) */
+    int translate_stardict_suggest(StarDictHandle *h, const char *word, char **items, int max);
+
+    /* Reverse lookup: return source words whose definitions contain target as a full word (caller frees each item) */
+    int translate_stardict_reverse(StarDictHandle *h, const char *target, char **items, int max, int max_scan);
+
 #ifdef __cplusplus
 }
 #endif

@@ -19,6 +19,9 @@ extern "C"
 {
 #endif
 
+#define DICT_PANEL_HEIGHT 7
+#define DICT_PANEL_ROWS (DICT_PANEL_HEIGHT - 1)
+
     /* Draw dict panel inside TeWindow. No-op if spell_panel_mode != 2 */
     void ui_dict_draw_panel(TeApp *app);
 

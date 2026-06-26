@@ -23,14 +23,12 @@ typedef struct
     char filename[TAB_FILENAME_MAX];
     char charset_in[TAB_CHARSET_MAX];
     char charset_out[TAB_CHARSET_MAX];
-    char *raw_bytes;
-    int raw_len;
     int modified;
     int show_line_numbers;
 } TeTab;
 
 TeTab *te_tab_new(void);
-TeTab *te_tab_new_with_content(const char *filename, const char *content, const char *raw_bytes, int raw_len);
+TeTab *te_tab_new_with_content(const char *filename, const char *content);
 void te_tab_free(TeTab *tab);
 void te_tab_clear_search(TeTab *tab);
 

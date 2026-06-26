@@ -10,6 +10,7 @@
  */
 
 #include "spell.h"
+#include "../core/portable.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -474,9 +475,10 @@ char **spell_list_dictionaries(const char *dir_path, int *n_dicts)
     int cap, count;
 
 #ifdef PLATFORM_WIN32
-    WIN32_FIND_DATAA fd;
+    WIN32_FIND_DATAW fd;
     HANDLE h;
-    char pat[300];
+    wchar_t *wdir = NULL;
+    wchar_t wpat[512];
 #elif defined(PLATFORM_AMIGA)
     BPTR lock;
     struct FileInfoBlock *fib = NULL;
@@ -500,41 +502,57 @@ char **spell_list_dictionaries(const char *dir_path, int *n_dicts)
 
 #ifdef PLATFORM_WIN32
 
-    snprintf(pat, sizeof(pat), "%s\\*.dic", dir_path);
-    h = FindFirstFileA(pat, &fd);
+    wdir = pf_utf8_to_utf16(dir_path);
 
-    if (h != INVALID_HANDLE_VALUE)
+    if (wdir)
     {
-        do
+        swprintf(wpat, sizeof(wpat) / sizeof(wchar_t), L"%s\\*.dic", wdir);
+
+        h = FindFirstFileW(wpat, &fd);
+
+        if (h != INVALID_HANDLE_VALUE)
         {
-            if (ends_with_dic(fd.cFileName))
+            do
             {
-                char *base = extract_dict_name(fd.cFileName);
+                char *name_utf8 = pf_utf16_to_utf8(fd.cFileName);
 
-                if (base)
+                if (!name_utf8)
+                    continue;
+
+                if (ends_with_dic(name_utf8))
                 {
-                    if (count >= cap)
+                    char *base = extract_dict_name(name_utf8);
+
+                    if (base)
                     {
-                        char **g;
-
-                        cap *= 2;
-                        g = (char **)realloc(list, (size_t)cap * sizeof(char *));
-
-                        if (!g)
+                        if (count >= cap)
                         {
-                            free(base);
-                            continue;
+                            char **g;
+
+                            cap *= 2;
+                            g = (char **)realloc(list, (size_t)cap * sizeof(char *));
+
+                            if (!g)
+                            {
+                                free(base);
+                                free(name_utf8);
+                                continue;
+                            }
+
+                            list = g;
                         }
 
-                        list = g;
+                        list[count++] = base;
                     }
-
-                    list[count++] = base;
                 }
-            }
-        } while (FindNextFileA(h, &fd));
 
-        FindClose(h);
+                free(name_utf8);
+            } while (FindNextFileW(h, &fd));
+
+            FindClose(h);
+        }
+
+        free(wdir);
     }
 
 #elif defined(PLATFORM_AMIGA)

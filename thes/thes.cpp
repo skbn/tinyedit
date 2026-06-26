@@ -11,6 +11,7 @@
 
 #include "thes.h"
 #include "../spell/spell.h" /* SpellChecker, spell_stem/generate/free_list */
+#include "../core/portable.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -826,9 +827,10 @@ extern "C"
         char **new_dicts = NULL;
 
 #ifdef PLATFORM_WIN32
-        WIN32_FIND_DATAA fd;
+        WIN32_FIND_DATAW fd;
         HANDLE h;
-        char pattern[300];
+        wchar_t *wdir = NULL;
+        wchar_t wpattern[512];
 #elif defined(PLATFORM_AMIGA)
         BPTR lock;
         struct FileInfoBlock *fib = NULL;
@@ -853,9 +855,19 @@ extern "C"
             return NULL;
 
 #ifdef PLATFORM_WIN32
-        snprintf(pattern, sizeof(pattern), "%s\\*.idx", dir_path);
+        wdir = pf_utf8_to_utf16(dir_path);
 
-        h = FindFirstFileA(pattern, &fd);
+        if (!wdir)
+        {
+            free(dicts);
+            return NULL;
+        }
+
+        swprintf(wpattern, sizeof(wpattern) / sizeof(wchar_t), L"%s\\*.idx", wdir);
+
+        free(wdir);
+
+        h = FindFirstFileW(wpattern, &fd);
 
         if (h == INVALID_HANDLE_VALUE)
         {
@@ -865,10 +877,19 @@ extern "C"
 
         do
         {
+            char *name_utf8 = NULL;
+
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 continue;
 
-            name = thes_extract_name(fd.cFileName);
+            name_utf8 = pf_utf16_to_utf8(fd.cFileName);
+
+            if (!name_utf8)
+                continue;
+
+            name = thes_extract_name(name_utf8);
+
+            free(name_utf8);
 
             if (!name)
                 continue;
@@ -901,7 +922,7 @@ extern "C"
             {
                 free(name);
             }
-        } while (FindNextFileA(h, &fd));
+        } while (FindNextFileW(h, &fd));
 
         FindClose(h);
 

@@ -19,6 +19,7 @@
 #include <ncurses.h>
 #endif
 #include "wm.h"
+#include "ui_dict.h"
 
 /* Create new window manager */
 TeWindowManager *wm_new(void)
@@ -227,7 +228,13 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
         return;
 
     tab_w = show_tabs ? 20 : 0;
-    panel_h = (spell_panel_mode >= 0) ? SPELL_PANEL_HEIGHT : 0;
+
+    if (spell_panel_mode == 2)
+        panel_h = DICT_PANEL_HEIGHT;
+    else if (spell_panel_mode >= 0)
+        panel_h = SPELL_PANEL_HEIGHT;
+    else
+        panel_h = 0;
 
     for (i = 0; i < wm->win_count; i++)
     {

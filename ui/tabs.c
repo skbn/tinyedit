@@ -31,8 +31,6 @@ TeTab *te_tab_new(void)
         return NULL;
     }
 
-    tab->raw_bytes = NULL;
-    tab->raw_len = 0;
     tab->modified = 0;
     tab->show_line_numbers = 0;
     tab->filename[0] = '\0';
@@ -42,8 +40,8 @@ TeTab *te_tab_new(void)
     return tab;
 }
 
-/* Create new tab with filename, content and raw bytes */
-TeTab *te_tab_new_with_content(const char *filename, const char *content, const char *raw_bytes, int raw_len)
+/* Create new tab with filename and content */
+TeTab *te_tab_new_with_content(const char *filename, const char *content)
 {
     TeTab *tab = NULL;
 
@@ -61,22 +59,6 @@ TeTab *te_tab_new_with_content(const char *filename, const char *content, const 
     if (content)
         ed_load(tab->editor, content);
 
-    if (raw_bytes && raw_len > 0)
-    {
-        tab->raw_bytes = (char *)malloc(raw_len + 1);
-
-        if (!tab->raw_bytes)
-        {
-            te_tab_free(tab);
-            return NULL;
-        }
-
-        memcpy(tab->raw_bytes, raw_bytes, raw_len);
-
-        tab->raw_bytes[raw_len] = '\0';
-        tab->raw_len = raw_len;
-    }
-
     return tab;
 }
 
@@ -90,12 +72,6 @@ void te_tab_free(TeTab *tab)
     {
         ed_free(tab->editor);
         tab->editor = NULL;
-    }
-
-    if (tab->raw_bytes)
-    {
-        free(tab->raw_bytes);
-        tab->raw_bytes = NULL;
     }
 
     free(tab);

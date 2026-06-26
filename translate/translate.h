@@ -22,10 +22,10 @@ extern "C"
 #define TRANSLATE_CACHE_N 8
 #endif
 #ifndef TRANSLATE_CACHE_KEY_MAX
-#define TRANSLATE_CACHE_KEY_MAX 384
+#define TRANSLATE_CACHE_KEY_MAX 512
 #endif
 #ifndef TRANSLATE_CACHE_VAL_MAX
-#define TRANSLATE_CACHE_VAL_MAX 1536
+#define TRANSLATE_CACHE_VAL_MAX 2048
 #endif
 #else
 #ifndef TRANSLATE_CACHE_N
@@ -71,6 +71,12 @@ extern "C"
     void translate_cache_clear(TranslateHandle *h);
     int translate_set_opts(TranslateHandle *h, const TranslateOpts *opts);
     const char *const *translate_supported_langs(TranslateHandle *h);
+
+    /* Suggest similar dictionary entries for word when using STARDICT (caller frees each item) */
+    int translate_suggest(TranslateHandle *h, const char *word, char **items, int max);
+
+    /* Reverse lookup for STARDICT: return source words whose definitions contain target (caller frees each item) */
+    int translate_reverse(TranslateHandle *h, const char *target, char **items, int max, int max_scan);
     int translate_is_available(void);
     const char *translate_backend_name(TranslateBackend backend);
     TranslateBackend translate_backend_parse(const char *name);

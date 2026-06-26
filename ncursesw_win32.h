@@ -41,6 +41,7 @@ typedef struct
 {
     chtype ch;
     attr_t attrs;
+    unsigned long full_cp; /* codepoint > 0xFFFF, used on Windows where wchar_t is 16-bit */
 } Cell;
 
 /* Window structure */
@@ -116,6 +117,12 @@ extern int COLORS;
 #endif
 #ifndef KEY_CSDOWN
 #define KEY_CSDOWN 0x804
+#endif
+#ifndef KEY_ALT_UP
+#define KEY_ALT_UP 0xA00
+#define KEY_ALT_DOWN 0xA01
+#define KEY_ALT_LEFT 0xA02
+#define KEY_ALT_RIGHT 0xA03
 #endif
 #ifndef KEY_CSHOME
 #define KEY_CSHOME 0x805
@@ -222,6 +229,12 @@ extern int COLORS;
 #endif
 #ifndef KEY_CRIGHT
 #define KEY_CRIGHT 0x7F4
+#endif
+#ifndef KEY_AUP
+#define KEY_AUP 0x7F1
+#endif
+#ifndef KEY_ADOWN
+#define KEY_ADOWN 0x7F2
 #endif
 #ifndef KEY_ALEFT
 #define KEY_ALEFT 0x7F5
@@ -390,6 +403,8 @@ int addch(const chtype ch);
 int waddch(WINDOW *win, const chtype ch);
 int mvaddch(int y, int x, const chtype ch);
 int mvwaddch(WINDOW *win, int y, int x, const chtype ch);
+int waddch32(WINDOW *win, unsigned long cp);
+int mvaddch32(int y, int x, unsigned long cp);
 chtype mvinch(int y, int x);
 chtype mvwinch(WINDOW *win, int y, int x);
 
@@ -412,6 +427,10 @@ int mvaddwstr(int y, int x, const wchar_t *wstr);
 int mvaddnwstr(int y, int x, const wchar_t *wstr, int n);
 int mvwaddwstr(WINDOW *win, int y, int x, const wchar_t *wstr);
 int mvwaddnwstr(WINDOW *win, int y, int x, const wchar_t *wstr, int n);
+
+/* Attribute change */
+int mvchgat(int y, int x, int n, attr_t attr, short color, const void *opts);
+int mvwchgat(WINDOW *win, int y, int x, int n, attr_t attr, short color, const void *opts);
 
 /* Printf-style output */
 int printw(const char *fmt, ...);
@@ -495,9 +514,14 @@ int keypad(WINDOW *win, bool bf);
 
 /* Cursor */
 int curs_set(int visibility);
+int set_tabsize(int n);
 
 /* Windows-specific extensions */
 int win32_set_font_name(const char *font_name);
+int win32_set_font_size(int size);
+int win32_add_font_file(const char *path);
+void win32_clear_font_files(void);
+int win32_get_font_family_name(const char *path, char *out, int out_sz);
 int win32_set_cursor_pen(int color);
 void win32_force_redraw(void);
 

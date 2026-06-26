@@ -10,6 +10,7 @@
  */
 
 #include "dict_scan.h"
+#include "../core/portable.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -62,9 +63,10 @@ char **dict_scan(const char *dir_path, int *n_out, dict_filter_fn filter, dict_x
 #ifdef PLATFORM_AMIGA
     BPTR lock;
 #elif defined(_WIN32)
-    char pattern[1024];
+    wchar_t *wdir = NULL;
+    wchar_t wpattern[1024];
     HANDLE hFind;
-    WIN32_FIND_DATAA fd;
+    WIN32_FIND_DATAW fd;
 #else
     DIR *dir = NULL;
 #endif
@@ -110,26 +112,38 @@ char **dict_scan(const char *dir_path, int *n_out, dict_filter_fn filter, dict_x
 
 #elif defined(_WIN32)
 
-    if (snprintf(pattern, sizeof(pattern), "%s\\*", dir_path) >= (int)sizeof(pattern))
-    {
-        free(list);
-        return NULL;
-    }
+    wdir = pf_utf8_to_utf16(dir_path);
 
-    hFind = FindFirstFileA(pattern, &fd);
-
-    if (hFind != INVALID_HANDLE_VALUE)
+    if (wdir)
     {
-        do
+        if (swprintf(wpattern, sizeof(wpattern) / sizeof(wchar_t), L"%s\\*", wdir) < (int)(sizeof(wpattern) / sizeof(wchar_t)))
         {
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && filter((const unsigned char *)fd.cFileName))
-            {
-                char *base = xform((const unsigned char *)fd.cFileName);
-                push_one(&list, &count, &cap, base);
-            }
-        } while (FindNextFileA(hFind, &fd));
+            hFind = FindFirstFileW(wpattern, &fd);
 
-        FindClose(hFind);
+            if (hFind != INVALID_HANDLE_VALUE)
+            {
+                do
+                {
+                    char *name_utf8 = pf_utf16_to_utf8(fd.cFileName);
+
+                    if (!name_utf8)
+                        continue;
+
+                    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && filter((const unsigned char *)name_utf8))
+                    {
+                        char *base = xform((const unsigned char *)name_utf8);
+
+                        push_one(&list, &count, &cap, base);
+                    }
+
+                    free(name_utf8);
+                } while (FindNextFileW(hFind, &fd));
+
+                FindClose(hFind);
+            }
+        }
+
+        free(wdir);
     }
 
 #else

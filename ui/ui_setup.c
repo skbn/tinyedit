@@ -49,9 +49,66 @@
 #endif
 #endif /* HAVE_HUNSPELL */
 
-/* Tabs */
-#if defined(PLATFORM_AMIGA)
-#ifdef AMIGA_TTF_TE
+#ifdef HAVE_TRANSLATE
+#include "ui_translate.h"
+#endif
+
+#ifdef PLATFORM_WIN32
+#include <windows.h>
+#endif
+
+/* Return the directory where the TTF font picker should start.
+ * Amiga: PROGDIR: ; Win32: executable directory; Unix: current directory */
+static void setup_font_start_dir(char *out, int out_sz)
+{
+#ifdef PLATFORM_AMIGA
+    strncpy(out, "PROGDIR:", out_sz - 1);
+    out[out_sz - 1] = '\0';
+#elif defined(PLATFORM_WIN32)
+    wchar_t exe_path[MAX_PATH];
+    char *u;
+
+    if (GetModuleFileNameW(NULL, exe_path, sizeof(exe_path) / sizeof(wchar_t)) == 0)
+    {
+        strncpy(out, ".", out_sz - 1);
+        out[out_sz - 1] = '\0';
+        return;
+    }
+
+    {
+        wchar_t *last_slash = wcsrchr(exe_path, L'\\');
+
+        if (!last_slash)
+            last_slash = wcsrchr(exe_path, L'/');
+
+        if (last_slash)
+            *last_slash = L'\0';
+    }
+
+    u = pf_utf16_to_utf8(exe_path);
+
+    if (u)
+    {
+        snprintf(out, out_sz, "%s", u);
+        free(u);
+    }
+    else
+    {
+        strncpy(out, ".", out_sz - 1);
+        out[out_sz - 1] = '\0';
+    }
+#else
+    strncpy(out, ".", out_sz - 1);
+    out[out_sz - 1] = '\0';
+#endif
+}
+
+/* Tabs: TTF tab exists on Amiga and on Win32 */
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
+#define HAVE_TTF_TAB 1
+#endif
+
+#ifdef HAVE_TTF_TAB
 #ifdef HAVE_HUNSPELL
 #ifdef HAVE_TRANSLATE
 #define ST_TAB_COUNT 5
@@ -69,7 +126,7 @@ static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF",
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF"};
 #endif
 #endif /* HAVE_HUNSPELL */
-#else  /* !AMIGA_TTF_TE */
+#else  /* !HAVE_TTF_TAB */
 #ifdef HAVE_HUNSPELL
 #ifdef HAVE_TRANSLATE
 #define ST_TAB_COUNT 4
@@ -87,26 +144,7 @@ static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "X-lat
 static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
 #endif
 #endif /* HAVE_HUNSPELL */
-#endif /* AMIGA_TTF_TE */
-#else  /* !PLATFORM_AMIGA */
-#ifdef HAVE_HUNSPELL
-#ifdef HAVE_TRANSLATE
-#define ST_TAB_COUNT 4
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Spell", "X-late"};
-#else
-#define ST_TAB_COUNT 3
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "Spell"};
-#endif
-#else /* !HAVE_HUNSPELL */
-#ifdef HAVE_TRANSLATE
-#define ST_TAB_COUNT 3
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "X-late"};
-#else
-#define ST_TAB_COUNT 2
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font"};
-#endif
-#endif /* HAVE_HUNSPELL */
-#endif /* PLATFORM_AMIGA */
+#endif /* HAVE_TTF_TAB */
 
 /* Field types */
 typedef enum
@@ -153,21 +191,39 @@ typedef struct
 static const SetupField st_fields[] =
     {
         /* Editor */
-        {0, "Charset", FT_CHARSET, F_OFF(charset), 0},
-        {0, "Auto-wrap col", FT_INT, F_OFF(autowrap_col), 0},
-        {0, "Hard wrap", FT_BOOL, F_OFF(hard_wrap), 0},
+        /* Display */
         {0, "Line numbers", FT_BOOL, F_OFF(show_line_numbers), 0},
-        {0, "Undo levels", FT_INT, F_OFF(undo_levels), 0},
+        {0, "Show whitespace", FT_BOOL, F_OFF(show_whitespace), 0},
+        {0, "Highlight line", FT_BOOL, F_OFF(highlight_line), 0},
+        {0, "Word count", FT_BOOL, F_OFF(word_count), 0},
+        {0, "Hard wrap", FT_BOOL, F_OFF(hard_wrap), 0},
+        {0, "Column ruler (0=off)", FT_INT, F_OFF(ruler_col), 0},
+        {0, "Indent guides", FT_BOOL, F_OFF(indent_guides), 0},
+        {0, "Wrap indicator", FT_BOOL, F_OFF(wrap_indicator), 0},
+        /* Editing */
+        {0, "Tab width", FT_INT, F_OFF(tab_width), 0},
+        {0, "Auto-wrap col", FT_INT, F_OFF(autowrap_col), 0},
+        {0, "Smart indent", FT_BOOL, F_OFF(smart_indent), 0},
+        {0, "Auto-close brackets", FT_BOOL, F_OFF(autoclose), 0},
+        {0, "Match brackets", FT_BOOL, F_OFF(show_brackets), 0},
+        {0, "Word move mode", FT_CYCLE, F_OFF(word_move_mode), 0},
+        /* Text assists */
         {0, "Smart quotes", FT_BOOL, F_OFF(assist_smart_quotes), 0},
         {0, "Auto-cap", FT_BOOL, F_OFF(assist_auto_cap), 0},
         {0, "Repeated words", FT_BOOL, F_OFF(assist_repeat_check), 0},
+        /* Persistence */
+        {0, "Auto-save", FT_BOOL, F_OFF(autosave), 0},
+        {0, "Auto-save interval (s)", FT_INT, F_OFF(autosave_interval), 0},
+        /* System */
         {0, "Terminal Mouse", FT_BOOL, F_OFF(mouse_enabled), 0},
+        {0, "Charset", FT_CHARSET, F_OFF(charset), 0},
+        {0, "Undo levels", FT_INT, F_OFF(undo_levels), 0},
 
 /* Colour/Font */
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "Font", FT_STR, F_OFF(font), TE_CFG_STR_MAX},
 #endif
-#ifdef PLATFORM_AMIGA
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "TTF Enabled", FT_BOOL, F_OFF(ttf_enabled), 0},
         {1, "TTF Font", FT_STR, F_OFF(ttf_font), TE_CFG_STR_MAX},
         {1, "TTF Size", FT_INT, F_OFF(ttf_size), 0},
@@ -190,40 +246,47 @@ static const SetupField st_fields[] =
         {1, "Border", FT_COLORPAIR, F_OFF(color_fg) + COL_BORDER * sizeof(int), 0},
         {1, "Search", FT_COLORPAIR, F_OFF(color_fg) + COL_SEARCH_MATCH * sizeof(int), 0},
         {1, "Spell Current", FT_COLORPAIR, F_OFF(color_fg) + COL_SPELL_CURRENT * sizeof(int), 0},
+        {1, "Bracket Match", FT_COLORPAIR, F_OFF(color_fg) + COL_BRACKET_MATCH * sizeof(int), 0},
+        {1, "Current Line", FT_COLORPAIR, F_OFF(color_fg) + COL_CURRENT_LINE * sizeof(int), 0},
+        {1, "Guides", FT_COLORPAIR, F_OFF(color_fg) + COL_GUIDE * sizeof(int), 0},
         {1, "Cursor color", FT_INT, F_OFF(cursor_color), 0},
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "Default BG", FT_INT, F_OFF(default_bg_color), 0},
 #endif
 
-/* TTF Fallbacks */
-#if defined(PLATFORM_AMIGA) && defined(AMIGA_TTF_TE)
-        {2, "Fallback 1", FT_STR, F_OFF(ttf_fallback[0]), TE_CFG_STR_MAX},
-        {2, "Fallback 1 Size", FT_INT, F_OFF(ttf_fallback_size[0]), 0},
-        {2, "Fallback 2", FT_STR, F_OFF(ttf_fallback[1]), TE_CFG_STR_MAX},
-        {2, "Fallback 2 Size", FT_INT, F_OFF(ttf_fallback_size[1]), 0},
-        {2, "Fallback 3", FT_STR, F_OFF(ttf_fallback[2]), TE_CFG_STR_MAX},
-        {2, "Fallback 3 Size", FT_INT, F_OFF(ttf_fallback_size[2]), 0},
-        {2, "Fallback 4", FT_STR, F_OFF(ttf_fallback[3]), TE_CFG_STR_MAX},
-        {2, "Fallback 4 Size", FT_INT, F_OFF(ttf_fallback_size[3]), 0},
-        {2, "Fallback 5", FT_STR, F_OFF(ttf_fallback[4]), TE_CFG_STR_MAX},
-        {2, "Fallback 5 Size", FT_INT, F_OFF(ttf_fallback_size[4]), 0},
-        {2, "Fallback 6", FT_STR, F_OFF(ttf_fallback[5]), TE_CFG_STR_MAX},
-        {2, "Fallback 6 Size", FT_INT, F_OFF(ttf_fallback_size[5]), 0},
-        {2, "Fallback 7", FT_STR, F_OFF(ttf_fallback[6]), TE_CFG_STR_MAX},
-        {2, "Fallback 7 Size", FT_INT, F_OFF(ttf_fallback_size[6]), 0},
-        {2, "Fallback 8", FT_STR, F_OFF(ttf_fallback[7]), TE_CFG_STR_MAX},
-        {2, "Fallback 8 Size", FT_INT, F_OFF(ttf_fallback_size[7]), 0},
+/* TTF Fallbacks: always on the TTF tab when it exists */
+#ifdef HAVE_TTF_TAB
+#define TAB_TTF_FB 2
 #endif
 
-/* Dictionary tab number: slot 3 on Amiga (TTF Fallbacks takes slot 2), slot 2 elsewhere */
-#if defined(PLATFORM_AMIGA) && defined(AMIGA_TTF_TE)
+#ifdef HAVE_TTF_TAB
+        {TAB_TTF_FB, "Fallback 1", FT_STR, F_OFF(ttf_fallback[0]), TE_CFG_STR_MAX},
+        {TAB_TTF_FB, "Fallback 1 Size", FT_INT, F_OFF(ttf_fallback_size[0]), 0},
+        {TAB_TTF_FB, "Fallback 2", FT_STR, F_OFF(ttf_fallback[1]), TE_CFG_STR_MAX},
+        {TAB_TTF_FB, "Fallback 2 Size", FT_INT, F_OFF(ttf_fallback_size[1]), 0},
+        {TAB_TTF_FB, "Fallback 3", FT_STR, F_OFF(ttf_fallback[2]), TE_CFG_STR_MAX},
+        {TAB_TTF_FB, "Fallback 3 Size", FT_INT, F_OFF(ttf_fallback_size[2]), 0},
+        {TAB_TTF_FB, "Fallback 4", FT_STR, F_OFF(ttf_fallback[3]), TE_CFG_STR_MAX},
+        {TAB_TTF_FB, "Fallback 4 Size", FT_INT, F_OFF(ttf_fallback_size[3]), 0},
+        {TAB_TTF_FB, "Fallback 5", FT_STR, F_OFF(ttf_fallback[4]), TE_CFG_STR_MAX},
+        {TAB_TTF_FB, "Fallback 5 Size", FT_INT, F_OFF(ttf_fallback_size[4]), 0},
+        {TAB_TTF_FB, "Fallback 6", FT_STR, F_OFF(ttf_fallback[5]), TE_CFG_STR_MAX},
+        {TAB_TTF_FB, "Fallback 6 Size", FT_INT, F_OFF(ttf_fallback_size[5]), 0},
+        {TAB_TTF_FB, "Fallback 7", FT_STR, F_OFF(ttf_fallback[6]), TE_CFG_STR_MAX},
+        {TAB_TTF_FB, "Fallback 7 Size", FT_INT, F_OFF(ttf_fallback_size[6]), 0},
+        {TAB_TTF_FB, "Fallback 8", FT_STR, F_OFF(ttf_fallback[7]), TE_CFG_STR_MAX},
+        {TAB_TTF_FB, "Fallback 8 Size", FT_INT, F_OFF(ttf_fallback_size[7]), 0},
+#endif
+
+/* Dictionary tab number: slot 3 when TTF tab exists, slot 2 otherwise */
+#ifdef HAVE_TTF_TAB
 #define TAB_DICT 3
 #else
 #define TAB_DICT 2
 #endif
 
 /* Translate tab number */
-#if defined(PLATFORM_AMIGA) && defined(AMIGA_TTF_TE)
+#ifdef HAVE_TTF_TAB
 #ifdef HAVE_HUNSPELL
 #define TAB_TRANSLATE 4
 #else
@@ -329,6 +392,14 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
                 label = "UTF-16";
             else
                 label = "UTF-8";
+        }
+        else if (strcmp(fld->label, "Word move mode") == 0)
+        {
+            /* 0=standard, 1=vim-like (non-space blocks) */
+            if (v == 0)
+                label = "Standard";
+            else
+                label = "Vim-like";
         }
         else
         {
@@ -618,26 +689,52 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
                         /* File mode: use file picker */
                         if (ui_files_pick(fld->label, "", tmp, sizeof(tmp)) == 0)
                         {
-                            strncpy(s, tmp, TE_CFG_STR_MAX - 1);
-                            s[TE_CFG_STR_MAX - 1] = '\0';
+#ifdef PLATFORM_WIN32
+                            char family[256];
+                            char *ttf_font = (char *)(base + F_OFF(ttf_font));
+                            int *ttf_enabled = (int *)(base + F_OFF(ttf_enabled));
+
+                            /* Extract font family and move path to TTF slot */
+                            if (win32_get_font_family_name(tmp, family, sizeof(family)) == 0)
+                            {
+                                strncpy(s, family, TE_CFG_STR_MAX - 1);
+
+                                s[TE_CFG_STR_MAX - 1] = '\0';
+                                strncpy(ttf_font, tmp, TE_CFG_STR_MAX - 1);
+                                ttf_font[TE_CFG_STR_MAX - 1] = '\0';
+
+                                *ttf_enabled = 1;
+                            }
+                            else
+                            {
+                                strncpy(s, tmp, TE_CFG_STR_MAX - 1);
+                                s[TE_CFG_STR_MAX - 1] = '\0';
+                            }
+
+#else
+                            {
+                                strncpy(s, tmp, TE_CFG_STR_MAX - 1);
+                                s[TE_CFG_STR_MAX - 1] = '\0';
+                            }
+#endif
                         }
-                    }
-                    else
-                    {
-                        /* Memory mode: text input */
-                        wchar_t wtmp[TE_CFG_STR_MAX];
-
-                        mbstowcs(wtmp, tmp, TE_CFG_STR_MAX - 1);
-                        wtmp[TE_CFG_STR_MAX - 1] = L'\0';
-
-                        if (ui_popup_input_wcs(fld->label, "Font name:", wtmp, TE_CFG_STR_MAX) == 0)
+                        else
                         {
-                            wcstombs(s, wtmp, TE_CFG_STR_MAX - 1);
-                            s[TE_CFG_STR_MAX - 1] = '\0';
-                        }
-                    }
+                            /* Memory mode: text input */
+                            wchar_t wtmp[TE_CFG_STR_MAX];
 
-                    break;
+                            mbstowcs(wtmp, tmp, TE_CFG_STR_MAX - 1);
+                            wtmp[TE_CFG_STR_MAX - 1] = L'\0';
+
+                            if (ui_popup_input_wcs(fld->label, "Font name:", wtmp, TE_CFG_STR_MAX) == 0)
+                            {
+                                wcstombs(s, wtmp, TE_CFG_STR_MAX - 1);
+                                s[TE_CFG_STR_MAX - 1] = '\0';
+                            }
+                        }
+
+                        break;
+                    }
                 }
             }
         }
@@ -645,11 +742,14 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
         else if ((strcmp(fld->label, "TTF Font") == 0) || strncmp(fld->label, "Fallback", 8) == 0)
         {
             char tmp[TE_CFG_STR_MAX];
+            char start_dir[TE_CFG_STR_MAX];
 
             strncpy(tmp, s, sizeof(tmp) - 1);
             tmp[sizeof(tmp) - 1] = '\0';
 
-            if (ui_files_pick(fld->label, "PROGDIR:", tmp, sizeof(tmp)) == 0)
+            setup_font_start_dir(start_dir, sizeof(start_dir));
+
+            if (ui_files_pick(fld->label, start_dir, tmp, sizeof(tmp)) == 0)
             {
                 strncpy(s, tmp, TE_CFG_STR_MAX - 1);
                 s[TE_CFG_STR_MAX - 1] = '\0';
@@ -798,6 +898,9 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
 
         if (strcmp(fld->label, "TTF Encoding") == 0)
             /* TTF encoding: 0=UTF-16, 1=UTF-8 (toggle between 2 options) */
+            *v = (*v == 0) ? 1 : 0;
+        else if (strcmp(fld->label, "Word move mode") == 0)
+            /* Word move mode: 0=Standard, 1=Vim-like (toggle between 2 options) */
             *v = (*v == 0) ? 1 : 0;
         else
             /* TTF antialias: 0=AUTO, 1=OFF, 2=ON (cycle through 3 options) */
@@ -1028,7 +1131,6 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
         char *buf = NULL;
         size_t r;
         char *content = NULL;
-        char *new_bytes = NULL;
         TeTab *tab = NULL;
 
         if (s[0] != '\0')
@@ -1073,25 +1175,14 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
 
             buf[r] = '\0';
 
-            /* Keep raw bytes for live charset re-decode */
-            free(te_app_get_raw_bytes(app));
-
-            new_bytes = (char *)malloc(r + 1);
-
-            if (new_bytes)
-            {
-                memcpy(new_bytes, buf, r + 1);
-                te_app_set_raw_bytes(app, new_bytes, (int)r);
-            }
-
-            /* Use raw buffer as content (UTF-8) */
             content = buf;
 
-            tab = te_tab_new_with_content(s, content, te_app_get_raw_bytes(app), te_app_get_raw_len(app));
+            tab = te_tab_new_with_content(s, content);
 
             if (tab)
             {
                 tab->show_line_numbers = w->show_line_numbers;
+                ed_set_word_move_mode(tab->editor, w->word_move_mode);
 
                 te_app_add_tab(app, tab);
                 te_app_switch_tab(app, app->tab_count - 1);
@@ -1431,8 +1522,8 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
                 continue;
             }
 
-#ifdef PLATFORM_AMIGA
-            /* If TTF_FONT, TTF_SIZE, or any fallback changed, reload fonts without restarting */
+#ifdef HAVE_TTF_TAB
+            /* If TTF_FONT, TTF_SIZE, or any fallback changed, reload fonts */
             if (work.ttf_enabled)
             {
                 int fi;
@@ -1449,10 +1540,11 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 
                 if (strcmp(cfg->ttf_font, work.ttf_font) != 0 || cfg->ttf_size != work.ttf_size || fallbacks_changed)
                 {
+#ifdef PLATFORM_AMIGA
                     extern int amiga_reload_ttf(const char *font_path, int new_size);
-#ifdef AMIGA_TTF_TE
                     extern int amiga_add_ttf_fallback(const char *path, int size);
                     extern void amiga_clear_ttf_fallbacks(void);
+                    int sz;
 
                     /* Push new fallback set into backend before reload to avoid stale list */
                     amiga_clear_ttf_fallbacks();
@@ -1461,12 +1553,13 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
                     {
                         if (work.ttf_fallback[fi][0])
                         {
-                            int sz = work.ttf_fallback_size[fi] > 0 ? work.ttf_fallback_size[fi] : work.ttf_size;
+                            sz = work.ttf_fallback_size[fi] > 0 ? work.ttf_fallback_size[fi] : work.ttf_size;
                             amiga_add_ttf_fallback(work.ttf_fallback[fi], sz);
                         }
                     }
-#endif
+
                     amiga_reload_ttf(work.ttf_font, work.ttf_size);
+#endif
                 }
             }
 #endif
@@ -1513,6 +1606,14 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 #endif
 
             *cfg = work;
+
+            /* Propagate word move mode to all open editors */
+            {
+                int ti;
+
+                for (ti = 0; ti < app->tab_count; ti++)
+                    ed_set_word_move_mode(app->tabs[ti]->editor, cfg->word_move_mode);
+            }
 
             /* Reinitialize colors with new configuration */
             te_init_colors(cfg);

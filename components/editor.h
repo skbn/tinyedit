@@ -39,6 +39,7 @@ typedef struct
     wchar_t *wcs; /* malloc'd, always NUL-terminated */
     int len;      /* character count (not bytes) */
     int cap;      /* allocated wchar_t slots */
+    int word_count;
 } EdLine;
 
 typedef enum
@@ -100,6 +101,7 @@ struct Ed
     int undo_last_col_end;  /* col after last recorded char */
     int undo_snapshot_mode; /* 1 = only allow snapshot operations, block individual ops */
     int hard_wrap;          /* 0=soft-wrap, 1=hard-wrap */
+    int word_move_mode;     /* 0=standard, 1=vim-like (non-space blocks) */
 
     /* Prefix sum array for soft-wrap: prefix[i] = total visual rows up to line i */
     int *prefix;           /* prefix sum array */
@@ -110,15 +112,19 @@ struct Ed
     int prefix_start;      /* start line of current prefix range (for range rebuild) */
     int prefix_end;        /* end line of current prefix range (for range rebuild) */
     int prefix_base;       /* visual rows before prefix_start (for absolute positioning) */
+
+    int word_count_total;       /* cached total word count */
+    int word_count_initialized; /* 1 = word counts are valid, 0 = lazy init pending */
 };
 
-#define INIT_ALLOC 256
+#define INIT_ALLOC 1024
 
 Ed *ed_new(void);
 void ed_free(Ed *ed);
-void ed_load(Ed *ed, const char *utf8_text);                /* UTF-8 in */
-char *ed_to_string(const Ed *ed);                           /* UTF-8 out (caller frees) */
-char *ed_range_to_string(const Ed *ed, int start, int end); /* serialise only [start, end) */
+void ed_load(Ed *ed, const char *utf8_text);                                  /* UTF-8 in */
+char *ed_to_string(const Ed *ed);                                             /* UTF-8 out (caller frees) */
+char *ed_range_to_string(const Ed *ed, int start, int end);                   /* serialise only [start, end) */
+int ed_save_to_file(const Ed *ed, const char *path, const char *charset_out); /* streaming save */
 
 /* Cursor movement */
 void ed_move_up(Ed *ed);
@@ -133,6 +139,7 @@ void ed_move_top(Ed *ed);
 void ed_move_bottom(Ed *ed);
 void ed_word_left(Ed *ed);
 void ed_word_right(Ed *ed);
+void ed_set_word_move_mode(Ed *ed, int mode);
 void ed_goto_line(Ed *ed, int line);
 
 /* Editing -- ch is a Unicode codepoint (wchar_t) */
@@ -145,6 +152,8 @@ int ed_delete_to_eol(Ed *ed);
 int ed_delete_word_left(Ed *ed);
 int ed_delete_word_right(Ed *ed);
 int ed_duplicate_line(Ed *ed);
+int ed_move_line_up(Ed *ed);
+int ed_move_line_down(Ed *ed);
 int ed_insert_tab(Ed *ed, int tabstop);
 int ed_paste_text(Ed *ed, const char *utf8_text);           /* UTF-8 in */
 int ed_paste_text_with_undo(Ed *ed, const char *utf8_text); /* UTF-8 in, single undo record */
@@ -174,6 +183,7 @@ void ed_toggle_insert(Ed *ed);
 void ed_get_info(const Ed *ed, EdInfo *info);
 const wchar_t *ed_line_wcs(const Ed *ed, int line);
 int ed_line_len(const Ed *ed, int line);
+int ed_word_count(Ed *ed);
 
 /* Get line as UTF-8 into caller buffer, returns bytes written or -1 */
 int ed_line_utf8(const Ed *ed, int line, char *buf, int bufsz);
@@ -207,12 +217,22 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in);
 /* Export the current block selection to a text file */
 int ed_export_block_to_file(Ed *ed, const char *path, const char *charset_out);
 
+/* Sort selected lines alphabetically (case-insensitive) */
+int ed_sort_block_lines(Ed *ed);
+
+/* Convert case of the selected block. mode: 0=UPPER, 1=lower, 2=Title */
+int ed_convert_block_case(Ed *ed, int mode);
+
 /* Set modified flag */
 void ed_set_modified(Ed *ed, int modified);
 
 /* Hard wrap mode */
 int ed_get_hard_wrap(const Ed *ed);
 void ed_set_hard_wrap(Ed *ed, int hard_wrap);
+
+/* Tab width for soft-wrap calculations */
+void ed_set_tab_width(int n);
+int ed_get_tab_width(void);
 
 /* Prefix sum for soft-wrap performance */
 void ed_prefix_invalidate(Ed *ed);
@@ -229,7 +249,9 @@ int ed_wrap_count(const wchar_t *line, int len, int width);
 /* Internal functions made public for editor_helper.c */
 void ed_clamp(Ed *ed);
 void ed_redo_clear(Ed *ed);
+void ed_clear_undo_redo(Ed *ed);
 int ed_undo_open_group(Ed *ed);
+int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col);
 
 /* Helper functions from editor_helper.c */
 wchar_t *line_to_wcs(EdLine *ln);

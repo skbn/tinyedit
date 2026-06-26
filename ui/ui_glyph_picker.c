@@ -452,16 +452,26 @@ long ui_glyph_pick(void)
 
                     cp = glyph_at(flat, NULL);
 
-                    wcs[0] = (wchar_t)cp;
-                    wcs[1] = L'\0';
-
                     if (is_sel)
                         attron(COLOR_PAIR(COL_POPUP_SEL));
                     else
                         attron(COLOR_PAIR(COL_POPUP));
 
                     mvaddnstr(line_y, cell_x, "   ", CELL_W);
-                    mvaddnwstr(line_y, cell_x + 1, wcs, 1);
+
+#ifdef PLATFORM_WIN32
+                    if (cp > 0xFFFF)
+                    {
+                        mvaddch32(line_y, cell_x + 1, cp);
+                    }
+                    else
+#endif
+                    {
+                        wcs[0] = (wchar_t)cp;
+                        wcs[1] = L'\0';
+
+                        mvaddnwstr(line_y, cell_x + 1, wcs, 1);
+                    }
 
                     if (is_sel)
                         attroff(COLOR_PAIR(COL_POPUP_SEL));

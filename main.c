@@ -32,10 +32,8 @@ const char __attribute__((used)) tinyedit_stack_size[] = "$STACK:131072";
 #ifdef PLATFORM_AMIGA
 #include <proto/exec.h>
 #include "ncursesw_amiga.h"
-#ifdef AMIGA_TTF_TE
 extern void amiga_clear_ttf_fallbacks(void);
-extern void amiga_add_ttf_fallback(const char *path, int size);
-#endif
+extern int amiga_add_ttf_fallback(const char *path, int size);
 #elif defined(PLATFORM_WIN32)
 #include "ncursesw_win32.h"
 #else
@@ -70,7 +68,6 @@ static char *load_file(const char *path, TeApp *app)
     FILE *fp = NULL;
     long size;
     char *buf = NULL;
-    char *new_bytes = NULL;
     size_t r;
 
     fp = fopen(path, "rb");
@@ -107,19 +104,6 @@ static char *load_file(const char *path, TeApp *app)
     fclose(fp);
 
     buf[r] = '\0';
-
-    /* Keep raw bytes for live charset re-decode */
-    new_bytes = (char *)malloc(r + 1);
-
-    if (new_bytes)
-    {
-        memcpy(new_bytes, buf, r + 1);
-        te_app_set_raw_bytes(app, new_bytes, (int)r);
-    }
-    else
-    {
-        te_app_set_raw_bytes(app, NULL, 0);
-    }
 
     /* Convert to UTF-8 if needed */
     if (app->charset_in[0] && strcasecmp(app->charset_in, "UTF-8") != 0 && strcasecmp(app->charset_in, "UTF8") != 0)
@@ -206,6 +190,12 @@ int main(int argc, char **argv)
     FILE *tty = NULL;
     char cfg_dir[512];
 
+#ifdef PLATFORM_AMIGA
+    /* Redirect stdout/stderr to avoid Amiga CLI console */
+    freopen("NIL:", "w", stdout);
+    freopen("NIL:", "w", stderr);
+#endif
+
     /* Locale init for wide-character ncursesw */
     ui_init_locale();
 
@@ -233,42 +223,83 @@ int main(int argc, char **argv)
     /* Optional TrueType (ignored if ttf_enabled=0 or path empty or ttengine.library missing) */
     if (cfg.ttf_enabled)
     {
+        int fi;
+        int sz;
+
         amiga_set_ttf(cfg.ttf_font, cfg.ttf_size, cfg.ttf_antialias);
         amiga_set_ttf_encoding(cfg.ttf_use_utf8);
 
-#ifdef AMIGA_TTF_TE
         /* Pass any TTF_FALLBACK<N> entries to the engine. Empty slots are skipped by amiga_add_ttf_fallback() */
-        int fi;
-
         amiga_clear_ttf_fallbacks();
 
         for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
         {
             if (cfg.ttf_fallback[fi][0])
             {
-                int sz = cfg.ttf_fallback_size[fi] > 0 ? cfg.ttf_fallback_size[fi] : cfg.ttf_size;
+                sz = cfg.ttf_fallback_size[fi] > 0 ? cfg.ttf_fallback_size[fi] : cfg.ttf_size;
 
                 amiga_add_ttf_fallback(cfg.ttf_fallback[fi], sz);
             }
         }
-#endif
     }
     else
     {
         /* Explicitly disable TTF when ttf_enabled=0 */
         amiga_set_ttf(NULL, 0, 0);
-#ifdef AMIGA_TTF_TE
         amiga_clear_ttf_fallbacks();
-#endif
     }
 #endif
 
 #ifdef PLATFORM_WIN32
     /* Windows setup (before initscr): font */
+    if (cfg.font[0] && (strchr(cfg.font, '\\') || strchr(cfg.font, '/') || strchr(cfg.font, ':')))
+    {
+        /* cfg.font contains a file path (legacy misconfiguration or File mode in setup)
+         * Extract the real family name and move the path to the TTF font slot */
+        char family[256];
+        char path[TE_CFG_STR_MAX];
+
+        strncpy(path, cfg.font, sizeof(path) - 1);
+        path[sizeof(path) - 1] = '\0';
+
+        if (win32_get_font_family_name(path, family, sizeof(family)) == 0)
+        {
+            strncpy(cfg.font, family, TE_CFG_STR_MAX - 1);
+            cfg.font[TE_CFG_STR_MAX - 1] = '\0';
+        }
+        else
+        {
+            cfg.font[0] = '\0';
+        }
+
+        if (!cfg.ttf_enabled || !cfg.ttf_font[0])
+        {
+            strncpy(cfg.ttf_font, path, TE_CFG_STR_MAX - 1);
+            cfg.ttf_font[TE_CFG_STR_MAX - 1] = '\0';
+            cfg.ttf_enabled = 1;
+        }
+    }
+
     win32_set_font_name(cfg.font[0] ? cfg.font : NULL);
 
     /* Windows cursor color */
     win32_set_cursor_pen(cfg.cursor_color >= 0 ? cfg.cursor_color : COLOR_WHITE);
+
+    /* Optional TrueType fonts loaded from files (TTF_FONT + TTF_FALLBACK<N>)
+     * FONT must be set to the family name of the loaded TTF */
+    if (cfg.ttf_enabled)
+    {
+        int fi;
+
+        win32_set_font_size(cfg.ttf_size);
+        win32_add_font_file(cfg.ttf_font);
+
+        for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
+        {
+            if (cfg.ttf_fallback[fi][0])
+                win32_add_font_file(cfg.ttf_fallback[fi]);
+        }
+    }
 #endif
 
     /* Init ncurses */
@@ -276,6 +307,8 @@ int main(int argc, char **argv)
     raw();
     noecho();
     keypad(stdscr, TRUE);
+
+    set_tabsize(cfg.tab_width > 0 ? cfg.tab_width : 4);
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
     /* Enable mouse if configured */
@@ -332,6 +365,16 @@ int main(int argc, char **argv)
     define_key("\033[1;2H", KEY_SHOME);
     define_key("\033[1;2F", KEY_SEND);
 
+    /* Register Alt+arrow key sequences for move line (xterm / rxvt) */
+    define_key("\033[1;3A", KEY_ALT_UP);
+    define_key("\033[1;3B", KEY_ALT_DOWN);
+    define_key("\033[1;3C", KEY_ALT_RIGHT);
+    define_key("\033[1;3D", KEY_ALT_LEFT);
+    define_key("\033\033[A", KEY_ALT_UP);
+    define_key("\033\033[B", KEY_ALT_DOWN);
+    define_key("\033\033[C", KEY_ALT_RIGHT);
+    define_key("\033\033[D", KEY_ALT_LEFT);
+
     /* Register Alt+key sequences for editor functions */
     define_key("\033y", KEY_ALT('Y'));
     define_key("\033g", KEY_ALT('G'));
@@ -378,6 +421,12 @@ int main(int argc, char **argv)
     define_key("\033R", KEY_ALT('R'));
     define_key("\033m", KEY_ALT('M'));
     define_key("\033M", KEY_ALT('M'));
+    define_key("\033n", KEY_ALT('N'));
+    define_key("\033N", KEY_ALT('N'));
+    define_key("\033v", KEY_ALT('V'));
+    define_key("\033V", KEY_ALT('V'));
+    define_key("\033x", KEY_ALT('X'));
+    define_key("\033X", KEY_ALT('X'));
 #endif
 
     curs_set(1);
@@ -482,24 +531,19 @@ int main(int argc, char **argv)
     if (argc >= 2)
     {
         TeTab *tab = NULL;
-        char *raw_bytes = NULL;
-        int raw_len;
 
         content = load_file(argv[1], app);
-        raw_bytes = te_app_get_raw_bytes(app);
-        raw_len = te_app_get_raw_len(app);
 
-        tab = te_tab_new_with_content(argv[1], content, raw_bytes, raw_len);
+        tab = te_tab_new_with_content(argv[1], content);
 
         if (tab)
         {
             tab->show_line_numbers = cfg.show_line_numbers;
+
+            ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
             te_app_add_tab(app, tab);
             te_app_switch_tab(app, 0);
         }
-
-        /* Clear app->raw_bytes since tab took ownership */
-        te_app_set_raw_bytes(app, NULL, 0);
 
         if (content)
             free(content);
@@ -511,6 +555,7 @@ int main(int argc, char **argv)
         if (tab)
         {
             tab->show_line_numbers = cfg.show_line_numbers;
+            ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
 
             te_app_add_tab(app, tab);
             te_app_switch_tab(app, 0);
@@ -527,7 +572,6 @@ int main(int argc, char **argv)
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
     /* Restore cursor color to terminal default before exiting */
-
     tty = fopen("/dev/tty", "w");
 
     if (tty)

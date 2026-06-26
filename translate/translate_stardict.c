@@ -1247,6 +1247,51 @@ static int binary_search(struct StarDictHandle *h, const char *word)
     return -1;
 }
 
+/* Like binary_search but instead of returning -1 on miss */
+static int binary_search_pos(struct StarDictHandle *h, const char *word)
+{
+    int lo = 0;
+    int hi = h->entry_count;
+
+    while (lo < hi)
+    {
+        int mid = lo + (hi - lo) / 2;
+        int cmp = sd_strcmp(h->entries[mid].word, word);
+
+        if (cmp < 0)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+
+    return lo;
+}
+
+/* Return the length of the shared prefix between two strings, case-insensitive over ASCII (matching sd_strcmp) */
+static int shared_prefix_len(const char *a, const char *b)
+{
+    int n = 0;
+
+    while (a[n] && b[n])
+    {
+        char ca = a[n];
+        char cb = b[n];
+
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (char)(ca + 32);
+
+        if (cb >= 'A' && cb <= 'Z')
+            cb = (char)(cb + 32);
+
+        if (ca != cb)
+            break;
+
+        n++;
+    }
+
+    return n;
+}
+
 /* Searches synonym table for word, returns index into main entries[] or -1 if not found */
 static int synonym_search(struct StarDictHandle *h, const char *word)
 {
@@ -1814,4 +1859,262 @@ const char *translate_stardict_bookname(struct StarDictHandle *h)
         return "";
 
     return h->bookname;
+}
+
+/* Suggest up to max dictionary entries similar to word (caller frees each item) */
+int translate_stardict_suggest(struct StarDictHandle *h, const char *word, char **items, int max)
+{
+    int pos;
+    int n = 0;
+    int lo;
+    int hi;
+    int best_prefix = 0;
+    int i;
+    int probe;
+    int min_share;
+
+    if (!h || !word || !items || max <= 0 || h->entry_count == 0)
+        return 0;
+
+    /* Find insertion position for word in the sorted entries */
+    pos = binary_search_pos(h, word);
+
+    /* Measure best shared prefix among nearby entries to avoid far-away matches */
+    for (probe = pos - 2; probe <= pos + 2; probe++)
+    {
+        int p;
+
+        if (probe < 0 || probe >= h->entry_count)
+            continue;
+
+        p = shared_prefix_len(h->entries[probe].word, word);
+
+        if (p > best_prefix)
+            best_prefix = p;
+    }
+
+    /* Drop suggestions with too little shared prefix */
+    if (best_prefix == 0)
+        return 0;
+
+    min_share = (int)strlen(word) >= 4 ? 2 : 1;
+
+    if (best_prefix < min_share)
+        return 0;
+
+    /* Collect best matching neighbours around the insertion position */
+    lo = pos - 1;
+    hi = pos;
+
+    while (n < max && (lo >= 0 || hi < h->entry_count))
+    {
+        int take_lo = 0;
+        int p_lo = 0;
+        int p_hi = 0;
+
+        if (lo >= 0)
+            p_lo = shared_prefix_len(h->entries[lo].word, word);
+
+        if (hi < h->entry_count)
+            p_hi = shared_prefix_len(h->entries[hi].word, word);
+
+        /* Prefer longer prefix, tie-break toward the insertion point */
+        if (lo >= 0 && (hi >= h->entry_count || p_lo >= p_hi))
+            take_lo = 1;
+
+        if (take_lo)
+        {
+            int p = p_lo;
+            int min_share = (int)strlen(word) >= 4 ? 2 : 1;
+            const char *w = NULL;
+            size_t wl;
+
+            if (p < min_share)
+                break;
+
+            w = h->entries[lo].word;
+            wl = strlen(w);
+
+            items[n] = (char *)malloc(wl + 1);
+
+            if (items[n])
+            {
+                memcpy(items[n], w, wl + 1);
+                n++;
+            }
+
+            lo--;
+        }
+        else if (hi < h->entry_count)
+        {
+            int p = p_hi;
+            int min_share = (int)strlen(word) >= 4 ? 2 : 1;
+            const char *w = NULL;
+            size_t wl;
+
+            if (p < min_share)
+                break;
+
+            w = h->entries[hi].word;
+            wl = strlen(w);
+
+            items[n] = (char *)malloc(wl + 1);
+
+            if (items[n])
+            {
+                memcpy(items[n], w, wl + 1);
+                n++;
+            }
+
+            hi++;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    return n;
+}
+
+/* Reverse lookup: return source words whose definitions contain target as a full word (caller frees each item) */
+int translate_stardict_reverse(struct StarDictHandle *h, const char *target, char **items, int max, int max_scan)
+{
+    int n = 0;
+    int i;
+    size_t tlen;
+    int target_is_ascii = 1;
+    int scan_count = 0;
+
+    if (!h || !target || !items || max <= 0)
+        return 0;
+
+    tlen = strlen(target);
+
+    if (tlen == 0)
+        return 0;
+
+    /* Detect pure ASCII target for fast case-insensitive matching */
+    for (i = 0; (size_t)i < tlen; i++)
+    {
+        if ((unsigned char)target[i] >= 0x80)
+        {
+            target_is_ascii = 0;
+            break;
+        }
+    }
+
+    for (i = 0; i < h->entry_count && n < max; i++)
+    {
+        char *def = NULL;
+        const char *p = NULL;
+        const char *end = NULL;
+
+        if (max_scan > 0 && scan_count >= max_scan)
+            break;
+
+        scan_count++;
+
+        /* Cached forward lookups make this fast */
+        def = lookup_single(h, h->entries[i].word, NULL, 0);
+
+        if (!def)
+            continue;
+
+        end = def + strlen(def);
+
+        /* Search target as a whole word */
+        p = def;
+
+        while (p < end)
+        {
+            const char *match = NULL;
+            size_t k;
+            int char_before;
+            int char_after;
+            int prev_is_word;
+            int next_is_word;
+
+            if (target_is_ascii)
+            {
+                /* ASCII case-insensitive compare */
+                const char *q = p;
+
+                while (q + tlen <= end)
+                {
+                    int eq = 1;
+
+                    for (k = 0; k < tlen; k++)
+                    {
+                        char a = q[k];
+                        char b = target[k];
+
+                        if (a >= 'A' && a <= 'Z')
+                            a = (char)(a + 32);
+
+                        if (b >= 'A' && b <= 'Z')
+                            b = (char)(b + 32);
+
+                        if (a != b)
+                        {
+                            eq = 0;
+                            break;
+                        }
+                    }
+
+                    if (eq)
+                    {
+                        match = q;
+                        break;
+                    }
+
+                    q++;
+                }
+            }
+            else
+            {
+                /* Non-ASCII byte-exact match */
+                match = strstr(p, target);
+            }
+
+            if (!match)
+                break;
+
+            /* Check word boundaries */
+            char_before = (match > def) ? (unsigned char)match[-1] : 0;
+            char_after = ((match + tlen) < end) ? (unsigned char)match[tlen] : 0;
+
+            prev_is_word = (char_before >= 'a' && char_before <= 'z') ||
+                           (char_before >= 'A' && char_before <= 'Z') ||
+                           (char_before >= '0' && char_before <= '9') ||
+                           (char_before >= 0x80); /* assume non-ASCII is word */
+
+            next_is_word = (char_after >= 'a' && char_after <= 'z') ||
+                           (char_after >= 'A' && char_after <= 'Z') ||
+                           (char_after >= '0' && char_after <= '9') ||
+                           (char_after >= 0x80);
+
+            if (!prev_is_word && !next_is_word)
+            {
+                /* Record matching source word */
+                size_t wl = strlen(h->entries[i].word);
+
+                items[n] = (char *)malloc(wl + 1);
+
+                if (items[n])
+                {
+                    memcpy(items[n], h->entries[i].word, wl + 1);
+                    n++;
+                }
+
+                break; /* one match per entry is enough */
+            }
+
+            p = match + 1;
+        }
+
+        free(def);
+    }
+
+    return n;
 }

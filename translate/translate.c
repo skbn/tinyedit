@@ -885,3 +885,41 @@ const char *const *translate_supported_langs(TranslateHandle *h)
 
     return langs;
 }
+
+int translate_suggest(TranslateHandle *h, const char *word, char **items, int max)
+{
+#ifdef HAVE_TRANSLATE_STARDICT
+    if (!h || !word || !items || max <= 0)
+        return 0;
+
+    if (h->opts.backend != TRANSLATE_BACKEND_STARDICT)
+        return 0;
+
+    if (!h->stardict_handle)
+        return 0;
+
+    return translate_stardict_suggest(h->stardict_handle, word, items, max);
+#else
+
+    return 0;
+#endif
+}
+
+int translate_reverse(TranslateHandle *h, const char *target, char **items, int max, int max_scan)
+{
+#ifdef HAVE_TRANSLATE_STARDICT
+    if (!h || !target || !items || max <= 0)
+        return 0;
+
+    if (h->opts.backend != TRANSLATE_BACKEND_STARDICT)
+        return 0;
+
+    if (!h->stardict_handle)
+        return 0;
+
+    return translate_stardict_reverse(h->stardict_handle, target, items, max, max_scan);
+#else
+
+    return 0;
+#endif
+}

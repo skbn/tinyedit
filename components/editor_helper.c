@@ -445,6 +445,7 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
 
                         if (!new_rows)
                         {
+                            free(*out_rows);
                             free(*out_cols);
 
                             *out_rows = NULL;
@@ -459,6 +460,7 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
                         if (!new_cols)
                         {
                             free(*out_rows);
+                            free(*out_cols);
 
                             *out_rows = NULL;
                             *out_cols = NULL;

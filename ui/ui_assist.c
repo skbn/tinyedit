@@ -200,7 +200,7 @@ int ui_assist_check_repeat(TeApp *app, int line, int col_start, int word_len)
     if (!l || col_start + word_len > ll)
         return 0;
 
-    /* Skip whitespace backwards from col_start. */
+    /* Skip whitespace backwards from col_start */
     k = col_start - 1;
 
     while (k >= 0 && (l[k] == L' ' || l[k] == L'\t'))

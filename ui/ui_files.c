@@ -68,7 +68,24 @@ static void init_dir_from_start(const char *start_dir, char *dir_input, int dir_
     else
     {
 #ifdef PLATFORM_WIN32
-        if (!GetCurrentDirectoryA(dir_input_sz, dir_input))
+        wchar_t wdir[UI_FILES_PATH_MAX];
+        if (GetCurrentDirectoryW((DWORD)(sizeof(wdir) / sizeof(wchar_t)), wdir))
+        {
+            char *u = pf_utf16_to_utf8(wdir);
+
+            if (u)
+            {
+                strncpy(dir_input, u, dir_input_sz - 1);
+                dir_input[dir_input_sz - 1] = '\0';
+                free(u);
+            }
+            else
+            {
+                dir_input[0] = '.';
+                dir_input[1] = '\0';
+            }
+        }
+        else
         {
             dir_input[0] = '.';
             dir_input[1] = '\0';
@@ -76,6 +93,7 @@ static void init_dir_from_start(const char *start_dir, char *dir_input, int dir_
 #elif defined(PLATFORM_AMIGA)
         BPTR cur = Lock((STRPTR) "", ACCESS_READ);
         dir_input[0] = '\0';
+
         if (cur)
         {
             NameFromLock(cur, (STRPTR)dir_input, (LONG)dir_input_sz);
@@ -201,10 +219,7 @@ static void draw_file_list(FileEnt *ents, int nents, int sel, int top, int visib
         char line[256];
 
         /* Clear line with correct background color */
-        if (idx == sel && is_list_active)
-            attron(COLOR_PAIR(COL_POPUP_SEL));
-        else
-            attron(COLOR_PAIR(COL_POPUP));
+        attrset(COLOR_PAIR(idx == sel && is_list_active ? COL_POPUP_SEL : COL_POPUP));
 
         for (j = 0; j < w - 4; j++)
             mvaddch(y + i, x + 2 + j, ' ');
@@ -216,10 +231,7 @@ static void draw_file_list(FileEnt *ents, int nents, int sel, int top, int visib
 
         mvaddnstr(y + i, x + 2, line, w - 4);
 
-        if (idx == sel && is_list_active)
-            attroff(COLOR_PAIR(COL_POPUP_SEL));
-        else
-            attroff(COLOR_PAIR(COL_POPUP));
+        standend();
     }
 }
 
@@ -298,135 +310,31 @@ static int handle_list_navigation(int key, int *sel, int *top, int nents, int vi
 /* Read dir into malloc'd FileEnt[], *out_n = count (NULL on error/empty, dirs first, alpha sorted) */
 static FileEnt *load_dir(const char *dir, int *out_n)
 {
-#ifdef PLATFORM_WIN32
-    WIN32_FIND_DATAA fd;
-    HANDLE h;
-    char pattern[UI_FILES_PATH_MAX];
-#elif defined(PLATFORM_AMIGA)
-    BPTR lock;
-    struct FileInfoBlock *fib = NULL;
-    const char *colon = NULL;
-#else
-    DIR *dp = NULL;
-    struct dirent *e = NULL;
-    struct stat st;
-    char full[UI_FILES_PATH_MAX];
-#endif
+    PfDir *d = NULL;
     FileEnt *ents = NULL;
     int n = 0, cap = 0;
     int i, j;
-    int at_root;
+    int at_root = 0;
+    int dlen;
+    const char *colon;
 
     *out_n = 0;
 
+    if (!dir || !dir[0])
+        dir = ".";
+
+    d = pf_dir_open(dir);
+    if (!d)
+        return NULL;
+
+    /* Determine if we are at a root directory */
+    dlen = (int)strlen(dir);
 #ifdef PLATFORM_WIN32
-    snprintf(pattern, sizeof(pattern), "%s\\*", dir);
-    h = FindFirstFileA(pattern, &fd);
-
-    if (h == INVALID_HANDLE_VALUE)
-        return NULL;
-
-    /* Prepend ".." entry unless at root (C:\ or C:/) */
-    int dlen = (int)strlen(dir);
     at_root = (dlen <= 3); /* "C:\" or "C:/" */
-
-    if (!at_root)
-    {
-        FileEnt *nb = (FileEnt *)realloc(ents, sizeof(FileEnt));
-
-        if (nb)
-        {
-            ents = nb;
-            cap = 1;
-
-            ents[0].name = strdup("..");
-            ents[0].is_dir = 1;
-
-            n = ents[0].name ? 1 : 0;
-        }
-    }
-
-    while (n < UI_FILES_MAX_ENTRIES)
-    {
-        /* Skip "." and ".." from FindFirstFile (we added our own "..") */
-        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
-        {
-            if (!FindNextFileA(h, &fd))
-                break;
-
-            continue;
-        }
-
-        if (n >= cap)
-        {
-            int nc = cap ? cap * 2 : 32;
-            FileEnt *nb = (FileEnt *)realloc(ents, (size_t)nc * sizeof(FileEnt));
-            int i;
-
-            if (!nb)
-            {
-                for (i = 0; i < n; i++)
-                    free(ents[i].name);
-
-                free(ents);
-
-                return NULL;
-            }
-
-            ents = nb;
-            cap = nc;
-        }
-
-        ents[n].name = NULL;
-        ents[n].is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
-
-        ents[n].name = strdup(fd.cFileName);
-
-        if (!ents[n].name)
-            break;
-
-        n++;
-
-        if (!FindNextFileA(h, &fd))
-            break;
-    }
-
-    FindClose(h);
 #elif defined(PLATFORM_AMIGA)
-    /* AmigaDOS: Lock/Examine/ExNext, fib_DirEntryType >0=dir, <0=file */
-    lock = Lock((STRPTR)(dir && dir[0] ? dir : ""), ACCESS_READ);
-
-    if (!lock)
-        return NULL;
-
-    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
-
-    if (!fib)
-    {
-        UnLock(lock);
-        return NULL;
-    }
-
-    /* Examine directory first (required before ExNext, early bail if not dir) */
-    if (!Examine(lock, fib) || fib->fib_DirEntryType <= 0)
-    {
-        FreeDosObject(DOS_FIB, fib);
-        UnLock(lock);
-        return NULL;
-    }
-
-    /* Prepend ".." entry unless at volume root (path ends with colon, e.g., "Work:") */
     colon = strchr(dir, ':');
-    at_root = 0;
-
-    if (!colon)
+    if (colon)
     {
-        /* No colon = relative path, treat as not-root for navigation */
-        at_root = 0;
-    }
-    else
-    {
-        /* Skip the colon and any trailing slashes */
         const char *after = colon + 1;
 
         while (*after == '/')
@@ -434,66 +342,9 @@ static FileEnt *load_dir(const char *dir, int *out_n)
 
         at_root = (*after == '\0');
     }
-
-    if (!at_root)
-    {
-        FileEnt *nb = (FileEnt *)realloc(ents, sizeof(FileEnt));
-
-        if (nb)
-        {
-            ents = nb;
-            cap = 1;
-
-            ents[0].name = strdup("..");
-            ents[0].is_dir = 1;
-
-            n = ents[0].name ? 1 : 0;
-        }
-    }
-
-    while (ExNext(lock, fib) && n < UI_FILES_MAX_ENTRIES)
-    {
-        if (n >= cap)
-        {
-            int nc = cap ? cap * 2 : 32;
-
-            FileEnt *nb = (FileEnt *)realloc(ents, (size_t)nc * sizeof(FileEnt));
-
-            if (!nb)
-            {
-                int i;
-
-                for (i = 0; i < n; i++)
-                    free(ents[i].name);
-
-                free(ents);
-
-                return NULL;
-            }
-
-            ents = nb;
-            cap = nc;
-        }
-
-        ents[n].is_dir = (fib->fib_DirEntryType > 0) ? 1 : 0;
-        ents[n].name = strdup((const char *)fib->fib_FileName);
-
-        if (!ents[n].name)
-            break;
-
-        n++;
-    }
-
-    FreeDosObject(DOS_FIB, fib);
-    UnLock(lock);
 #else
-    dp = opendir(dir);
-
-    if (!dp)
-        return NULL;
-
-    /* Prepend ".." entry unless at filesystem root "/" */
     at_root = (strcmp(dir, "/") == 0);
+#endif
 
     if (!at_root)
     {
@@ -511,15 +362,17 @@ static FileEnt *load_dir(const char *dir, int *out_n)
         }
     }
 
-    while ((e = readdir(dp)) != NULL && n < UI_FILES_MAX_ENTRIES)
+    for (;;)
     {
-        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
-            continue;
+        int is_dir;
+        const char *name = pf_dir_next_entry(d, &is_dir);
+
+        if (!name || n >= UI_FILES_MAX_ENTRIES)
+            break;
 
         if (n >= cap)
         {
             int nc = cap ? cap * 2 : 32;
-            int i;
             FileEnt *nb = (FileEnt *)realloc(ents, (size_t)nc * sizeof(FileEnt));
 
             if (!nb)
@@ -528,8 +381,7 @@ static FileEnt *load_dir(const char *dir, int *out_n)
                     free(ents[i].name);
 
                 free(ents);
-
-                closedir(dp);
+                pf_dir_close(d);
                 return NULL;
             }
 
@@ -537,24 +389,16 @@ static FileEnt *load_dir(const char *dir, int *out_n)
             cap = nc;
         }
 
-        ents[n].name = NULL;
-        ents[n].is_dir = 0;
-
-        snprintf(full, sizeof(full), "%s/%s", dir, e->d_name);
-
-        if (pf_is_directory(full))
-            ents[n].is_dir = 1;
-
-        ents[n].name = strdup(e->d_name);
+        ents[n].name = strdup(name);
 
         if (!ents[n].name)
             break;
 
+        ents[n].is_dir = is_dir;
         n++;
     }
 
-    closedir(dp);
-#endif
+    pf_dir_close(d);
 
     /* Bubble sort: dirs first, then files, O(N^2) but N small */
     for (i = 0; i < n; i++)
@@ -668,7 +512,7 @@ static void draw_frame(int y, int x, int h, int w, const char *title)
 {
     int i, j;
 
-    attron(COLOR_PAIR(COL_POPUP));
+    attrset(COLOR_PAIR(COL_POPUP));
 
     for (i = 0; i < h; i++)
     {
@@ -693,7 +537,7 @@ static void draw_frame(int y, int x, int h, int w, const char *title)
         mvaddch(y, tx + tl, ' ');
     }
 
-    attroff(COLOR_PAIR(COL_POPUP));
+    standend();
 }
 
 int ui_files_pick(const char *title, const char *start_dir, char *out_path, int out_path_sz)
@@ -707,6 +551,9 @@ int ui_files_pick(const char *title, const char *start_dir, char *out_path, int 
     int nents = 0;
     int y, x, h, w, visible;
     int key;
+    wint_t wch;
+    int key_rc;
+    int is_key;
     int rc = -1;
     int should_exit = 0;
 
@@ -750,16 +597,11 @@ int ui_files_pick(const char *title, const char *start_dir, char *out_path, int 
             int j;
 
             draw_frame(y, x, h, w, title ? title : "Select file");
-            attron(COLOR_PAIR(COL_POPUP));
 
             /* Dir input line */
-            if (edit_dir)
-                attron(COLOR_PAIR(COL_POPUP_SEL));
-
+            attrset(COLOR_PAIR(edit_dir ? COL_POPUP_SEL : COL_POPUP));
             mvaddnstr(y + 2, x + 2, "Dir: ", w - 4);
-
-            if (edit_dir)
-                attroff(COLOR_PAIR(COL_POPUP_SEL));
+            standend();
 
             input_draw(&dir_state, y + 2, x + 7, w - 9, edit_dir);
 
@@ -767,13 +609,13 @@ int ui_files_pick(const char *title, const char *start_dir, char *out_path, int 
             draw_file_list(ents, nents, sel, top, visible, y + 4, x, w, !edit_dir);
 
             /* Status bar */
-            attron(COLOR_PAIR(COL_STATUS));
+            attrset(COLOR_PAIR(COL_STATUS));
 
             for (j = 0; j < w - 4; j++)
                 mvaddch(y + h - 2, x + 2 + j, ' ');
 
             mvaddnstr(y + h - 2, x + 2, "TAB=edit dir  Up/Down=move  Enter=open  ESC=cancel", w - 4);
-            attroff(COLOR_PAIR(COL_STATUS));
+            standend();
 
             /* Position cursor - only show when editing dir */
             if (edit_dir)
@@ -788,7 +630,13 @@ int ui_files_pick(const char *title, const char *start_dir, char *out_path, int 
 
             refresh();
 
-            key = wrapper_getch();
+            key_rc = wrapper_read_key(&wch);
+            is_key = (key_rc == KEY_CODE_YES);
+
+            if (key_rc == ERR)
+                continue;
+
+            key = (int)wch;
 
             if (key == 27)
             {
@@ -805,7 +653,7 @@ int ui_files_pick(const char *title, const char *start_dir, char *out_path, int 
 
             if (edit_dir)
             {
-                if (input_handle_key(&dir_state, key) == 1)
+                if (input_handle_key(&dir_state, key, is_key) == 1)
                     continue;
 
                 if (key == '\n' || key == '\r' || key == KEY_ENTER)
@@ -917,13 +765,17 @@ int ui_files_pick(const char *title, const char *start_dir, char *out_path, int 
 int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, int out_path_sz)
 {
     char dir_input[UI_FILES_PATH_MAX];
-    int dir_cursor;
+    wchar_t dir_w[UI_FILES_PATH_MAX];
+    InputState dir_state;
     int edit_dir = 0;
     int sel = 0, top = 0;
     FileEnt *ents = NULL;
     int nents = 0;
     int y, x, h, w, visible;
     int key;
+    wint_t wch;
+    int key_rc;
+    int is_key;
     int rc = -1;
     int should_exit = 0;
     int dir_count_total;
@@ -940,7 +792,24 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
     else
     {
 #ifdef PLATFORM_WIN32
-        if (!GetCurrentDirectoryA(sizeof(dir_input), dir_input))
+        wchar_t wdir[UI_FILES_PATH_MAX];
+        if (GetCurrentDirectoryW((DWORD)(sizeof(wdir) / sizeof(wchar_t)), wdir))
+        {
+            char *u = pf_utf16_to_utf8(wdir);
+
+            if (u)
+            {
+                strncpy(dir_input, u, sizeof(dir_input) - 1);
+                dir_input[sizeof(dir_input) - 1] = '\0';
+                free(u);
+            }
+            else
+            {
+                dir_input[0] = '.';
+                dir_input[1] = '\0';
+            }
+        }
+        else
         {
             dir_input[0] = '.';
             dir_input[1] = '\0';
@@ -966,10 +835,26 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
 #endif
     }
 
-    dir_cursor = (int)strlen(dir_input);
+    char_to_wchar(dir_input, dir_w, sizeof(dir_w) / sizeof(wchar_t));
+
+    /* Init dir state */
+    dir_state.buf = dir_w;
+    dir_state.bufsz = sizeof(dir_w) / sizeof(wchar_t);
+    dir_state.len = (int)wcslen(dir_w);
+    dir_state.cursor = dir_state.len;
+
+    if (dir_state.len > dir_state.bufsz - 1)
+    {
+        dir_w[dir_state.bufsz - 1] = L'\0';
+        dir_state.len = dir_state.bufsz - 1;
+        dir_state.cursor = dir_state.len;
+    }
 
     for (;;)
     {
+        /* Convert wchar_t back to char for load_dir */
+        wchar_to_char(dir_w, dir_input, sizeof(dir_input));
+
         ents = load_dir(dir_input, &nents);
 
         if (!ents)
@@ -1019,17 +904,14 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
 
             standend();
             draw_frame(y, x, h, w, title ? title : "Select directory");
-            attron(COLOR_PAIR(COL_POPUP));
 
+            /* Dir input line */
+            attrset(COLOR_PAIR(edit_dir ? COL_POPUP_SEL : COL_POPUP));
             mvaddnstr(y + 2, x + 2, "Dir: ", w - 4);
 
-            if (edit_dir)
-                attron(COLOR_PAIR(COL_POPUP_SEL));
+            standend();
 
-            mvaddnstr(y + 2, x + 7, dir_input, w - 9);
-
-            if (edit_dir)
-                attroff(COLOR_PAIR(COL_POPUP_SEL));
+            input_draw(&dir_state, y + 2, x + 7, w - 9, edit_dir);
 
             for (i = 0; i < nents; i++)
             {
@@ -1041,14 +923,12 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
 
                 if (dir_count >= top && dir_count < top + visible)
                 {
-                    if (dir_count == sel && !edit_dir)
-                        attron(COLOR_PAIR(COL_POPUP_SEL));
-                    else
-                        attron(COLOR_PAIR(COL_POPUP));
-
+                    attrset(COLOR_PAIR(dir_count == sel && !edit_dir ? COL_POPUP_SEL : COL_POPUP));
                     snprintf(line, sizeof(line), "[%s]", en->name);
+
                     mvaddnstr(y + 4 + (dir_count - top), x + 2, line, w - 4);
-                    attroff(COLOR_PAIR(COL_POPUP_SEL));
+
+                    standend();
                 }
 
                 dir_count++;
@@ -1060,12 +940,30 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
             else if (sel >= top + visible)
                 top = sel - visible + 1;
 
-            attron(COLOR_PAIR(COL_POPUP));
+            attrset(COLOR_PAIR(COL_POPUP));
             mvaddnstr(y + h - 2, x + 2, "TAB=edit dir  Up/Down=move  Enter=enter  Space=select", w - 4);
-            attroff(COLOR_PAIR(COL_POPUP));
+            standend();
+
+            /* Position cursor when editing dir */
+            if (edit_dir)
+            {
+                curs_set(1);
+                input_move_cursor(&dir_state, y + 2, x + 7, w - 9);
+            }
+            else
+            {
+                curs_set(0);
+            }
+
             refresh();
 
-            key = wrapper_getch();
+            key_rc = wrapper_read_key(&wch);
+            is_key = (key_rc == KEY_CODE_YES);
+
+            if (key_rc == ERR)
+                continue;
+
+            key = (int)wch;
 
             if (key == 27)
             {
@@ -1077,23 +975,15 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
             if (key == '\t')
             {
                 edit_dir = !edit_dir;
-                dir_cursor = (int)strlen(dir_input);
+                dir_state.cursor = dir_state.len;
                 continue;
             }
 
             if (edit_dir)
             {
-                if (key == KEY_BACKSPACE || key == 127 || key == 8)
+                if (key == '\n' || key == '\r' || key == KEY_ENTER)
                 {
-                    if (dir_cursor > 0)
-                    {
-                        dir_cursor--;
-                        dir_input[dir_cursor] = '\0';
-                    }
-                }
-                else if (key == '\n' || key == '\r' || key == KEY_ENTER)
-                {
-                    if (dir_input[0])
+                    if (dir_w[0])
                     {
                         sel = 0;
                         top = 0;
@@ -1101,18 +991,22 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
                         break;
                     }
                 }
-                else if (key >= 32 && key < 127 && dir_cursor + 1 < (int)sizeof(dir_input))
-                {
-                    dir_input[dir_cursor++] = (char)key;
-                    dir_input[dir_cursor] = '\0';
-                }
+
+                if (input_handle_key(&dir_state, key, is_key) == 1)
+                    continue;
 
                 continue;
             }
 
             if (key == KEY_BACKSPACE || key == 127 || key == 8)
             {
+                wchar_to_char(dir_w, dir_input, sizeof(dir_input));
                 path_go_parent(dir_input);
+                char_to_wchar(dir_input, dir_w, sizeof(dir_w) / sizeof(wchar_t));
+
+                dir_state.len = (int)wcslen(dir_w);
+                dir_state.cursor = dir_state.len;
+
                 sel = 0;
                 top = 0;
 
@@ -1171,6 +1065,8 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
             {
                 int dir_idx = 0;
 
+                wchar_to_char(dir_w, dir_input, sizeof(dir_input));
+
                 for (i = 0; i < nents; i++)
                 {
                     if (!ents[i].is_dir)
@@ -1191,6 +1087,11 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
                             top = 0;
                         }
 
+                        char_to_wchar(dir_input, dir_w, sizeof(dir_w) / sizeof(wchar_t));
+
+                        dir_state.len = (int)wcslen(dir_w);
+                        dir_state.cursor = dir_state.len;
+
                         break;
                     }
 
@@ -1202,6 +1103,8 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
             else if (key == ' ')
             {
                 int dir_idx = 0;
+
+                wchar_to_char(dir_w, dir_input, sizeof(dir_input));
 
                 for (i = 0; i < nents; i++)
                 {
@@ -1253,6 +1156,8 @@ int ui_files_pick_dir(const char *title, const char *start_dir, char *out_path, 
 
     free_entries(ents, nents);
 
+    curs_set(1);
+
     return rc;
 }
 
@@ -1269,6 +1174,9 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
     int nents = 0;
     int y, x, h, w, visible;
     int key;
+    wint_t wch;
+    int key_rc;
+    int is_key;
     int rc = -1;
 
     if (!out_path || out_path_sz < 2)
@@ -1329,51 +1237,33 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
             sel = 0;
 
         draw_frame(y, x, h, w, title ? title : "Save as");
-        attron(COLOR_PAIR(COL_POPUP));
 
         /* Dir field */
-        /* Clear the dir field row with popup background */
-        attron(COLOR_PAIR(COL_POPUP));
+        attrset(COLOR_PAIR(COL_POPUP));
 
         for (j = 0; j < w - 4; j++)
             mvaddch(y + 2, x + 2 + j, ' ');
 
-        if (field == 0)
-        {
-            attroff(COLOR_PAIR(COL_POPUP));
-            attron(COLOR_PAIR(COL_POPUP_SEL));
-        }
+        standend();
 
+        attrset(COLOR_PAIR(field == 0 ? COL_POPUP_SEL : COL_POPUP));
         mvaddnstr(y + 2, x + 2, "Dir:  ", 6);
-
-        if (field == 0)
-        {
-            attroff(COLOR_PAIR(COL_POPUP_SEL));
-            attron(COLOR_PAIR(COL_POPUP));
-        }
+        standend();
 
         input_draw(&dir_state, y + 2, x + 8, w - 10, field == 0);
 
         /* Name field */
-        /* Clear the name field row with popup background */
-        attron(COLOR_PAIR(COL_POPUP));
+        attrset(COLOR_PAIR(COL_POPUP));
 
         for (j = 0; j < w - 4; j++)
             mvaddch(y + 3, x + 2 + j, ' ');
 
-        if (field == 1)
-        {
-            attroff(COLOR_PAIR(COL_POPUP));
-            attron(COLOR_PAIR(COL_POPUP_SEL));
-        }
+        standend();
 
+        attrset(COLOR_PAIR(field == 1 ? COL_POPUP_SEL : COL_POPUP));
         mvaddnstr(y + 3, x + 2, "Name: ", 6);
 
-        if (field == 1)
-        {
-            attroff(COLOR_PAIR(COL_POPUP_SEL));
-            attron(COLOR_PAIR(COL_POPUP));
-        }
+        standend();
 
         input_draw(&name_state, y + 3, x + 8, w - 10, field == 1);
 
@@ -1381,13 +1271,14 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
         draw_file_list(ents, nents, sel, top, visible, y + 5, x, w, field == 2);
 
         /* Status bar */
-        attron(COLOR_PAIR(COL_STATUS));
+        attrset(COLOR_PAIR(COL_STATUS));
 
         for (j = 0; j < w - 4; j++)
             mvaddch(y + h - 2, x + 2 + j, ' ');
 
         mvaddnstr(y + h - 2, x + 2, "TAB: field  Enter: save  ESC: cancel", w - 4);
-        attroff(COLOR_PAIR(COL_STATUS));
+
+        standend();
 
         /* Position cursor - only show when in input fields */
         if (field == 0)
@@ -1407,7 +1298,13 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
 
         refresh();
 
-        key = wrapper_getch();
+        key_rc = wrapper_read_key(&wch);
+        is_key = (key_rc == KEY_CODE_YES);
+
+        if (key_rc == ERR)
+            continue;
+
+        key = (int)wch;
 
         if (key == 27)
         {
@@ -1455,14 +1352,14 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
         /* Handle text input for dir field */
         if (field == 0)
         {
-            if (input_handle_key(&dir_state, key) == 1)
+            if (input_handle_key(&dir_state, key, is_key) == 1)
                 continue;
         }
 
         /* Handle text input for name field */
         if (field == 1)
         {
-            if (input_handle_key(&name_state, key) == 1)
+            if (input_handle_key(&name_state, key, is_key) == 1)
                 continue;
         }
 
@@ -1516,46 +1413,16 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
     return rc;
 }
 
-int ui_files_open(TeApp *app)
+int ui_files_open_path(TeApp *app, const char *path)
 {
-    char path[UI_FILES_PATH_MAX];
-    char start_dir_buf[UI_FILES_PATH_MAX];
     FILE *fp = NULL;
     long size;
     char *buf = NULL;
-    char *new_bytes = NULL;
     size_t r;
     char *content = NULL;
-    const char *start_dir = NULL;
 
-    if (!app)
+    if (!app || !path || !path[0])
         return -1;
-
-    /* Start from current file's directory, or CWD */
-    if (te_app_get_filename(app)[0])
-    {
-        /* Extract directory from current filename */
-        const char *last_slash = strrchr(te_app_get_filename(app), '/');
-
-        if (!last_slash)
-            last_slash = strrchr(te_app_get_filename(app), '\\');
-
-        if (last_slash)
-        {
-            int dir_len = (int)(last_slash - te_app_get_filename(app));
-
-            if (dir_len > (int)sizeof(start_dir_buf) - 1)
-                dir_len = (int)sizeof(start_dir_buf) - 1;
-
-            strncpy(start_dir_buf, te_app_get_filename(app), dir_len);
-            start_dir_buf[dir_len] = '\0';
-            start_dir = start_dir_buf;
-        }
-    }
-
-    /* Show file picker */
-    if (ui_files_pick("Open file", start_dir, path, sizeof(path)) != 0)
-        return -1; /* User cancelled or error */
 
     /* Read file */
     fp = fopen(path, "rb");
@@ -1592,21 +1459,6 @@ int ui_files_open(TeApp *app)
 
     buf[r] = '\0';
 
-    /* Keep raw bytes for live charset re-decode */
-    free(te_app_get_raw_bytes(app));
-
-    new_bytes = (char *)malloc(r + 1);
-
-    if (new_bytes)
-    {
-        memcpy(new_bytes, buf, r + 1);
-        te_app_set_raw_bytes(app, new_bytes, (int)r);
-    }
-    else
-    {
-        te_app_set_raw_bytes(app, NULL, 0);
-    }
-
     /* Convert to UTF-8 if needed */
     if (app->charset_in[0] && strcasecmp(app->charset_in, "UTF-8") != 0 && strcasecmp(app->charset_in, "UTF8") != 0)
     {
@@ -1641,8 +1493,10 @@ int ui_files_open(TeApp *app)
         content = buf;
     }
 
-    /* Load into editor (ed_load clears previous content) */
+    /* Load into editor (clear history and previous content) */
+    ed_clear_undo_redo(te_app_get_editor(app));
     ed_load(te_app_get_editor(app), content);
+
     free(content);
 
     /* Update filename */
@@ -1651,4 +1505,42 @@ int ui_files_open(TeApp *app)
     te_status(app, "Loaded: %s", path);
 
     return 0;
+}
+
+int ui_files_open(TeApp *app)
+{
+    char path[UI_FILES_PATH_MAX];
+    char start_dir_buf[UI_FILES_PATH_MAX];
+    const char *start_dir = NULL;
+
+    if (!app)
+        return -1;
+
+    /* Start from current file's directory, or CWD */
+    if (te_app_get_filename(app)[0])
+    {
+        /* Extract directory from current filename */
+        const char *last_slash = strrchr(te_app_get_filename(app), '/');
+
+        if (!last_slash)
+            last_slash = strrchr(te_app_get_filename(app), '\\');
+
+        if (last_slash)
+        {
+            int dir_len = (int)(last_slash - te_app_get_filename(app));
+
+            if (dir_len > (int)sizeof(start_dir_buf) - 1)
+                dir_len = (int)sizeof(start_dir_buf) - 1;
+
+            strncpy(start_dir_buf, te_app_get_filename(app), dir_len);
+            start_dir_buf[dir_len] = '\0';
+            start_dir = start_dir_buf;
+        }
+    }
+
+    /* Show file picker */
+    if (ui_files_pick("Open file", start_dir, path, sizeof(path)) != 0)
+        return -1; /* User cancelled or error */
+
+    return ui_files_open_path(app, path);
 }

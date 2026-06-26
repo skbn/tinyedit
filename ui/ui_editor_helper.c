@@ -18,6 +18,7 @@
 #include "../core/utf8.h"
 #include "../core/charset.h"
 #include "../core/clipboard.h"
+#include "../core/portable.h"
 #include "ui_editor_helper.h"
 #include "../components/editor.h"
 #include "te.h"
@@ -30,6 +31,18 @@
 #else
 #include "../hyph_wrap/hyph_wrap.h"
 #endif
+
+#define SIF_MAX_HITS 500
+
+typedef struct
+{
+    char **paths;  /* full path of each hit */
+    int *lines;    /* line number of each hit */
+    char **labels; /* "path:line: snippet" for ui_popup_list */
+    int count;
+    int cap;
+    int truncated; /* hit SIF_MAX_HITS limit */
+} SifResults;
 
 /* Thunk adapting hyph_breakpoints() to EdHyphenFn. user_data is HyphDict* */
 static int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count)
@@ -85,6 +98,114 @@ int wcs_vwidth(const wchar_t *s, int n)
     }
 
     return v;
+}
+
+/* Draw wide string with tab expansion */
+void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_width)
+{
+    int i;
+    int col = 0;
+    int out_len = 0;
+    wchar_t buf[4096];
+    int max_len = (int)(sizeof(buf) / sizeof(buf[0]));
+
+    if (!s || n <= 0 || tab_width < 1)
+        return;
+
+    if (n > max_len / 2)
+        n = max_len / 2;
+
+    for (i = 0; i < n && out_len < max_len - 1; i++)
+    {
+        if (s[i] == L'\t')
+        {
+            int w = tab_width - (col % tab_width);
+            int j;
+
+            for (j = 0; j < w && out_len < max_len - 1; j++)
+            {
+                buf[out_len] = L' ';
+                out_len++;
+            }
+
+            col += w;
+        }
+        else
+        {
+            int w = wcswidth(&s[i], 1);
+
+            if (w <= 0)
+                w = 1;
+
+            buf[out_len] = s[i];
+            out_len++;
+            col += w;
+        }
+    }
+
+    mvaddnwstr(y, x, buf, out_len);
+}
+
+/* Visual width with tab-stop support */
+int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width)
+{
+    int v = 0;
+    int col = start_col;
+    int i;
+
+    if (!s || n <= 0 || tab_width < 1)
+        return 0;
+
+    for (i = 0; i < n; i++)
+    {
+        if (s[i] == L'\t')
+        {
+            int w = tab_width - (col % tab_width);
+
+            v += w;
+            col += w;
+        }
+        else
+        {
+            int w = wcswidth(&s[i], 1);
+
+            if (w <= 0)
+                w = 1;
+
+            v += w;
+            col += w;
+        }
+    }
+
+    return v;
+}
+
+/* Left margin for editor body with line numbers */
+int editor_body_offset(const TeApp *app, int line_count)
+{
+    int margin = 1;
+    int tab_width;
+
+    if (!app || !te_app_get_show_line_numbers(app))
+        return 0;
+
+    if (line_count <= 0)
+        line_count = 1;
+
+    while (line_count >= 10)
+    {
+        line_count /= 10;
+        margin++;
+    }
+
+    margin += 1; /* space after the number */
+
+    tab_width = app->cfg.tab_width > 0 ? app->cfg.tab_width : 4;
+
+    /* Round up to the next multiple of tab_width */
+    margin = ((margin + tab_width - 1) / tab_width) * tab_width;
+
+    return margin;
 }
 
 void clear_search_highlights(TeApp *app)
@@ -829,7 +950,6 @@ int charset_select(TeApp *app)
             FILE *fp = NULL;
             long size;
             char *buf = NULL;
-            char *new_bytes = NULL;
             size_t r;
 
             fp = fopen(te_app_get_filename(app), "rb");
@@ -848,21 +968,6 @@ int charset_select(TeApp *app)
                         r = fread(buf, 1, (size_t)size, fp);
                         buf[r] = '\0';
 
-                        /* Update raw_bytes */
-                        free(te_app_get_raw_bytes(app));
-
-                        new_bytes = (char *)malloc(r + 1);
-
-                        if (new_bytes)
-                        {
-                            memcpy(new_bytes, buf, r + 1);
-                            te_app_set_raw_bytes(app, new_bytes, (int)r);
-                        }
-                        else
-                        {
-                            te_app_set_raw_bytes(app, NULL, 0);
-                        }
-
                         /* Convert to UTF-8 using new charset_in */
                         if (new_view[0] && strcasecmp(new_view, "UTF-8") != 0 && strcasecmp(new_view, "UTF8") != 0)
                         {
@@ -876,6 +981,8 @@ int charset_select(TeApp *app)
                                 if (wrote >= 0)
                                 {
                                     utf8[wrote] = '\0';
+
+                                    ed_clear_undo_redo(te_app_get_editor(app));
                                     ed_load(te_app_get_editor(app), utf8);
                                 }
 
@@ -884,6 +991,7 @@ int charset_select(TeApp *app)
                         }
                         else
                         {
+                            ed_clear_undo_redo(te_app_get_editor(app));
                             ed_load(te_app_get_editor(app), buf);
                         }
 
@@ -894,13 +1002,292 @@ int charset_select(TeApp *app)
                 fclose(fp);
             }
         }
-        else if (!view_changed && te_app_get_raw_bytes(app) && te_app_get_raw_len(app) > 0)
-        {
-            /* TODO */
-        }
 
         te_status(app, "View: %s  Save: %s", new_view[0] ? new_view : "UTF-8", new_save[0] ? new_save : "UTF-8");
     }
+
+    return 1;
+}
+
+static int sif_grow(SifResults *r)
+{
+    int nc = r->cap ? r->cap * 2 : 64;
+    char **np = NULL;
+    char **nl = NULL;
+    int *ni = NULL;
+
+    if (nc > SIF_MAX_HITS)
+        nc = SIF_MAX_HITS;
+
+    if (nc == r->cap)
+        return -1;
+
+    np = (char **)realloc(r->paths, (size_t)nc * sizeof(char *));
+
+    if (!np)
+        return -1;
+
+    r->paths = np;
+
+    nl = (char **)realloc(r->labels, (size_t)nc * sizeof(char *));
+
+    if (!nl)
+        return -1;
+
+    r->labels = nl;
+
+    ni = (int *)realloc(r->lines, (size_t)nc * sizeof(int));
+
+    if (!ni)
+        return -1;
+
+    r->lines = ni;
+
+    r->cap = nc;
+    return 0;
+}
+
+static int sif_cb(void *user, const char *path, int line_no, const char *line_text)
+{
+    SifResults *r = (SifResults *)user;
+    char label[512];
+    const char *base = NULL;
+    const char *p = NULL;
+    char *trimmed_text;
+
+    if (r->count >= SIF_MAX_HITS)
+    {
+        r->truncated = 1;
+        return 1; /* stop walk */
+    }
+
+    if (r->count >= r->cap)
+    {
+        if (sif_grow(r) != 0)
+            return 1;
+    }
+
+    /* Strip leading whitespace from the snippet for readability */
+    p = line_text;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+
+    trimmed_text = (char *)p; /* alias, no allocation */
+
+    /* Use just the basename in the label to keep it short */
+    base = strrchr(path, '/');
+
+    if (!base)
+        base = strrchr(path, '\\');
+
+    base = base ? base + 1 : path;
+
+    snprintf(label, sizeof(label), "%s:%d: %.200s", base, line_no, trimmed_text);
+
+    r->paths[r->count] = strdup(path);
+    r->labels[r->count] = strdup(label);
+    r->lines[r->count] = line_no;
+
+    if (!r->paths[r->count] || !r->labels[r->count])
+    {
+        free(r->paths[r->count]);
+        free(r->labels[r->count]);
+        return 1; /* OOM: stop */
+    }
+
+    r->count++;
+    return 0;
+}
+
+static void sif_free(SifResults *r)
+{
+    int i;
+
+    for (i = 0; i < r->count; i++)
+    {
+        free(r->paths[i]);
+        free(r->labels[i]);
+    }
+
+    free(r->paths);
+    free(r->labels);
+    free(r->lines);
+
+    memset(r, 0, sizeof(*r));
+}
+
+int do_search_in_files(TeApp *app)
+{
+    wchar_t ext_w[64];
+    wchar_t query_w[128];
+    char ext_buf[64];
+    char query_buf[128];
+    char root_dir[1024];
+    const char *fn = NULL;
+    SifResults res;
+    int total;
+    char *tmp = NULL;
+    const char *src = NULL;
+    char *dst = NULL;
+    const char **items = NULL;
+    int choice;
+    char title[80];
+
+    if (!app)
+        return 1;
+
+    /* Ask for extensions to scan (blank = all files) */
+    wcsncpy(ext_w, L"*.c,*.h,*.txt,*.md", sizeof(ext_w) / sizeof(wchar_t) - 1);
+    ext_w[sizeof(ext_w) / sizeof(wchar_t) - 1] = L'\0';
+
+    if (ui_popup_input_wcs("Find in files", "Extensions (comma-separated, blank=all):", ext_w, sizeof(ext_w) / sizeof(wchar_t)) != 0)
+        return 1;
+
+    /* Convert extensions to UTF-8 and strip '*' wildcards */
+    tmp = wcs_to_utf8(ext_w, (int)wcslen(ext_w));
+    dst = ext_buf;
+
+    if (!tmp)
+    {
+        te_status(app, "Memory error");
+        return 1;
+    }
+
+    src = tmp;
+
+    while (*src && (size_t)(dst - ext_buf) < sizeof(ext_buf) - 1)
+    {
+        if (*src == '*')
+        {
+            src++;
+            continue;
+        }
+
+        *dst++ = *src++;
+    }
+
+    *dst = '\0';
+
+    free(tmp);
+
+    /* Ask for the search term */
+    query_w[0] = L'\0';
+
+    if (ui_popup_input_wcs("Find in files", "Term:", query_w, sizeof(query_w) / sizeof(wchar_t)) != 0 || !query_w[0])
+        return 1;
+
+    tmp = wcs_to_utf8(query_w, (int)wcslen(query_w));
+
+    if (!tmp)
+    {
+        te_status(app, "Memory error");
+        return 1;
+    }
+
+    strncpy(query_buf, tmp, sizeof(query_buf) - 1);
+    query_buf[sizeof(query_buf) - 1] = '\0';
+
+    free(tmp);
+
+    /* Pick root directory from current file's dir or cwd */
+    root_dir[0] = '\0';
+
+    fn = te_app_get_filename(app);
+
+    if (fn && fn[0])
+    {
+        const char *last_slash = strrchr(fn, '/');
+
+        if (!last_slash)
+            last_slash = strrchr(fn, '\\');
+
+        if (last_slash)
+        {
+            size_t dir_len = (size_t)(last_slash - fn);
+
+            if (dir_len < sizeof(root_dir))
+            {
+                memcpy(root_dir, fn, dir_len);
+                root_dir[dir_len] = '\0';
+            }
+        }
+    }
+
+    if (!root_dir[0])
+        strncpy(root_dir, ".", sizeof(root_dir) - 1);
+
+    /* Run grep, accumulating hits into res */
+    memset(&res, 0, sizeof(res));
+
+    te_status(app, "Searching in %s ...", root_dir);
+    refresh();
+
+    total = pf_grep_files(root_dir, ext_buf, query_buf, 5, sif_cb, &res);
+
+    if (total < 0 || res.count == 0)
+    {
+        sif_free(&res);
+
+        te_status(app, "No matches for '%s'", query_buf);
+        return 1;
+    }
+
+    /* Present results */
+
+    items = (const char **)res.labels;
+
+    if (res.truncated)
+        snprintf(title, sizeof(title), "Find in files (%d, truncated)", res.count);
+    else
+        snprintf(title, sizeof(title), "Find in files (%d)", res.count);
+
+    choice = ui_popup_list(title, items, res.count, 0);
+
+    if (choice >= 0 && choice < res.count)
+    {
+        char chosen_path[1024];
+        int chosen_line = res.lines[choice];
+        TeTab *new_tab = NULL;
+
+        strncpy(chosen_path, res.paths[choice], sizeof(chosen_path) - 1);
+        chosen_path[sizeof(chosen_path) - 1] = '\0';
+
+        sif_free(&res); /* free before opening the new tab */
+
+        /* Open the file in a new tab and jump to the line */
+        new_tab = te_tab_new();
+
+        if (!new_tab)
+        {
+            te_status(app, "Memory error opening tab");
+            return 1;
+        }
+
+        ed_set_word_move_mode(new_tab->editor, app->cfg.word_move_mode);
+        te_app_add_tab(app, new_tab);
+        te_app_switch_tab(app, app->tab_count - 1);
+
+        if (ui_files_open_path(app, chosen_path) != 0)
+        {
+            te_app_close_tab(app, app->tab_count - 1);
+            return 1;
+        }
+
+        ed_set_undo_levels(te_app_get_editor(app), app->cfg.undo_levels);
+        ed_set_hard_wrap(te_app_get_editor(app), app->cfg.hard_wrap);
+
+        /* Jump to the hit line (1-based -> 0-based) */
+        if (chosen_line > 0)
+            ed_set_pos(te_app_get_editor(app), chosen_line - 1, 0);
+
+        ed_ensure_visible(te_app_get_editor(app));
+        te_status(app, "Opened %s at line %d", chosen_path, chosen_line);
+
+        return 1;
+    }
+
+    sif_free(&res);
 
     return 1;
 }

@@ -30,14 +30,14 @@ extern void te_status(TeApp *app, const char *fmt, ...);
 #define DICT_PICKER_MAX_ITEMS 32
 #define DICT_PICKER_MAX_LEN 100
 
-/* List of grammar tags we never want to offer as a candidate to insert.
- * Comparison is case insensitive */
-static const char *GRAMMAR_TAGS[] = {
-    "noun", "verb", "adjective", "adverb", "pronoun", "article",
-    "conjunction", "preposition", "interjection", "determiner",
-    "numeral", "particle", "auxiliary", "modal", "phrase",
-    "phraseologicalunit", "abbreviation", "acronym", "initialism",
-    "letter", "symbol", "prefix", "suffix", NULL};
+/* List of grammar tags we never want to offer as a candidate to insert. Comparison is case insensitive */
+static const char *GRAMMAR_TAGS[] =
+    {
+        "noun", "verb", "adjective", "adverb", "pronoun", "article",
+        "conjunction", "preposition", "interjection", "determiner",
+        "numeral", "particle", "auxiliary", "modal", "phrase",
+        "phraseologicalunit", "abbreviation", "acronym", "initialism",
+        "letter", "symbol", "prefix", "suffix", NULL};
 
 static int line_is_grammar_tag(const char *s, int len)
 {
@@ -295,10 +295,61 @@ int ui_dict_picker(TeApp *app)
 
     if (!result)
     {
-        te_status(app, "No translation for '%s': %s", word_buf, err[0] ? err : "(not found)");
+        /* No exact match: offer similar suggestions, then retry with the chosen one */
+        char *sugg_items[DICT_PICKER_MAX_ITEMS];
+        int n_sugg = 0;
+        int sugg_sel;
+        char title[160];
+        int j;
+        char *chosen = NULL;
+
+        n_sugg = translate_suggest((TranslateHandle *)app->translate_handle, word_buf, sugg_items, DICT_PICKER_MAX_ITEMS);
+
+        if (n_sugg <= 0)
+        {
+            te_status(app, "No translation for '%s'", word_buf);
+
+            free(word_buf);
+            return 1;
+        }
+
+        snprintf(title, sizeof(title), "Not found: %s -- did you mean?", word_buf);
+        sugg_sel = ui_popup_list(title, (const char **)sugg_items, n_sugg, 0);
+
+        if (sugg_sel < 0 || sugg_sel >= n_sugg)
+        {
+            /* User cancelled */
+            for (j = 0; j < n_sugg; j++)
+                free(sugg_items[j]);
+
+            free(word_buf);
+            return 1;
+        }
+
+        /* Replace input with the chosen suggestion and retry the lookup */
+        chosen = sugg_items[sugg_sel];
+
+        sugg_items[sugg_sel] = NULL;
 
         free(word_buf);
-        return 1;
+        word_buf = chosen;
+
+        for (j = 0; j < n_sugg; j++)
+        {
+            if (sugg_items[j])
+                free(sugg_items[j]);
+        }
+
+        err[0] = '\0';
+        result = translate_text((TranslateHandle *)app->translate_handle, from_lang, to_lang, word_buf, detected, sizeof(detected), err, sizeof(err));
+
+        if (!result)
+        {
+            te_status(app, "Lookup of '%s' failed: %s", word_buf, err[0] ? err : "(unknown)");
+
+            free(word_buf);
+            return 1;
+        }
     }
 
     /* Extract candidates */

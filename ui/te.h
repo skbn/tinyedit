@@ -110,6 +110,12 @@
 #ifndef KEY_CSDOWNU
 #define KEY_CSDOWNU 0x80A
 #endif
+#ifndef KEY_ALT_UP
+#define KEY_ALT_UP 0xA00
+#define KEY_ALT_DOWN 0xA01
+#define KEY_ALT_LEFT 0xA02
+#define KEY_ALT_RIGHT 0xA03
+#endif
 #ifndef KEY_CSHOME
 #define KEY_CSHOME 0x805
 #endif
@@ -191,6 +197,9 @@ typedef struct
     char dict_word[128];
     int dict_scroll;
 
+    int bracket_match_row;
+    int bracket_match_col;
+
     char status[256];
     char cfg_path[512];
 
@@ -231,15 +240,13 @@ typedef struct
     /* Editor assistance toggles. Default off; enabled via setup UI
      * Each one independent: smart_quotes, repeat_check, auto_cap */
     int assist_smart_quotes; /* '  -> ‘/’ ; "  -> “/”            */
-    int assist_repeat_check; /* warn/highlight on "the the" etc. */
+    int assist_repeat_check; /* warn/highlight on "the the" etc */
     int assist_auto_cap;     /* capitalize after ". ", "? ", "! " */
 } TeApp;
 
 /* Helper functions to access active tab data */
 Ed *te_app_get_editor(TeApp *app);
 const char *te_app_get_filename(TeApp *app);
-char *te_app_get_raw_bytes(TeApp *app);
-int te_app_get_raw_len(TeApp *app);
 int te_app_get_show_line_numbers(TeApp *app);
 void te_app_set_filename(TeApp *app, const char *val);
 void te_app_clear_filename(TeApp *app);
@@ -253,7 +260,6 @@ TeTab *te_app_get_active_tab(TeApp *app);
 int te_app_add_tab(TeApp *app, TeTab *tab);
 int te_app_close_tab(TeApp *app, int index);
 void te_app_switch_tab(TeApp *app, int index);
-void te_app_set_raw_bytes(TeApp *app, char *ptr, int len);
 
 /* ui_editor.c */
 void ui_editor_run(TeApp *app);
@@ -277,7 +283,7 @@ int ui_popup_search_results_popup(TeApp *app, const wchar_t *search, int *rows, 
 void ui_popup_center(int want_h, int want_w, int *y, int *x, int *h, int *w);
 void ui_draw_popup_frame(int y, int x, int h, int w, const char *title);
 
-int input_handle_key(InputState *state, int ch);
+int input_handle_key(InputState *state, int ch, int is_key);
 void input_draw(InputState *state, int y, int x, int width, int is_active);
 void input_move_cursor(InputState *state, int y, int x, int width);
 
