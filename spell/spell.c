@@ -273,6 +273,10 @@ int spell_check(SpellChecker *sc, const char *word)
     if (word[0] == '\0')
         return 1;
 
+    /* Skip words that start with a digit; they are not dictionary words */
+    if (word[0] >= '0' && word[0] <= '9')
+        return 1;
+
     wlen = strlen(word);
 
     /* Fast path: lookup in cache (no alloc) */

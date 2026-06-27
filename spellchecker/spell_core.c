@@ -188,6 +188,10 @@ int spell_check(struct spell *s, const char *word)
     if (!s || !word)
         return -1;
 
+    /* Skip words that start with a digit; they are not dictionary words */
+    if (word[0] >= '0' && word[0] <= '9')
+        return 1;
+
     /* Convert from dictionary encoding to UTF-8 if needed */
     if (strcasecmp(s->encoding, "UTF-8") != 0 && strcasecmp(s->encoding, "UTF8") != 0)
     {

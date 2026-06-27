@@ -105,24 +105,31 @@ static const char *HELP_LINES[] =
         "    Alt+J            Next tab",
         "    Alt+K            Previous tab",
         "    Alt+W            Close current tab",
+#ifdef HAVE_HUNSPELL
         "",
-        "  Spell:",
+        "  Spell checker:",
         "    Alt+S            Toggle spell/dict panel",
         "    Alt+H            Toggle spell checker",
         "    Alt+P            Spell check word under cursor",
+#ifdef HAVE_MYTHES
+        "    Alt+A            Thesaurus lookup for word under cursor",
+#endif
+
+#ifdef HAVE_HYPHEN
+        "    Alt+E            Toggle hyphen wrap",
+#endif
+
+#endif /* HAVE_HUNSPELL */
+
 #ifdef HAVE_TRANSLATE
+        "",
+        "  Translate:",
         "    Alt+R            Translate selected text",
         "    Alt+M            Dictionary popup (pick translation)",
         "    Alt+N            Reverse lookup (scan dict)",
         "    Ctrl+T           Toggle translator",
         "    Alt+B            Exchange languages",
         "    Alt+D            Toggle line numbers / dict panel",
-#endif
-#ifdef HAVE_MYTHES
-        "    Alt+A            Thesaurus lookup for word under cursor",
-#endif
-#ifdef HAVE_HYPHEN
-        "    Alt+E            Toggle hyphen wrap",
 #endif
         "",
         "  Other:",
