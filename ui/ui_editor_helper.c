@@ -733,19 +733,32 @@ int ui_editor_goto_line(TeApp *app)
 int copy(TeApp *app)
 {
     EdInfo info;
-    ed_get_info(te_app_get_editor(app), &info);
+    Ed *ed = te_app_get_editor(app);
+    ed_get_info(ed, &info);
 
     if (info.block.active)
     {
-        char *utf8 = ed_block_get_utf8(te_app_get_editor(app));
+        char *utf8 = ed_block_get_utf8(ed);
 
-        if (ed_block_copy(te_app_get_editor(app)) == 0)
+        if (ed_block_copy(ed) == 0)
         {
             /* Copy to external clipboard if available */
             if (clipboard_use_external() && utf8)
             {
-                clipboard_copy(utf8);
-                te_status(app, "Block copied to clipboard");
+                if (clipboard_copy(utf8) == 0)
+                {
+                    te_status(app, "Block copied to clipboard");
+                }
+                else
+                {
+                    /* External clipboard failed: free internal killbuf so the large block does not sit unused in memory until exit */
+                    free(ed->killbuf);
+
+                    ed->killbuf = NULL;
+                    ed->killlen = 0;
+
+                    te_status(app, "Clipboard copy failed; internal block freed");
+                }
             }
             else
             {

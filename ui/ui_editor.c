@@ -1475,7 +1475,14 @@ static void draw_body(TeApp *app)
                             if (ch == L'\t')
                             {
                                 /* Mark every tab with an arrow */
+#ifdef PLATFORM_AMIGA
+                                if (app->cfg.ttf_enabled)
+                                    mvaddnwstr(offset_y + sr, col_x, L"\u2192", 1);
+                                else
+                                    mvaddch(offset_y + sr, col_x, '>');
+#else
                                 mvaddnwstr(offset_y + sr, col_x, L"\u2192", 1);
+#endif
                             }
                             else if (ch == L' ' && (seg_start + k) >= trail_start)
                             {
@@ -1672,10 +1679,17 @@ static void draw_body(TeApp *app)
                         if (free_cols >= 1)
                         {
                             attron(COLOR_PAIR(COL_GUIDE));
+
                             if (free_cols >= 2)
                             {
                                 int wx = x_screen_end - 2;
-                                wchar_t wrap_mark[2] = {L'\x21B5', L'\0'};
+                                wchar_t wrap_mark[2];
+#ifdef PLATFORM_AMIGA
+                                wrap_mark[0] = app->cfg.ttf_enabled ? L'\x21B5' : L'<';
+#else
+                                wrap_mark[0] = L'\x21B5';
+#endif
+                                wrap_mark[1] = L'\0';
 
                                 mvaddnwstr(offset_y + sr, wx, wrap_mark, 1);
                                 mvaddch(offset_y + sr, x_screen_end - 1, ' ');
@@ -1897,7 +1911,16 @@ static void draw_body(TeApp *app)
                     int col_x = offset_x + ln_offset + wcs_vwidth_ex(wl, k, 0, s_tab_width);
 
                     if (ch == L'\t')
+                    {
+#ifdef PLATFORM_AMIGA
+                        if (app->cfg.ttf_enabled)
+                            mvaddnwstr(offset_y + i, col_x, L"\u2192", 1);
+                        else
+                            mvaddch(offset_y + i, col_x, '>');
+#else
                         mvaddnwstr(offset_y + i, col_x, L"\u2192", 1);
+#endif
+                    }
                     else if (ch == L' ' && k >= trail_start)
                         mvaddnwstr(offset_y + i, col_x, L"\u00b7", 1);
                 }

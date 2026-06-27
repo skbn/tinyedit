@@ -300,6 +300,9 @@ int te_app_close_tab(TeApp *app, int index)
     for (i = index; i < app->tab_count - 1; i++)
         app->tabs[i] = app->tabs[i + 1];
 
+    /* Clear the now-unused slot so the last tab is not duplicated and leaked */
+    app->tabs[app->tab_count - 1] = NULL;
+
     app->tab_count--;
 
     if (app->active_tab >= app->tab_count)
@@ -507,7 +510,13 @@ void te_draw_titlebar(TeApp *app)
         mod = info.modified;
     }
 
+    /* On Amiga/Windows the window title already shows the app name, so the top bar only needs the filename */
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
+    prefix_len = 0;
+#else
     prefix_len = (int)strlen(WRAPPER_PID) + 2;
+#endif
+
     suffix_len = mod ? 4 : 0;
     max_fn_len = COLS - prefix_len - suffix_len - 30;
 
@@ -531,7 +540,11 @@ void te_draw_titlebar(TeApp *app)
         fn = truncated;
     }
 
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
+    snprintf(left, sizeof(left), "%s%s", fn, mod ? " [+]" : "");
+#else
     snprintf(left, sizeof(left), "%s  %s%s", WRAPPER_PID, fn, mod ? " [+]" : "");
+#endif
 
     if (tab && tab->editor)
     {

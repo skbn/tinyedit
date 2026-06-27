@@ -1614,7 +1614,7 @@ int waddch(WINDOW *w, const chtype ch)
     if (w->_cury < 0 || w->_cury >= w->_maxy || w->_curx < 0 || w->_curx >= w->_maxx)
         return ERR;
 
-    if ((ch & A_CHARTEXT) == '\t')
+    if (!s_ansi_mode && (ch & A_CHARTEXT) == '\t')
     {
         int tab_w = s_tab_size - (w->_curx % s_tab_size);
         int j;
@@ -1863,8 +1863,8 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
             w->_curx < 0 || w->_curx >= w->_maxx)
             continue;
 
-        /* Tab character advances to next tab stop */
-        if (ws[i] == L'\t')
+        /* Tab expansion: skip when ANSI mode is active (preserves CP437 art) */
+        if (!s_ansi_mode && ws[i] == L'\t')
         {
             int tab_w = s_tab_size - (w->_curx % s_tab_size);
             int j;

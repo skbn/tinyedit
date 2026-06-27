@@ -1420,6 +1420,9 @@ int ui_files_open_path(TeApp *app, const char *path)
     char *buf = NULL;
     size_t r;
     char *content = NULL;
+    int is_utf8;
+    size_t outsz;
+    char *utf8 = NULL;
 
     if (!app || !path || !path[0])
         return -1;
@@ -1444,6 +1447,32 @@ int ui_files_open_path(TeApp *app, const char *path)
         return -1;
     }
 
+    /* Fast path for UTF-8: stream directly from FILE*. Avoids holding the whole file plus the wchar_t copy at once */
+    is_utf8 = (!app->charset_in[0] || strcasecmp(app->charset_in, "UTF-8") == 0 || strcasecmp(app->charset_in, "UTF8") == 0);
+
+    if (is_utf8)
+    {
+        int rc;
+
+        fseek(fp, 0, SEEK_SET);
+
+        ed_clear_undo_redo(te_app_get_editor(app));
+        rc = ed_load_stream(te_app_get_editor(app), fp);
+
+        fclose(fp);
+
+        if (rc != 0)
+        {
+            te_status(app, "Memory error during load");
+            return -1;
+        }
+
+        te_app_set_filename(app, path);
+        te_status(app, "Loaded: %s", path);
+        return 0;
+    }
+
+    /* Non-UTF8 charset: read whole file, convert, then ed_load */
     buf = (char *)malloc((size_t)size + 1);
 
     if (!buf)
@@ -1459,32 +1488,25 @@ int ui_files_open_path(TeApp *app, const char *path)
 
     buf[r] = '\0';
 
-    /* Convert to UTF-8 if needed */
-    if (app->charset_in[0] && strcasecmp(app->charset_in, "UTF-8") != 0 && strcasecmp(app->charset_in, "UTF8") != 0)
+    /* Convert to UTF-8 */
+    outsz = (size_t)r * 4 + 16;
+    utf8 = (char *)malloc(outsz);
+
+    if (utf8)
     {
-        size_t outsz = (size_t)r * 4 + 16;
-        char *utf8 = (char *)malloc(outsz);
+        int wrote = charset_body_to_utf8(app->charset_in, buf, (int)r, utf8, (int)outsz);
 
-        if (utf8)
+        if (wrote >= 0)
         {
-            int wrote = charset_body_to_utf8(app->charset_in, buf, (int)r, utf8, (int)outsz);
+            utf8[wrote] = '\0';
+            content = utf8;
 
-            if (wrote >= 0)
-            {
-                utf8[wrote] = '\0';
-                content = utf8;
-
-                free(buf);
-            }
-            else
-            {
-                free(utf8);
-
-                content = buf;
-            }
+            free(buf);
         }
         else
         {
+            free(utf8);
+
             content = buf;
         }
     }

@@ -8,6 +8,7 @@
  * the Free Software Foundation, either version 2 of the License, or
  * (at your option) any later version.
  */
+
 /* ncursesw_win32.c - ncursesw for Windows using GDI (own window like Amiga) */
 
 #ifdef PLATFORM_WIN32
@@ -65,7 +66,8 @@ static int s_keypad = 1;
 static int s_nodelay = 0;
 static int s_cursor_vis = 1;
 
-static int s_tab_size = 4; /* visual tab stop width, configurable via set_tabsize() */
+static int s_tab_size = 4;  /* visual tab stop width, configurable via set_tabsize() */
+static int s_ansi_mode = 0; /* ANSI art mode: when ON, do not expand tabs (preserves CP437 art alignment) */
 
 /* Ungetch buffer */
 static int s_ungetch = ERR;
@@ -1778,7 +1780,10 @@ static void render_all(void)
         cy = cy_cell * fh;
 
         /* XOR block cursor preserves underlying text */
-        rc = {cx, cy, cx + cursor_w, cy + fh};
+        rc.left = cx;
+        rc.top = cy;
+        rc.right = cx + cursor_w;
+        rc.bottom = cy + fh;
         InvertRect(hMemDC, &rc);
 
         /* dirty the cursor cells so next render repaints under it */
@@ -2743,6 +2748,52 @@ static int utf8_decode_one(const unsigned char *p, int max, wchar_t *out, int *c
     return -1;
 }
 
+static int utf8_decode_one_cp(const unsigned char *p, int max, unsigned long *out, int *consumed)
+{
+    unsigned char b0;
+
+    if (max <= 0)
+    {
+        *out = 0;
+        *consumed = 0;
+        return -1;
+    }
+
+    b0 = p[0];
+
+    if (b0 < 0x80)
+    {
+        *out = (unsigned long)b0;
+        *consumed = 1;
+        return 0;
+    }
+
+    if ((b0 & 0xE0) == 0xC0 && max >= 2 && (p[1] & 0xC0) == 0x80)
+    {
+        *out = (unsigned long)(((b0 & 0x1F) << 6) | (p[1] & 0x3F));
+        *consumed = 2;
+        return 0;
+    }
+
+    if ((b0 & 0xF0) == 0xE0 && max >= 3 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80)
+    {
+        *out = (unsigned long)(((b0 & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F));
+        *consumed = 3;
+        return 0;
+    }
+
+    if ((b0 & 0xF8) == 0xF0 && max >= 4 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80)
+    {
+        *out = (unsigned long)(((b0 & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F));
+        *consumed = 4;
+        return 0;
+    }
+
+    *out = (unsigned long)b0;
+    *consumed = 1;
+    return -1;
+}
+
 int waddnstr(WINDOW *win, const char *str, int n)
 {
     int i;
@@ -2757,16 +2808,24 @@ int waddnstr(WINDOW *win, const char *str, int n)
 
     while (i < n && str[i])
     {
-        wchar_t wc;
+        unsigned long cp = 0;
         int consumed = 1;
 
-        utf8_decode_one((const unsigned char *)&str[i], n - i, &wc, &consumed);
+        utf8_decode_one_cp((const unsigned char *)&str[i], n - i, &cp, &consumed);
 
         if (consumed <= 0)
             consumed = 1; /* always make progress */
 
-        if (waddch(win, (chtype)wc) == ERR)
-            return ERR;
+        if (cp > 0xFFFF || is_wide_cp((unsigned int)cp))
+        {
+            if (waddch32(win, cp) == ERR)
+                return ERR;
+        }
+        else
+        {
+            if (waddch(win, (chtype)cp) == ERR)
+                return ERR;
+        }
 
         i += consumed;
     }
@@ -2838,8 +2897,31 @@ int waddnwstr(WINDOW *win, const wchar_t *wstr, int n)
 
     for (i = 0; i < n && wstr[i]; i++)
     {
-        if (waddch(win, (chtype)wstr[i]) == ERR)
-            return ERR;
+        unsigned int wc = (unsigned int)wstr[i];
+        unsigned long cp = wc;
+
+        if (wc >= 0xD800 && wc <= 0xDBFF && i + 1 < n)
+        {
+            unsigned int lo = (unsigned int)wstr[i + 1];
+
+            if (lo >= 0xDC00 && lo <= 0xDFFF)
+            {
+                cp = 0x10000UL + (((unsigned long)(wc - 0xD800)) << 10) + (unsigned long)(lo - 0xDC00);
+                i++; /* consume trailing surrogate */
+            }
+        }
+
+        /* Supplementary plane or wide BMP -> waddch32 (preserves cp) */
+        if (cp > 0xFFFF || is_wide_cp((unsigned int)cp))
+        {
+            if (waddch32(win, cp) == ERR)
+                return ERR;
+        }
+        else
+        {
+            if (waddch(win, (chtype)cp) == ERR)
+                return ERR;
+        }
     }
 
     return OK;

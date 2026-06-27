@@ -14,6 +14,7 @@
 #define WRAPPER_EDITOR_H
 
 #include <stdint.h>
+#include <stdio.h>
 #include <wchar.h>
 
 typedef struct Ed Ed;
@@ -121,6 +122,7 @@ struct Ed
 
 Ed *ed_new(void);
 void ed_free(Ed *ed);
+int ed_load_stream(Ed *ed, FILE *fp);                                         /* streaming UTF-8 in */
 void ed_load(Ed *ed, const char *utf8_text);                                  /* UTF-8 in */
 char *ed_to_string(const Ed *ed);                                             /* UTF-8 out (caller frees) */
 char *ed_range_to_string(const Ed *ed, int start, int end);                   /* serialise only [start, end) */
