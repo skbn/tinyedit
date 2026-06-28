@@ -33,6 +33,7 @@ char *wrap_paste_text(TeApp *app, const char *utf8, int col);
 int editor_body_offset(const TeApp *app, int line_count);
 
 /* Function key implementations */
+int ui_editor_detect_wrap_hyphens(TeApp *app);
 int search_prev(TeApp *app);
 int search_next(TeApp *app);
 int replace(TeApp *app);

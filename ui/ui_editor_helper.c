@@ -23,8 +23,17 @@
 #include "../components/editor.h"
 #include "te.h"
 #include "ui_files.h"
+#include "ui_spell.h"
 
-#define SIF_MAX_HITS 500
+#ifdef HAVE_HUNSPELL
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/spell.h"
+#else
+#include "../spell/spell.h"
+#endif
+#endif
+
+#define SIF_MAX_HITS 2000
 
 typedef struct
 {
@@ -602,6 +611,119 @@ int insert_file(TeApp *app)
     }
 
     return 1;
+}
+
+/* Detect loaded wrap-hyphens using the active spell checker */
+int ui_editor_detect_wrap_hyphens(TeApp *app)
+{
+#ifdef HAVE_HUNSPELL
+    Ed *ed = NULL;
+    EdLine *ln = NULL;
+    EdLine *next = NULL;
+    int i, j, k;
+    int detected = 0;
+    int first_start, first_end, next_start, next_end;
+    int combined_len;
+    int spell_ok;
+    char *word_utf8 = NULL;
+    wchar_t combined[512];
+
+    if (!app)
+        return 0;
+
+    ed = te_app_get_editor(app);
+
+    if (!ed)
+        return 0;
+
+    if (!app->spell_handle)
+        return 0;
+
+    if (!app->cfg.hyph_detect_on_load)
+        return 0;
+
+    for (i = 0; i < ed->count - 1; i++)
+    {
+        ln = ed->lines[i];
+        next = ed->lines[i + 1];
+
+        if (ln->len <= 0 || ln->wcs[ln->len - 1] != L'-')
+            continue;
+
+        if (!next || next->len <= 0)
+            continue;
+
+        /* Last word before the trailing hyphen */
+        first_end = ln->len - 1;
+        first_start = first_end - 1;
+
+        while (first_start >= 0 && !iswspace(ln->wcs[first_start]))
+            first_start--;
+
+        first_start++;
+
+        /* Strip leading punctuation from the first word */
+        while (first_start < first_end && iswpunct(ln->wcs[first_start]))
+            first_start++;
+
+        if (first_start >= first_end)
+            continue;
+
+        /* First word on the next line */
+        next_start = 0;
+
+        while (next_start < next->len && iswspace(next->wcs[next_start]))
+            next_start++;
+
+        if (next_start >= next->len)
+            continue;
+
+        next_end = next_start + 1;
+
+        while (next_end < next->len && !iswspace(next->wcs[next_end]))
+            next_end++;
+
+        /* Strip leading and trailing punctuation from the next word */
+        while (next_start < next_end && iswpunct(next->wcs[next_start]))
+            next_start++;
+
+        while (next_end > next_start && iswpunct(next->wcs[next_end - 1]))
+            next_end--;
+
+        if (next_start >= next_end)
+            continue;
+
+        /* Build combined word from both halves */
+        combined_len = 0;
+
+        for (j = first_start; j < first_end && combined_len < 511; j++)
+            combined[combined_len++] = ln->wcs[j];
+
+        for (k = next_start; k < next_end && combined_len < 511; k++)
+            combined[combined_len++] = next->wcs[k];
+
+        combined[combined_len] = L'\0';
+
+        if (combined_len < 4 || combined_len >= 256)
+            continue;
+
+        word_utf8 = wcs_to_utf8(combined, combined_len);
+        spell_ok = (word_utf8 && spell_check(app->spell_handle, word_utf8));
+        free(word_utf8);
+        word_utf8 = NULL;
+
+        /* If the joined word is valid, the hyphen was probably a wrap-hyphen */
+        if (spell_ok)
+        {
+            ln->has_wrap_hyphen = 1;
+            detected++;
+        }
+    }
+
+    return detected;
+#else
+    return 0;
+#endif
 }
 
 int toggle_spell_panel(TeApp *app)

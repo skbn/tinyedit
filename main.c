@@ -41,6 +41,7 @@ extern int amiga_add_ttf_fallback(const char *path, int size);
 #endif
 
 #include "ui/te.h"
+#include "ui/ui_editor_helper.h"
 #include "core/charset.h"
 #include "components/config.h"
 #include "core/clipboard.h"
@@ -189,6 +190,7 @@ int main(int argc, char **argv)
     const char *cfg_path = NULL;
     FILE *tty = NULL;
     char cfg_dir[512];
+    int detected;
 
 #ifdef PLATFORM_AMIGA
     /* Redirect stdout/stderr to avoid Amiga CLI console */
@@ -543,6 +545,11 @@ int main(int argc, char **argv)
             ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
             te_app_add_tab(app, tab);
             te_app_switch_tab(app, 0);
+
+            detected = ui_editor_detect_wrap_hyphens(app);
+
+            if (detected > 0)
+                te_status(app, "Detected %d wrap-hyphens", detected);
         }
 
         if (content)

@@ -312,6 +312,7 @@ static const SetupField st_fields[] =
         {TAB_DICT, "Hyphen Dict Path", FT_STR, F_OFF(hyph_dict_path), TE_CFG_STR_MAX},
         {TAB_DICT, "Hyphen Dictionary", FT_HYPHLIST, F_OFF(hyph_dict_name), 0},
         {TAB_DICT, "Hyphen Wrap", FT_BOOL, F_OFF(hyph_wrap_enabled), 0},
+        {TAB_DICT, "Hyphen Detect on Load", FT_BOOL, F_OFF(hyph_detect_on_load), 0},
 #endif /* HAVE_HYPHEN */
 #ifdef HAVE_MYTHES
         {TAB_DICT, "Thesaurus Enabled", FT_BOOL, F_OFF(thes_enabled), 0},

@@ -358,6 +358,7 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->hyph_dict_path[sizeof(cfg->hyph_dict_path) - 1] = '\0';
     cfg->hyph_dict_name[0] = '\0';
     cfg->hyph_wrap_enabled = 0;
+    cfg->hyph_detect_on_load = 0;
 #endif
 
 #ifdef HAVE_MYTHES
@@ -938,6 +939,10 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         {
             cfg->hyph_wrap_enabled = parse_yesno(rest);
         }
+        else if (strcasecmp(word, "HYPH_DETECT_ON_LOAD") == 0)
+        {
+            cfg->hyph_detect_on_load = parse_yesno(rest);
+        }
 #endif
 #ifdef HAVE_MYTHES
         else if (strcasecmp(word, "THES_ENABLED") == 0)
@@ -1184,12 +1189,15 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "DEFAULT_BG_COLOR") == 0 ||
                 strcasecmp(word, "CURSORCOLOR") == 0 ||
                 strcasecmp(word, "MOUSE_ENABLED") == 0 ||
+                strcasecmp(word, "ASSIST_SMART_QUOTES") == 0 ||
+                strcasecmp(word, "ASSIST_AUTO_CAP") == 0 ||
+                strcasecmp(word, "ASSIST_REPEAT_CHECK") == 0 ||
                 strcasecmp(word, "COLOR") == 0 ||
                 strcasecmp(word, "COLORMAP") == 0
 #ifdef HAVE_HUNSPELL
                 || strcasecmp(word, "SPELL_ENABLED") == 0 || strcasecmp(word, "SPELL_DICT_PATH") == 0 || strcasecmp(word, "SPELL_DICT_NAME") == 0 || strcasecmp(word, "SPELL_CUSTOM_DICT") == 0
 #ifdef HAVE_HYPHEN
-                || strcasecmp(word, "HYPH_ENABLED") == 0 || strcasecmp(word, "HYPH_DICT_PATH") == 0 || strcasecmp(word, "HYPH_DICT_NAME") == 0 || strcasecmp(word, "HYPH_WRAP_ENABLED") == 0
+                || strcasecmp(word, "HYPH_ENABLED") == 0 || strcasecmp(word, "HYPH_DICT_PATH") == 0 || strcasecmp(word, "HYPH_DICT_NAME") == 0 || strcasecmp(word, "HYPH_WRAP_ENABLED") == 0 || strcasecmp(word, "HYPH_DETECT_ON_LOAD") == 0
 #endif
 #ifdef HAVE_MYTHES
                 || strcasecmp(word, "THES_ENABLED") == 0 || strcasecmp(word, "THES_DICT_PATH") == 0 || strcasecmp(word, "THES_DICT_NAME") == 0
@@ -1307,6 +1315,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "HYPH_DICT_PATH %s\n", cfg->hyph_dict_path);
     fprintf(out, "HYPH_DICT_NAME %s\n", cfg->hyph_dict_name);
     fprintf(out, "HYPH_WRAP_ENABLED %s\n", cfg->hyph_wrap_enabled ? "YES" : "NO");
+    fprintf(out, "HYPH_DETECT_ON_LOAD %s\n", cfg->hyph_detect_on_load ? "YES" : "NO");
 #endif
 
 #ifdef HAVE_MYTHES

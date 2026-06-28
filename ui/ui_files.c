@@ -15,6 +15,7 @@
 #include <string.h>
 #include "te.h"
 #include "ui_files.h"
+#include "ui_editor_helper.h"
 #include "../core/keys.h"
 #include "../core/portable.h"
 
@@ -1423,6 +1424,7 @@ int ui_files_open_path(TeApp *app, const char *path)
     int is_utf8;
     size_t outsz;
     char *utf8 = NULL;
+    int detected;
 
     if (!app || !path || !path[0])
         return -1;
@@ -1468,7 +1470,14 @@ int ui_files_open_path(TeApp *app, const char *path)
         }
 
         te_app_set_filename(app, path);
-        te_status(app, "Loaded: %s", path);
+
+        detected = ui_editor_detect_wrap_hyphens(app);
+
+        if (detected > 0)
+            te_status(app, "Loaded: %s (%d wrap-hyphens)", path, detected);
+        else
+            te_status(app, "Loaded: %s", path);
+
         return 0;
     }
 
@@ -1524,7 +1533,12 @@ int ui_files_open_path(TeApp *app, const char *path)
     /* Update filename */
     te_app_set_filename(app, path);
 
-    te_status(app, "Loaded: %s", path);
+    detected = ui_editor_detect_wrap_hyphens(app);
+
+    if (detected > 0)
+        te_status(app, "Loaded: %s (%d wrap-hyphens)", path, detected);
+    else
+        te_status(app, "Loaded: %s", path);
 
     return 0;
 }

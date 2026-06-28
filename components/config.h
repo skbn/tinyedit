@@ -127,7 +127,8 @@ typedef struct
     int hyph_enabled;
     char hyph_dict_path[TE_CFG_STR_MAX];
     char hyph_dict_name[TE_CFG_STR_MAX];
-    int hyph_wrap_enabled; /* Use hyphenation in hard-wrap mode */
+    int hyph_wrap_enabled;   /* Use hyphenation in hard-wrap mode */
+    int hyph_detect_on_load; /* Detect wrap-hyphens when loading files */
 #endif
 
 #ifdef HAVE_MYTHES
