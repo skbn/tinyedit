@@ -11,6 +11,7 @@
 
 #include "ui_translate.h"
 #include "ui_dict.h"
+#include "ui_editor_helper.h"
 #include "te.h"
 
 #include <stdio.h>
@@ -453,17 +454,21 @@ int ui_translate_action(TeApp *app)
     if (choice == 1)
     {
         /* Replace lines */
+        ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
+
         if (replace_lines(app, first, last, result) == 0)
         {
             te_status(app, "Replaced %d line(s) with translation", last - first + 1);
+
             ed_block_clear(te_app_get_editor(app));
+            ed_auto_rewrap_after_edit(app);
         }
         else
             te_status(app, "Replace failed");
     }
     else if (choice == 2)
     {
-        /* Insert a new paragraph below `last` */
+        /* Insert a new paragraph below last */
         Ed *ed = te_app_get_editor(app);
 
         if (!ed)
@@ -472,14 +477,19 @@ int ui_translate_action(TeApp *app)
         }
         else
         {
+            ed_auto_rewrap_capture_pre_snapshot(ed);
+
             ed_save_undo(ed);
+
             ed_set_pos(ed, last, ed_line_len(ed, last));
             ed_enter(ed); /* line break */
 
             if (ed_paste_text(ed, result) == 0)
             {
                 te_status(app, "Inserted translation below paragraph");
+
                 ed_block_clear(ed);
+                ed_auto_rewrap_after_edit(app);
             }
             else
                 te_status(app, "Insert failed");

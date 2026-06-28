@@ -11,6 +11,7 @@
 
 #include "ui_thes.h"
 #include "ui_thes_glue.h"
+#include "ui_editor_helper.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -492,6 +493,9 @@ int ui_thes_lookup_word(UI_APP_T *app)
                 }
                 else
                 {
+                    ed_auto_rewrap_capture_pre_snapshot(ed);
+
+                    ed_save_undo(ed);
                     ed_set_pos(ed, info.row, ws);
 
                     for (i = 0; i < (we - ws); i++)
@@ -499,6 +503,8 @@ int ui_thes_lookup_word(UI_APP_T *app)
 
                     for (i = 0; i < wlen; i++)
                         ed_insert_char(ed, wsyn[i]);
+
+                    ed_auto_rewrap_after_edit(app);
                 }
 
                 free(wsyn);

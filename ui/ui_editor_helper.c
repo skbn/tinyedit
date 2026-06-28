@@ -647,7 +647,7 @@ int paste(TeApp *app)
             const char *to_insert = clip;
             int pasted = 0;
 
-            /* HARD-WRAP only: reflow pasted text; soft-wrap inserts verbatim */
+            /* Pre-wrap pasted text in hard-wrap mode; soft-wrap inserts verbatim */
             if (app->hard_wrap)
             {
                 int pw = editor_eff_wrap(app);
@@ -658,32 +658,20 @@ int paste(TeApp *app)
 
                     if (wrapped)
                         to_insert = wrapped;
-
-#ifdef HAVE_HYPHEN
-                    if (app->hyph_wrap_enabled && app->hyph_handle)
-                        pasted = ed_paste_and_rewrap(te_app_get_editor(app), to_insert, pw, ui_hyph_thunk, app->hyph_handle) == 0;
-                    else
-#endif
-                        pasted = ed_paste_and_rewrap(te_app_get_editor(app), to_insert, pw, NULL, NULL) == 0;
-
-                    if (!pasted)
-                        ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
-                }
-                else
-                {
-                    ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
                 }
             }
-            else
-            {
-                ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
-            }
+
+            ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
+            ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
 
             clear_search_highlights(app);
             soft_reset_desired();
 
             s_soft_vtop = 0;
             te_status(app, "Pasted from clipboard");
+
+            ed_auto_rewrap_after_edit(app);
+            ed_ensure_visible(te_app_get_editor(app));
 
             free(wrapped);
             free(clip);
@@ -697,6 +685,8 @@ int paste(TeApp *app)
     else
     {
         /* SSH/headless: use internal block only */
+        ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
+
         if (ed_block_paste(te_app_get_editor(app)) == 0)
         {
             clear_search_highlights(app);
@@ -704,9 +694,17 @@ int paste(TeApp *app)
 
             s_soft_vtop = 0;
             te_status(app, "Pasted (internal block)");
+
+            ed_auto_rewrap_after_edit(app);
+            ed_ensure_visible(te_app_get_editor(app));
         }
         else
         {
+            Ed *ed = te_app_get_editor(app);
+
+            free(ed->auto_rewrap_pre_snapshot);
+
+            ed->auto_rewrap_pre_snapshot = NULL;
             te_status(app, "No internal block to paste (external clipboard unavailable in SSH)");
         }
     }
@@ -802,6 +800,7 @@ int cut(TeApp *app)
 
         if (ed_block_cut(te_app_get_editor(app)) == 0)
         {
+            ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
             clear_search_highlights(app);
 
             /* Copy to external clipboard if available */
@@ -814,6 +813,8 @@ int cut(TeApp *app)
             {
                 te_status(app, "Block cut (internal only)");
             }
+
+            ed_auto_rewrap_after_edit(app);
         }
 
         if (utf8)
@@ -915,7 +916,7 @@ int ui_editor_export(TeApp *app)
     return 1;
 }
 
-int rewrap(TeApp *app)
+int ftn_reply(TeApp *app)
 {
     int col = editor_eff_wrap(app);
     int rc;
@@ -923,18 +924,12 @@ int rewrap(TeApp *app)
     if (col <= 0)
         col = (app->wrap_col > 0) ? app->wrap_col : 75;
 
-#ifdef HAVE_HYPHEN
-    /* Use hyphenation when enabled and dict loaded, otherwise plain rewrap (breaks at spaces) */
-    if (app->hyph_wrap_enabled && app->hyph_handle)
-        rc = ed_rewrap_paragraph_ex(te_app_get_editor(app), col, ui_hyph_thunk, app->hyph_handle);
-    else
-#endif
-        rc = ed_rewrap_paragraph(te_app_get_editor(app), col);
+    rc = ed_rewrap_ftn_reply(te_app_get_editor(app), col);
 
     if (rc == 0)
     {
         clear_search_highlights(app);
-        te_status(app, "Paragraph rewrapped");
+        te_status(app, "FTN reply rewrapped");
     }
 
     return 1;
@@ -1268,7 +1263,6 @@ int do_search_in_files(TeApp *app)
     }
 
     /* Present results */
-
     items = (const char **)res.labels;
 
     if (res.truncated)

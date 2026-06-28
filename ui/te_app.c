@@ -22,6 +22,7 @@
 #include "../core/utf8.h"
 #include "../components/config.h"
 #include "../components/editor.h"
+#include "ui_editor_helper.h"
 #include "../wrapper.h"
 
 #ifdef HAVE_TRANSLATE

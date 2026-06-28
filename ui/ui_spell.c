@@ -20,6 +20,7 @@
 #include "../core/utf8.h"
 #include "../spellchecker/spell.h"
 #include "../components/editor.h"
+#include "ui_editor_helper.h"
 
 #ifdef HAVE_HUNSPELL
 #if defined(PLATFORM_AMIGA)
@@ -652,16 +653,18 @@ int spell_check_word(TeApp *app)
             else
             {
                 /* Replace word with suggestion */
+                ed_auto_rewrap_capture_pre_snapshot(ed);
+
                 ed_save_undo(ed);
                 ed_set_pos(ed, info.row, word_start);
 
-                /* Delete old word */
                 for (i = 0; i < word_len; i++)
                     ed_delete(ed);
 
-                /* Insert new word */
                 for (i = 0; i < suggestion_len; i++)
                     ed_insert_char(ed, suggestion_wcs[i]);
+
+                ed_auto_rewrap_after_edit(app);
 
                 te_status(app, "Replaced with '%s'", suggestions[selected]);
             }

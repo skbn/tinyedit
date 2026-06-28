@@ -25,6 +25,7 @@ int ui_spell_suggest(TeApp *app, const char *word, char **suggestions, int count
 int spell_load_from_config(TeApp *app);
 int spell_check_word(TeApp *app);
 int ui_spell_check_word_simple(TeApp *app, const wchar_t *word, int word_len);
+
 #endif
 
 #endif /* UI_SPELL_H */

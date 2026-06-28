@@ -41,6 +41,7 @@ typedef struct
     int len;      /* character count (not bytes) */
     int cap;      /* allocated wchar_t slots */
     int word_count;
+    int has_wrap_hyphen; /* 1 if last char is an artificial wrap-hyphen */
 } EdLine;
 
 typedef enum
@@ -116,16 +117,24 @@ struct Ed
 
     int word_count_total;       /* cached total word count */
     int word_count_initialized; /* 1 = word counts are valid, 0 = lazy init pending */
+
+    /* Pre-edit snapshot for auto-rewrap undo */
+    char *auto_rewrap_pre_snapshot;
+    int auto_rewrap_pre_start;
+    int auto_rewrap_pre_end;
+    int auto_rewrap_pre_cursor_row;
+    int auto_rewrap_pre_cursor_col;
 };
 
 #define INIT_ALLOC 1024
 
 Ed *ed_new(void);
 void ed_free(Ed *ed);
-int ed_load_stream(Ed *ed, FILE *fp);                                         /* streaming UTF-8 in */
-void ed_load(Ed *ed, const char *utf8_text);                                  /* UTF-8 in */
-char *ed_to_string(const Ed *ed);                                             /* UTF-8 out (caller frees) */
-char *ed_range_to_string(const Ed *ed, int start, int end);                   /* serialise only [start, end) */
+int ed_load_stream(Ed *ed, FILE *fp);                       /* streaming UTF-8 in */
+void ed_load(Ed *ed, const char *utf8_text);                /* UTF-8 in */
+char *ed_to_string(const Ed *ed);                           /* UTF-8 out (caller frees) */
+char *ed_range_to_string(const Ed *ed, int start, int end); /* serialise only [start, end) */
+void ed_auto_rewrap_capture_pre_snapshot(Ed *ed);
 int ed_save_to_file(const Ed *ed, const char *path, const char *charset_out); /* streaming save */
 
 /* Cursor movement */
@@ -200,22 +209,17 @@ void ed_set_pos(Ed *ed, int row, int col);
 /* Text operations (no UI dependencies) */
 /* Case-insensitive, wraps */
 int ed_search_forward(Ed *ed, const wchar_t *needle);
-/* Find all matches, returns count and malloc'd arrays (caller must free) */
+/* Find all matches, returns count and malloc'd arrays */
 int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols);
 /* Custom search with case_sensitive and whole_word support */
 int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int whole_word, int **out_rows, int **out_cols);
-/* Re-flow with quote preservation */
-int ed_rewrap_paragraph(Ed *ed, int width);
-int ed_rewrap_document(Ed *ed, int width);
+/* Re-wrap the current FTN reply quote block (Ctrl+W) */
+int ed_rewrap_ftn_reply(Ed *ed, int width);
 
-/* Hyphenation callback: returns break positions in word_utf8 */
-typedef int (*EdHyphenFn)(void *user_data, const char *word_utf8, int word_byte_len, int *out_byte_pos, int *out_count);
-
-/* Like ed_rewrap_paragraph, but uses hyph to split overflow words */
-int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data);
-
-/* Paste text and rewrap paragraph as a single undo operation */
-int ed_paste_and_rewrap(Ed *ed, const char *utf8_text, int width, EdHyphenFn hyph, void *hyph_data);
+/* Re-flow the hard-wrap paragraph around the cursor.
+   hyph_cb(user_data, word, word_wlen, col_limit) -> break char offset or -1.
+   Returns 0 on success, -1 if not applicable (empty line) or on error */
+int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar_t *, int, int), void *hyph_data);
 
 /* Insert a text file at the cursor position (with undo) */
 int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in);

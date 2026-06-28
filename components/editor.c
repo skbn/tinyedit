@@ -86,6 +86,7 @@ static EdLine *line_new(const wchar_t *src, int len)
     ln->wcs[len] = L'\0';
     ln->len = len;
     ln->word_count = 0;
+    ln->has_wrap_hyphen = 0;
 
     return ln;
 }
@@ -111,6 +112,7 @@ static EdLine *line_new_take(wchar_t *wcs, int len)
     ln->wcs[len] = L'\0';
     ln->len = len;
     ln->word_count = 0;
+    ln->has_wrap_hyphen = 0;
 
     return ln;
 }
@@ -936,6 +938,7 @@ void ed_free(Ed *ed)
 
     free(ed->lines);
     free(ed->killbuf);
+    free(ed->auto_rewrap_pre_snapshot);
 
     prefix_free(ed);
 
@@ -1229,12 +1232,17 @@ char *ed_to_string(const Ed *ed)
             }
 
             line_cap *= 2;
-            line_buf = (char *)realloc(line_buf, (size_t)line_cap);
-
-            if (!line_buf)
             {
-                free(out);
-                return NULL;
+                char *tmp = (char *)realloc(line_buf, (size_t)line_cap);
+
+                if (!tmp)
+                {
+                    free(line_buf);
+                    free(out);
+                    return NULL;
+                }
+
+                line_buf = tmp;
             }
         }
 
@@ -1341,6 +1349,7 @@ int ed_save_to_file(const Ed *ed, const char *path, const char *charset_out)
 
         for (;;)
         {
+            char *tmp = NULL;
             line_len = ed_line_utf8(ed, i, line_buf, line_cap);
 
             if (line_len > 0)
@@ -1353,15 +1362,19 @@ int ed_save_to_file(const Ed *ed, const char *path, const char *charset_out)
             }
 
             line_cap *= 2;
-            line_buf = (char *)realloc(line_buf, (size_t)line_cap);
 
-            if (!line_buf)
+            tmp = (char *)realloc(line_buf, (size_t)line_cap);
+
+            if (!tmp)
             {
+                free(line_buf);
                 free(buf);
 
                 fclose(fp);
                 return -1;
             }
+
+            line_buf = tmp;
         }
 
         /* Line alone bigger than buffer: flush current buffer and write it directly */
@@ -1506,6 +1519,37 @@ char *ed_range_to_string(const Ed *ed, int start, int end)
     free(parts);
 
     return out;
+}
+
+/* Capture the current paragraph as the pre-edit snapshot for auto-rewrap */
+void ed_auto_rewrap_capture_pre_snapshot(Ed *ed)
+{
+    int first, last;
+
+    if (!ed || ed->count <= 0)
+        return;
+
+    /* Empty line: paragraph separator -- nothing to reflow */
+    if (ed->lines[ed->row]->len == 0)
+        return;
+
+    first = ed->row;
+
+    while (first > 0 && ed->lines[first - 1]->len > 0)
+        first--;
+
+    last = ed->row;
+
+    while (last < ed->count - 1 && ed->lines[last + 1]->len > 0)
+        last++;
+
+    free(ed->auto_rewrap_pre_snapshot);
+
+    ed->auto_rewrap_pre_snapshot = ed_range_to_string(ed, first, last + 1);
+    ed->auto_rewrap_pre_start = first;
+    ed->auto_rewrap_pre_end = last + 1;
+    ed->auto_rewrap_pre_cursor_row = ed->row;
+    ed->auto_rewrap_pre_cursor_col = ed->col;
 }
 
 /* Scroll + clamp */
@@ -1798,9 +1842,20 @@ void ed_set_word_move_mode(Ed *ed, int mode)
 int ed_insert_char(Ed *ed, wchar_t ch)
 {
     EdLine *ln = NULL;
+    int was_snapshot_mode = 0;
 
     if (!ed || ch == 0)
         return -1;
+
+    if (ed->hard_wrap)
+    {
+        was_snapshot_mode = ed->undo_snapshot_mode;
+
+        if (!ed->undo_snapshot_mode)
+            ed_auto_rewrap_capture_pre_snapshot(ed);
+
+        ed->undo_snapshot_mode = 1;
+    }
 
     ln = ed->lines[ed->row];
 
@@ -1840,6 +1895,7 @@ int ed_insert_char(Ed *ed, wchar_t ch)
         }
     }
 
+    ln->has_wrap_hyphen = 0;
     ed->col++;
     ed->modified = 1;
 
@@ -1867,6 +1923,9 @@ int ed_enter(Ed *ed)
 
     line_truncate(ed, ln, ed->col);
 
+    ln->has_wrap_hyphen = 0;
+    nl->has_wrap_hyphen = 0;
+
     if (doc_insert_line(ed, ed->row + 1, nl) != 0)
         return -1;
 
@@ -1884,17 +1943,32 @@ int ed_backspace(Ed *ed)
 {
     EdLine *ln = NULL;
     EdLine *prev = NULL;
+    wchar_t deleted_ch = 0;
+    int was_snapshot_mode = 0;
 
     if (!ed)
         return -1;
+
+    if (ed->hard_wrap)
+    {
+        was_snapshot_mode = ed->undo_snapshot_mode;
+
+        if (!ed->undo_snapshot_mode)
+            ed_auto_rewrap_capture_pre_snapshot(ed);
+
+        ed->undo_snapshot_mode = 1;
+    }
 
     ln = ed->lines[ed->row];
 
     if (ed->col > 0)
     {
-        record_delete_back(ed, ed->row, ed->col - 1, ln->wcs[ed->col - 1]);
+        deleted_ch = ln->wcs[ed->col - 1];
+
+        record_delete_back(ed, ed->row, ed->col - 1, deleted_ch);
         line_delete(ed, ln, ed->col - 1);
 
+        ln->has_wrap_hyphen = 0;
         ed->col--;
         ed->modified = 1;
 
@@ -1925,17 +1999,32 @@ int ed_delete(Ed *ed)
 {
     EdLine *ln = NULL;
     EdLine *nxt = NULL;
+    wchar_t deleted_ch = 0;
+    int was_snapshot_mode = 0;
 
     if (!ed)
         return -1;
+
+    if (ed->hard_wrap)
+    {
+        was_snapshot_mode = ed->undo_snapshot_mode;
+
+        if (!ed->undo_snapshot_mode)
+            ed_auto_rewrap_capture_pre_snapshot(ed);
+
+        ed->undo_snapshot_mode = 1;
+    }
 
     ln = ed->lines[ed->row];
 
     if (ed->col < ln->len)
     {
-        record_delete_fwd(ed, ed->row, ed->col, ln->wcs[ed->col]);
+        deleted_ch = ln->wcs[ed->col];
+
+        record_delete_fwd(ed, ed->row, ed->col, deleted_ch);
         line_delete(ed, ln, ed->col);
 
+        ln->has_wrap_hyphen = 0;
         ed->modified = 1;
         ed_prefix_invalidate_from(ed, ed->row);
     }
@@ -1949,6 +2038,7 @@ int ed_delete(Ed *ed)
         line_append(ed, ln, nxt->wcs, nxt->len);
         line_free(doc_remove_line(ed, ed->row + 1));
 
+        ln->has_wrap_hyphen = 0;
         ed->modified = 1;
         ed_prefix_invalidate_from(ed, ed->row);
     }
@@ -2234,6 +2324,8 @@ int ed_duplicate_line(Ed *ed)
 
     if (!dup)
         return -1;
+
+    dup->has_wrap_hyphen = ln->has_wrap_hyphen;
 
     /* Record undo operation - split at current position */
     if (!ed->undo_snapshot_mode)
