@@ -214,6 +214,9 @@ typedef int (*EdHyphenFn)(void *user_data, const char *word_utf8, int word_byte_
 /* Like ed_rewrap_paragraph, but uses hyph to split overflow words */
 int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data);
 
+/* Paste text and rewrap paragraph as a single undo operation */
+int ed_paste_and_rewrap(Ed *ed, const char *utf8_text, int width, EdHyphenFn hyph, void *hyph_data);
+
 /* Insert a text file at the cursor position (with undo) */
 int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in);
 /* Export the current block selection to a text file */

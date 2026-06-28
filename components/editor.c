@@ -4309,12 +4309,17 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
     const char *last_seg = NULL;
     wchar_t *last_wcs = NULL;
     int last_wlen;
+    int orig_row;
+    int orig_col;
 
     if (!ed || !utf8_text)
         return -1;
 
     if (!*utf8_text)
         return 0;
+
+    orig_row = ed->row;
+    orig_col = ed->col;
 
     cur = ed->lines[ed->row];
 
@@ -4398,7 +4403,9 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
     }
 
     ed->row = new_row;
-    ed->col = new_col;
+
+    /* Single-line paste: cursor advances by pasted text length; multi-line paste already computed absolute new_col */
+    ed->col = new_col + (new_row == orig_row ? orig_col : 0);
     ed->modified = 1;
 
     ed_clamp(ed);

@@ -737,24 +737,26 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         {
             int j;
             int space_found = 0;
+            int space_break_at = line_len;
+            int hyph_break_at = -1;
 
+            /* Find a space-based break point */
             for (j = line_len; j > avail / 3; j--)
             {
                 if (joined[pos + j - 1] == L' ')
                 {
-                    break_at = j;
+                    space_break_at = j;
                     space_found = 1;
                     break;
                 }
             }
 
-            /* No space and hyphenator available: split word with hyphen */
-            if (!space_found && hyph)
+            /* If hyphenator available, see if a hyphenation break fills the line better */
+            if (hyph)
             {
                 size_t ws, we;
                 char *uw = NULL;
 
-                /* Find word boundaries: ws back, we forward */
                 ws = pos + (size_t)line_len;
 
                 while (ws > pos && joined[ws - 1] != L' ')
@@ -784,21 +786,23 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
                         {
                             int idx;
 
-                            /* Pick rightmost break that fits (avail - 1) */
                             for (idx = hn - 1; idx >= 0; idx--)
                             {
                                 int cco = utf8_charcount(uw, hp[idx]);
-                                int wc_pos = (int)ws + cco; /* in joined */
+                                int wc_pos = (int)ws + cco;
                                 int line_chars = wc_pos - (int)pos;
+                                int word_len = (int)(we - ws);
 
-                                if (line_chars >= avail) /* leave 1 col for '-' */
+                                if (line_chars >= avail)
                                     continue;
 
                                 if (line_chars <= 0)
                                     break;
 
-                                break_at = line_chars;
-                                hyph_inserted = 1;
+                                if (cco < 3 || (word_len - cco) < 3)
+                                    continue;
+
+                                hyph_break_at = line_chars;
                                 break;
                             }
                         }
@@ -806,6 +810,17 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
                         free(uw);
                     }
                 }
+            }
+
+            /* Prefer hyphenation if it fills the line at least as much as the space break */
+            if (hyph_break_at > 0 && hyph_break_at >= space_break_at)
+            {
+                break_at = hyph_break_at;
+                hyph_inserted = 1;
+            }
+            else if (space_found)
+            {
+                break_at = space_break_at;
             }
         }
 
@@ -996,6 +1011,259 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
 
         ed_prefix_invalidate(ed);
     }
+
+    return 0;
+}
+
+/* Helper: find paragraph bounds around ed->row using the same rules as ed_rewrap_paragraph_ex */
+static void paste_rewrap_bounds(Ed *ed, int *out_first, int *out_last, wchar_t *prefix, int *prefix_len)
+{
+    const wchar_t *line = NULL;
+    int first, last;
+    int pl;
+
+    *out_first = ed->row;
+    *out_last = ed->row;
+    *prefix_len = 0;
+    prefix[0] = L'\0';
+
+    if (!ed || ed->count <= 0)
+        return;
+
+    line = ed->lines[ed->row]->wcs;
+
+    /* If current line is empty, search upward for a non-empty line to anchor the paragraph */
+    if (!line || !line[0])
+    {
+        int anchor = ed->row;
+
+        while (anchor > 0)
+        {
+            anchor--;
+
+            if (ed->lines[anchor]->wcs && ed->lines[anchor]->wcs[0])
+                break;
+        }
+
+        line = ed->lines[anchor]->wcs;
+        *out_first = anchor;
+        *out_last = anchor;
+    }
+
+    if (!line || !line[0])
+        return;
+
+    pl = ed_detect_quote_prefix(line);
+
+    if (pl >= 16)
+        pl = 15;
+
+    if (pl > 0)
+    {
+        wmemcpy(prefix, line, (size_t)pl);
+        prefix[pl] = L'\0';
+    }
+
+    *prefix_len = pl;
+
+    first = *out_first;
+
+    while (first > 0)
+    {
+        const wchar_t *l = ed->lines[first - 1]->wcs;
+
+        if (!l || !l[0])
+            break;
+
+        if (pl > 0)
+        {
+            if (wcsncmp(l, prefix, (size_t)pl) != 0)
+                break;
+        }
+        else
+        {
+            int p = 0;
+
+            while (p < 8 && l[p] == L' ')
+                p++;
+
+            if (l[p] == L'>')
+                break;
+        }
+
+        first--;
+    }
+
+    last = ed->row;
+
+    while (last < ed->count - 1)
+    {
+        const wchar_t *l = ed->lines[last + 1]->wcs;
+
+        if (!l || !l[0])
+            break;
+
+        if (pl > 0)
+        {
+            if (wcsncmp(l, prefix, (size_t)pl) != 0)
+                break;
+        }
+        else
+        {
+            int p = 0;
+
+            while (p < 8 && l[p] == L' ')
+                p++;
+
+            if (l[p] == L'>')
+                break;
+        }
+
+        last++;
+    }
+
+    *out_first = first;
+    *out_last = last;
+}
+
+/* Paste text and rewrap the paragraph as a single undo operation */
+int ed_paste_and_rewrap(Ed *ed, const char *utf8_text, int width, EdHyphenFn hyph, void *hyph_data)
+{
+    int first, last;
+    wchar_t prefix[16];
+    int prefix_len;
+    char *snapshot_before = NULL;
+    char *snapshot_after = NULL;
+    int cursor_row_before, cursor_col_before;
+    int cursor_row_after, cursor_col_after;
+    int old_count, new_count;
+    UndoGroup *g = NULL;
+
+    if (!ed || !utf8_text || width < 20 || ed->count <= 0)
+        return -1;
+
+    int first_before, last_before;
+    int doc_count_before;
+
+    cursor_row_before = ed->row;
+    cursor_col_before = ed->col;
+
+    paste_rewrap_bounds(ed, &first, &last, prefix, &prefix_len);
+
+    first_before = first;
+    last_before = last;
+    old_count = last - first + 1;
+    doc_count_before = ed->count;
+
+    snapshot_before = ed_range_to_string(ed, first, last + 1);
+
+    if (!snapshot_before)
+        return -1;
+
+    /* Block individual undo operations while we paste and rewrap */
+    ed->undo_snapshot_mode = 1;
+
+    if (ed_paste_text(ed, utf8_text) != 0)
+    {
+        ed->undo_snapshot_mode = 0;
+        free(snapshot_before);
+        return -1;
+    }
+
+    if (ed_rewrap_paragraph_ex(ed, width, hyph, hyph_data) != 0)
+    {
+        ed->undo_snapshot_mode = 0;
+        free(snapshot_before);
+        return -1;
+    }
+
+    ed->undo_snapshot_mode = 0;
+
+    /* Lines changed: old_count replaced by new_count; snapshot starts at the original first row */
+    new_count = ed->count - (doc_count_before - old_count);
+    first = first_before;
+    last = first_before + new_count - 1;
+
+    snapshot_after = ed_range_to_string(ed, first, last + 1);
+
+    if (!snapshot_after)
+    {
+        free(snapshot_before);
+        return -1;
+    }
+
+    cursor_row_after = ed->row;
+    cursor_col_after = ed->col;
+
+    /* After paste+rewrap, cursor should be at the end of the pasted text, not at column 0 of the last line */
+    if (last >= 0 && last < ed->count)
+    {
+        cursor_row_after = last;
+        cursor_col_after = ed->lines[last]->len;
+    }
+
+    /* Move visible cursor to the end of the pasted text */
+    ed->row = cursor_row_after;
+    ed->col = cursor_col_after;
+
+    ed_clamp(ed);
+    ed_ensure_visible(ed);
+
+    /* Push single undo group for the whole paste+rewrap */
+    ed_redo_clear(ed);
+
+    if (ed_undo_open_group(ed) != 0)
+    {
+        free(snapshot_before);
+        free(snapshot_after);
+        return -1;
+    }
+
+    if (ed->undo_top <= 0)
+    {
+        free(snapshot_before);
+        free(snapshot_after);
+        return -1;
+    }
+
+    g = &ed->undo_stack[ed->undo_top - 1];
+    g->cur_row = cursor_row_before;
+    g->cur_col = cursor_col_before;
+    g->end_row = cursor_row_after;
+    g->end_col = cursor_col_after;
+
+    if (g->count >= g->cap)
+    {
+        int nc = (g->cap > 0) ? (g->cap * 2) : 4;
+        UndoOp *t = (UndoOp *)realloc(g->ops, (size_t)nc * sizeof(UndoOp));
+
+        if (!t)
+        {
+            free(snapshot_before);
+            free(snapshot_after);
+            ed->undo_open = 0;
+            return -1;
+        }
+
+        g->ops = t;
+        g->cap = nc;
+    }
+
+    g->ops[g->count].type = OP_SNAPSHOT_RANGE;
+    g->ops[g->count].row = first;
+    g->ops[g->count].col = cursor_col_before;
+    g->ops[g->count].len = 0;
+    g->ops[g->count].join_col = 0;
+    g->ops[g->count].text = NULL;
+    g->ops[g->count].utf8_snapshot = snapshot_before;
+    g->ops[g->count].utf8_snapshot_new = snapshot_after;
+    g->ops[g->count].hard_wrap_mode = ed->hard_wrap;
+    g->ops[g->count].end_row = old_count;
+    g->ops[g->count].end_col = new_count;
+    g->count++;
+    ed->undo_open = 0;
+
+    ed_prefix_invalidate(ed);
 
     return 0;
 }

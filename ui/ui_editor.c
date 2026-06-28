@@ -1131,17 +1131,31 @@ char *wrap_paste_text(TeApp *app, const char *utf8, int col)
     return result;
 }
 
-/* Effective wrap column. Clamp to COLS-1; 0=disabled */
+/* Effective wrap column. Clamp to visible body width; 0=disabled */
 int editor_eff_wrap(const TeApp *app)
 {
     int cfgw = app->wrap_col;
-    int limit = COLS - 1; /* one column margin */
+    int ln_offset = 0;
+    int limit;
 
     if (cfgw <= 0)
         return 0; /* AUTOWRAP disabled */
 
     if (COLS <= 10)
         return 0; /* Too narrow: scroll instead */
+
+    if (te_app_get_show_line_numbers(app))
+    {
+        EdInfo info;
+
+        ed_get_info(te_app_get_editor(app), &info);
+        ln_offset = editor_body_offset(app, info.line_count);
+    }
+
+    limit = COLS - ln_offset - 1; /* one column margin */
+
+    if (limit < 20)
+        limit = 20;
 
     if (cfgw > limit)
         return limit; /* Screen narrower than configured */
@@ -4173,6 +4187,7 @@ void ui_editor_run(TeApp *app)
                 char *wrapped = NULL;
                 const char *to_insert = buf;
                 int reported_len;
+                int did_rewrap = 0;
 
                 ed_save_undo(te_app_get_editor(app));
 
@@ -4190,7 +4205,41 @@ void ui_editor_run(TeApp *app)
                     }
                 }
 
-                ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
+                if (app->hard_wrap)
+                {
+                    int pw = editor_eff_wrap(app);
+
+                    if (pw > 0)
+                    {
+                        int rc;
+
+#ifdef HAVE_HYPHEN
+                        if (app->hyph_wrap_enabled && app->hyph_handle)
+                            rc = ed_paste_and_rewrap(te_app_get_editor(app), to_insert, pw, ui_hyph_thunk, app->hyph_handle);
+                        else
+#endif
+                            rc = ed_paste_and_rewrap(te_app_get_editor(app), to_insert, pw, NULL, NULL);
+
+                        if (rc != 0)
+                        {
+                            free(buf);
+
+                            if (wrapped)
+                                free(wrapped);
+
+                            screen_dirty = 1;
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
+                    }
+                }
+                else
+                {
+                    ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
+                }
 
                 clear_search_highlights(app);
                 soft_reset_desired();
@@ -4318,6 +4367,7 @@ void ui_editor_run(TeApp *app)
                     char *wrapped = NULL;
                     const char *to_insert = rapid_buf;
                     int reported_len;
+                    int did_rewrap = 0;
 
                     ed_save_undo(te_app_get_editor(app));
 
@@ -4335,7 +4385,41 @@ void ui_editor_run(TeApp *app)
                         }
                     }
 
-                    ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
+                    if (app->hard_wrap)
+                    {
+                        int pw = editor_eff_wrap(app);
+
+                        if (pw > 0)
+                        {
+                            int rc;
+
+#ifdef HAVE_HYPHEN
+                            if (app->hyph_wrap_enabled && app->hyph_handle)
+                                rc = ed_paste_and_rewrap(te_app_get_editor(app), to_insert, pw, ui_hyph_thunk, app->hyph_handle);
+                            else
+#endif
+                                rc = ed_paste_and_rewrap(te_app_get_editor(app), to_insert, pw, NULL, NULL);
+
+                            if (rc != 0)
+                            {
+                                free(rapid_buf);
+
+                                if (wrapped)
+                                    free(wrapped);
+
+                                screen_dirty = 1;
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
+                        }
+                    }
+                    else
+                    {
+                        ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
+                    }
 
                     clear_search_highlights(app);
                     soft_reset_desired();

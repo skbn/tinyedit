@@ -24,14 +24,6 @@
 #include "te.h"
 #include "ui_files.h"
 
-#ifdef HAVE_HYPHEN
-
-#if defined(PLATFORM_AMIGA)
-#include "../spellchecker/hyph.h"
-#else
-#include "../hyph_wrap/hyph_wrap.h"
-#endif
-
 #define SIF_MAX_HITS 500
 
 typedef struct
@@ -44,8 +36,16 @@ typedef struct
     int truncated; /* hit SIF_MAX_HITS limit */
 } SifResults;
 
+#ifdef HAVE_HYPHEN
+
+#if defined(PLATFORM_AMIGA)
+#include "../spellchecker/hyph.h"
+#else
+#include "../hyph_wrap/hyph_wrap.h"
+#endif
+
 /* Thunk adapting hyph_breakpoints() to EdHyphenFn. user_data is HyphDict* */
-static int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count)
+int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count)
 {
     HyphDict *h = (HyphDict *)user_data;
     int cap, n;
@@ -645,6 +645,7 @@ int paste(TeApp *app)
         {
             char *wrapped = NULL;
             const char *to_insert = clip;
+            int pasted = 0;
 
             /* HARD-WRAP only: reflow pasted text; soft-wrap inserts verbatim */
             if (app->hard_wrap)
@@ -657,10 +658,27 @@ int paste(TeApp *app)
 
                     if (wrapped)
                         to_insert = wrapped;
+
+#ifdef HAVE_HYPHEN
+                    if (app->hyph_wrap_enabled && app->hyph_handle)
+                        pasted = ed_paste_and_rewrap(te_app_get_editor(app), to_insert, pw, ui_hyph_thunk, app->hyph_handle) == 0;
+                    else
+#endif
+                        pasted = ed_paste_and_rewrap(te_app_get_editor(app), to_insert, pw, NULL, NULL) == 0;
+
+                    if (!pasted)
+                        ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
+                }
+                else
+                {
+                    ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
                 }
             }
+            else
+            {
+                ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
+            }
 
-            ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
             clear_search_highlights(app);
             soft_reset_desired();
 
@@ -899,8 +917,11 @@ int ui_editor_export(TeApp *app)
 
 int rewrap(TeApp *app)
 {
-    int col = (app->wrap_col > 0) ? app->wrap_col : 75;
+    int col = editor_eff_wrap(app);
     int rc;
+
+    if (col <= 0)
+        col = (app->wrap_col > 0) ? app->wrap_col : 75;
 
 #ifdef HAVE_HYPHEN
     /* Use hyphenation when enabled and dict loaded, otherwise plain rewrap (breaks at spaces) */

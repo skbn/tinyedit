@@ -17,6 +17,10 @@
 /* Additional helper functions */
 int charset_select(TeApp *app);
 
+#ifdef HAVE_HYPHEN
+int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count);
+#endif
+
 void clear_search_highlights(TeApp *app);
 
 /* Functions from ui_editor.c needed by ui_editor_helper.c */
