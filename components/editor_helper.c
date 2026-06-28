@@ -535,6 +535,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
     int old_count = 0;
     int doc_count_before = 0;
     int prev_was_wrap_hyphen = 0;
+    int inserted = 0;
 
     if (!ed || width < 20 || ed->count <= 0)
         return -1;
@@ -836,14 +837,13 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
     free(joined);
 
     /* Save snapshot of affected paragraph only (not whole doc) for efficient undo */
-    old_count = 0;
+    old_count = last - first + 1;
     doc_count_before = ed->count;
 
     if (need_snapshot)
     {
         cursor_row_before = ed->row;
         cursor_col_before = ed->col;
-        old_count = last - first + 1;
 
         snapshot_before = ed_range_to_string(ed, first, last + 1);
 
@@ -857,31 +857,59 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         ed->undo_snapshot_mode = 1;
     }
 
-    /* Delete the old paragraph block */
-    ed_set_pos(ed, first, 0);
-
-    for (i = first; i <= last; i++)
-        ed_delete_line(ed);
-
-    ed_set_pos(ed, first, 0);
-
     outu = wcs_to_utf8(outw, (int)out_used);
 
     free(outw);
 
-    if (outu)
+    if (!outu)
     {
-        ed_paste_text(ed, outu);
-        free(outu);
+        free(snapshot_before);
+
+        ed->undo_snapshot_mode = 0;
+        return -1;
     }
+
+    inserted = ed_replace_range_from_utf8(ed, first, old_count, outu);
+
+    if (inserted > 0)
+    {
+        const char *last_nl = strrchr(outu, '\n');
+
+        if (last_nl && last_nl[1] == '\0')
+        {
+            cursor_row_after = first + inserted - 1;
+            cursor_col_after = 0;
+        }
+        else
+        {
+            const char *last_seg = last_nl ? last_nl + 1 : outu;
+            wchar_t *last_wcs = NULL;
+            int last_wlen = 0;
+
+            cursor_row_after = first + inserted - 1;
+            last_wcs = utf8_to_wcs(last_seg, &last_wlen);
+            cursor_col_after = last_wcs ? last_wlen : 0;
+
+            free(last_wcs);
+        }
+    }
+    else
+    {
+        cursor_row_after = first;
+        cursor_col_after = 0;
+    }
+
+    ed->row = cursor_row_after;
+    ed->col = cursor_col_after;
+    ed->modified = 1;
+    ed_prefix_invalidate_from(ed, first);
+
+    free(outu);
 
     /* Disable snapshot mode and save snapshot after rewrap if needed */
     if (need_snapshot)
     {
         int new_count;
-
-        cursor_row_after = ed->row;
-        cursor_col_after = ed->col;
 
         ed->undo_snapshot_mode = 0;
 
@@ -908,6 +936,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
         {
             free(snapshot_before);
             free(snapshot_after);
+
             ed->undo_snapshot_mode = 0;
 
             return -1;
@@ -937,6 +966,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, EdHyphenFn hyph, void *hyph_data)
             {
                 free(snapshot_before);
                 free(snapshot_after);
+
                 ed->undo_snapshot_mode = 0;
 
                 return -1;

@@ -1167,6 +1167,100 @@ static int lineno_width(int line_count)
     return width + 1; /* space after number */
 }
 
+#ifdef HAVE_HUNSPELL
+/* Check whether a word is misspelled, ignoring words split across two lines by a trailing hyphen (e.g. "adqui-" / "rido") */
+static int spell_word_incorrect(TeApp *app, int line_idx, const wchar_t *line, int line_len, int word_start, int word_end)
+{
+    int word_len = word_end - word_start;
+    int incorrect = 0;
+    int joined_len = 0;
+    int i, j;
+    int next_end = 0;
+    int prev_word_end = 0;
+    int prev_word_start = 0;
+    int next_len = 0;
+    int prev_len = 0;
+    wchar_t joined[512];
+    const wchar_t *next_line = NULL;
+    const wchar_t *prev_line = NULL;
+    Ed *ed = NULL;
+
+    if (word_len <= 1 || !app || !app->spell_handle || !app->spell_active)
+        return 0;
+
+    incorrect = ui_spell_check_word_simple(app, &line[word_start], word_len);
+
+    if (!incorrect)
+        return 0;
+
+    ed = te_app_get_editor(app);
+
+    if (!ed || line_idx < 0 || line_idx >= ed->count)
+        return incorrect;
+
+    /* Word followed by '-' at EOL and continuation on next line */
+    if (word_end < line_len && line[word_end] == L'-' && word_end + 1 == line_len && line_idx + 1 < ed->count)
+    {
+        next_line = ed_line_wcs(ed, line_idx + 1);
+        next_len = next_line ? ed_line_len(ed, line_idx + 1) : -1;
+
+        if (next_len > 0)
+        {
+            while (next_end < next_len && iswalnum(next_line[next_end]))
+                next_end++;
+
+            if (next_end > 0 && iswlower(next_line[0]))
+            {
+                for (i = 0; i < word_len && joined_len < 510; i++)
+                    joined[joined_len++] = line[word_start + i];
+
+                for (j = 0; j < next_end && joined_len < 510; j++)
+                    joined[joined_len++] = next_line[j];
+
+                joined[joined_len] = L'\0';
+
+                if (!ui_spell_check_word_simple(app, joined, joined_len))
+                    incorrect = 0;
+            }
+        }
+    }
+
+    /* Word at column 0 preceded by "word-" on previous line */
+    if (incorrect && word_start == 0 && line_idx > 0)
+    {
+        prev_line = ed_line_wcs(ed, line_idx - 1);
+        prev_len = prev_line ? ed_line_len(ed, line_idx - 1) : -1;
+
+        if (prev_len >= 2 && prev_line[prev_len - 1] == L'-')
+        {
+            prev_word_end = prev_len - 1;
+            prev_word_start = prev_word_end;
+
+            while (prev_word_start > 0 && iswalnum(prev_line[prev_word_start - 1]))
+                prev_word_start--;
+
+            if (prev_word_end > prev_word_start)
+            {
+                joined_len = 0;
+
+                for (j = prev_word_start; j < prev_word_end && joined_len < 510; j++)
+                    joined[joined_len++] = prev_line[j];
+
+                for (i = 0; i < word_len && joined_len < 510; i++)
+                    joined[joined_len++] = line[word_start + i];
+
+                joined[joined_len] = L'\0';
+
+                if (!ui_spell_check_word_simple(app, joined, joined_len))
+                    incorrect = 0;
+            }
+        }
+    }
+
+    return incorrect;
+}
+#endif
+
 /* Draw editor body */
 static void draw_body(TeApp *app)
 {
@@ -1583,7 +1677,7 @@ static void draw_body(TeApp *app)
                                 int marked = 0;
 
                                 /* Ignore single-character words */
-                                if (spell_on && word_len > 1 && ui_spell_check_word_simple(app, &l[word_start], word_len))
+                                if (spell_on && word_len > 1 && spell_word_incorrect(app, li, l, len, word_start, word_end))
                                 {
                                     attron(COLOR_PAIR(COL_SPELL_CURRENT));
                                     mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth_ex(&l[seg_start], word_start - seg_start, seg_start_vcol, s_tab_width), &l[word_start], word_len);
@@ -1871,7 +1965,7 @@ static void draw_body(TeApp *app)
                         int marked = 0;
 
                         /* Ignore single-character words like word processors do */
-                        if (spell_on && word_len > 1 && ui_spell_check_word_simple(app, &wl[word_start], word_len))
+                        if (spell_on && word_len > 1 && spell_word_incorrect(app, line_idx, wl, line_len, word_start, word_end))
                         {
                             attron(COLOR_PAIR(COL_SPELL_CURRENT));
                             mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth_ex(wl, word_start, 0, s_tab_width), &wl[word_start], word_len);

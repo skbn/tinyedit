@@ -254,6 +254,7 @@ void ed_redo_clear(Ed *ed);
 void ed_clear_undo_redo(Ed *ed);
 int ed_undo_open_group(Ed *ed);
 int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col);
+int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text);
 
 /* Helper functions from editor_helper.c */
 wchar_t *line_to_wcs(EdLine *ln);

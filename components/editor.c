@@ -3488,15 +3488,11 @@ static int count_utf8_lines(const char *utf8_text)
             p++;
     }
 
-    /* A trailing newline implies an empty final line */
-    if (p > utf8_text && p[-1] == '\n')
-        count++;
-
     return count;
 }
 
 /* Replace line range with UTF-8 text for OP_SNAPSHOT_RANGE undo/redo */
-static int doc_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text)
+int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text)
 {
     const char *p = NULL;
     int i;
@@ -3785,7 +3781,7 @@ static int apply_group_reverse(Ed *ed, UndoGroup *g)
                 int start = op->row;
                 int newc = op->end_col;
 
-                doc_replace_range_from_utf8(ed, start, newc, op->utf8_snapshot);
+                ed_replace_range_from_utf8(ed, start, newc, op->utf8_snapshot);
                 ed_set_pos(ed, op->row, op->col);
 
                 if (start < min_row)
@@ -3974,7 +3970,7 @@ static int apply_group_forward(Ed *ed, UndoGroup *g)
                 int start = op->row;
                 int oldc = op->end_row;
 
-                doc_replace_range_from_utf8(ed, start, oldc, op->utf8_snapshot_new);
+                ed_replace_range_from_utf8(ed, start, oldc, op->utf8_snapshot_new);
 
                 /* Jump to end cursor position stored when snapshot was taken */
                 ed_set_pos(ed, op->row, op->col);
@@ -4363,7 +4359,7 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
     suffix = NULL;
 
     /* Replace the current line with the combined text (O(N) bulk insert) */
-    inserted = doc_replace_range_from_utf8(ed, ed->row, 1, combined);
+    inserted = ed_replace_range_from_utf8(ed, ed->row, 1, combined);
 
     free(combined);
     combined = NULL;

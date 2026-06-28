@@ -33,6 +33,18 @@
 extern int ui_popup_list(const char *title, const char **items, int count, int initial);
 
 #ifdef HAVE_MYTHES
+/* Information about a word split across two lines by a hyphen */
+typedef struct
+{
+    int first_row;
+    int first_start;
+    int first_end; /* column of '-' on first_row */
+    int second_row;
+    int second_start;
+    int second_end;
+    wchar_t joined[256];
+    int joined_len;
+} ThesHyphenSplit;
 
 static int thes_is_word_char(wchar_t c)
 {
@@ -41,6 +53,119 @@ static int thes_is_word_char(wchar_t c)
 
     if (c == L'\'' || c == L'-')
         return 1;
+
+    return 0;
+}
+
+/* Detect if the word under the cursor is one half of a hyphen-split word */
+static int thes_hyphen_split_find(Ed *ed, EdInfo *info, const wchar_t *line, int line_len, int ws, int we, ThesHyphenSplit *hs)
+{
+    int word_len = we - ws;
+    int hyphen_col = -1;
+    int first_word_len = 0;
+
+    if (!ed || !info || !line || !hs)
+        return 0;
+
+    if (word_len <= 0 || word_len >= 128)
+        return 0;
+
+    memset(hs, 0, sizeof(*hs));
+
+    /* Case A: word at EOL followed by '-' and continuation on next line */
+    /* Cursor on the word itself; '-' is the next character at EOL */
+    if (we < line_len && line[we] == L'-' && we + 1 == line_len && info->row + 1 < info->line_count)
+    {
+        hyphen_col = we;
+        first_word_len = we - ws;
+    }
+    /* Cursor includes the trailing '-' (e.g. cursor is on the hyphen) */
+    else if (we == line_len && word_len > 0 && line[we - 1] == L'-' && info->row + 1 < info->line_count)
+    {
+        hyphen_col = we - 1;
+        first_word_len = word_len - 1;
+    }
+
+    if (hyphen_col >= 0 && first_word_len > 0)
+    {
+        const wchar_t *next_line = ed_line_wcs(ed, info->row + 1);
+
+        if (next_line)
+        {
+            int next_len = ed_line_len(ed, info->row + 1);
+            int next_end = 0;
+
+            while (next_end < next_len && thes_is_word_char(next_line[next_end]))
+                next_end++;
+
+            /* Continuation must start lowercase */
+            if (next_end > 0 && iswlower(next_line[0]))
+            {
+                int i, j;
+
+                hs->first_row = info->row;
+                hs->first_start = ws;
+                hs->first_end = hyphen_col;
+                hs->second_row = info->row + 1;
+                hs->second_start = 0;
+                hs->second_end = next_end;
+
+                for (i = 0; i < first_word_len && hs->joined_len < 254; i++)
+                    hs->joined[hs->joined_len++] = line[ws + i];
+
+                for (j = 0; j < next_end && hs->joined_len < 254; j++)
+                    hs->joined[hs->joined_len++] = next_line[j];
+
+                hs->joined[hs->joined_len] = L'\0';
+
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    /* Case B: word at column 0 preceded by "word-" on previous line */
+    if (ws == 0 && info->row > 0 && we > 0 && iswlower(line[0]))
+    {
+        const wchar_t *prev_line = ed_line_wcs(ed, info->row - 1);
+
+        if (prev_line)
+        {
+            int prev_len = ed_line_len(ed, info->row - 1);
+
+            if (prev_len >= 2 && prev_line[prev_len - 1] == L'-')
+            {
+                int prev_word_end = prev_len - 1;
+                int prev_word_start = prev_word_end;
+
+                while (prev_word_start > 0 && thes_is_word_char(prev_line[prev_word_start - 1]))
+                    prev_word_start--;
+
+                if (prev_word_end > prev_word_start)
+                {
+                    int i, j;
+
+                    hs->first_row = info->row - 1;
+                    hs->first_start = prev_word_start;
+                    hs->first_end = prev_word_end;
+                    hs->second_row = info->row;
+                    hs->second_start = ws;
+                    hs->second_end = we;
+
+                    for (j = prev_word_start; j < prev_word_end && hs->joined_len < 254; j++)
+                        hs->joined[hs->joined_len++] = prev_line[j];
+
+                    for (i = 0; i < word_len && hs->joined_len < 254; i++)
+                        hs->joined[hs->joined_len++] = line[ws + i];
+
+                    hs->joined[hs->joined_len] = L'\0';
+
+                    return 1;
+                }
+            }
+        }
+    }
 
     return 0;
 }
@@ -116,6 +241,10 @@ int ui_thes_lookup_word(UI_APP_T *app)
     const char *thes_encoding = NULL;
     char utf8_buf[1024];
     char defn_utf8_buf[1024];
+    ThesHyphenSplit hs;
+    int is_hyphen_split = 0;
+    char *joined_u8 = NULL;
+    const char *check_u8 = NULL;
 
     if (!app)
         return 0;
@@ -168,16 +297,36 @@ int ui_thes_lookup_word(UI_APP_T *app)
     if (!u8)
         return 0;
 
-    nmeanings = thes_lookup(UI_APP_THES_HANDLE(app), u8, &meanings);
+    check_u8 = u8;
+
+    /* Join hyphen-split halves for thesaurus lookup */
+    if (thes_hyphen_split_find(ed, &info, line, line_len, ws, we, &hs))
+    {
+        joined_u8 = wcs_to_utf8(hs.joined, hs.joined_len);
+
+        if (joined_u8)
+        {
+            is_hyphen_split = 1;
+            check_u8 = joined_u8;
+        }
+    }
+
+    nmeanings = thes_lookup(UI_APP_THES_HANDLE(app), check_u8, &meanings);
 
     if (nmeanings <= 0 || !meanings)
     {
-        UI_APP_STATUS_FN(app, "No synonyms for '%s'", u8);
+        UI_APP_STATUS_FN(app, "No synonyms for '%s'", check_u8);
 
+        free(joined_u8);
         free(u8);
 
         return 0;
     }
+
+    /* We no longer need the joined lookup string; thesaurus owns meanings now */
+    free(joined_u8);
+
+    joined_u8 = NULL;
 
     /* Flatten: count total non-NULL synonyms across all meanings */
     total_items = 0;
@@ -196,7 +345,7 @@ int ui_thes_lookup_word(UI_APP_T *app)
     if (total_items == 0)
     {
         thes_free_meanings(UI_APP_THES_HANDLE(app), meanings, nmeanings);
-        UI_APP_STATUS_FN(app, "No synonyms for '%s'", u8);
+        UI_APP_STATUS_FN(app, "No synonyms for '%s'", check_u8);
 
         free(u8);
 
@@ -319,13 +468,38 @@ int ui_thes_lookup_word(UI_APP_T *app)
             if (wsyn)
             {
                 ed_save_undo(ed);
-                ed_set_pos(ed, info.row, ws);
 
-                for (i = 0; i < (we - ws); i++)
-                    ed_delete(ed);
+                if (is_hyphen_split)
+                {
+                    int del_count;
 
-                for (i = 0; i < wlen; i++)
-                    ed_insert_char(ed, wsyn[i]);
+                    /* Remove first half (including the hyphen) on the first row */
+                    ed_set_pos(ed, hs.first_row, hs.first_start);
+                    del_count = (hs.first_end + 1) - hs.first_start;
+
+                    for (i = 0; i < del_count; i++)
+                        ed_delete(ed);
+
+                    for (i = 0; i < wlen; i++)
+                        ed_insert_char(ed, wsyn[i]);
+
+                    /* Remove the second half on the following row */
+                    ed_set_pos(ed, hs.second_row, hs.second_start);
+                    del_count = hs.second_end - hs.second_start;
+
+                    for (i = 0; i < del_count; i++)
+                        ed_delete(ed);
+                }
+                else
+                {
+                    ed_set_pos(ed, info.row, ws);
+
+                    for (i = 0; i < (we - ws); i++)
+                        ed_delete(ed);
+
+                    for (i = 0; i < wlen; i++)
+                        ed_insert_char(ed, wsyn[i]);
+                }
 
                 free(wsyn);
 
