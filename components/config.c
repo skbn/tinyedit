@@ -1192,6 +1192,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "ASSIST_SMART_QUOTES") == 0 ||
                 strcasecmp(word, "ASSIST_AUTO_CAP") == 0 ||
                 strcasecmp(word, "ASSIST_REPEAT_CHECK") == 0 ||
+                strcasecmp(word, "WORD_MOVE_MODE") == 0 ||
                 strcasecmp(word, "COLOR") == 0 ||
                 strcasecmp(word, "COLORMAP") == 0
 #ifdef HAVE_HUNSPELL
@@ -1204,7 +1205,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 #endif
 #endif
 #ifdef HAVE_TRANSLATE
-                || strcasecmp(word, "TRANSLATE_ENABLED") == 0 || strcasecmp(word, "TRANSLATE_BACKEND") == 0 || strcasecmp(word, "TRANSLATE_ENDPOINT") == 0 || strcasecmp(word, "TRANSLATE_API_KEY") == 0 || strcasecmp(word, "TRANSLATE_EMAIL") == 0 || strcasecmp(word, "TRANSLATE_FROM_LANG") == 0 || strcasecmp(word, "TRANSLATE_TO_LANG") == 0 || strcasecmp(word, "TRANSLATE_TIMEOUT") == 0
+                || strcasecmp(word, "TRANSLATE_ENABLED") == 0 || strcasecmp(word, "TRANSLATE_BACKEND") == 0 || strcasecmp(word, "TRANSLATE_ENDPOINT") == 0 || strcasecmp(word, "TRANSLATE_API_KEY") == 0 || strcasecmp(word, "TRANSLATE_EMAIL") == 0 || strcasecmp(word, "TRANSLATE_FROM_LANG") == 0 || strcasecmp(word, "TRANSLATE_TO_LANG") == 0 || strcasecmp(word, "TRANSLATE_TIMEOUT") == 0 || strcasecmp(word, "STARDICT_PATH") == 0
 #endif
             )
             {
