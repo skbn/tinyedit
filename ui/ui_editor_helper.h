@@ -32,6 +32,11 @@ char *wrap_paste_text(TeApp *app, const char *utf8, int col);
 /* Left margin for editor body with line numbers */
 int editor_body_offset(const TeApp *app, int line_count);
 
+/* Autosave swap helpers */
+void ui_editor_swp_remove(const char *path);
+int ui_editor_swp_recover(TeApp *app, const char *path);
+void ui_editor_swp_cleanup_all(TeApp *app);
+
 /* Function key implementations */
 int ui_editor_detect_wrap_hyphens(TeApp *app);
 int search_prev(TeApp *app);

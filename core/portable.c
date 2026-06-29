@@ -1371,6 +1371,29 @@ int pf_remove_file(const char *path)
 
 #endif
 
+/* Remove the autosave swap companion for a file */
+int pf_remove_swp(const char *path)
+{
+    char swp_path[1024];
+    long size;
+
+    if (!path || !path[0])
+        return 0;
+
+    pf_swap_path(path, swp_path, sizeof(swp_path));
+
+    if (!swp_path[0])
+        return 0;
+
+    size = pf_get_file_size(swp_path);
+
+    /* Swap does not exist */
+    if (size < 0)
+        return 0;
+
+    return pf_remove_file(swp_path);
+}
+
 #if defined(PLATFORM_WIN32)
 wchar_t *pf_utf8_to_utf16(const char *s)
 {

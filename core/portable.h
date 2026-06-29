@@ -58,6 +58,9 @@ int pf_atomic_rename(const char *from, const char *to);
 /* Portable file removal */
 int pf_remove_file(const char *path);
 
+/* Remove the autosave swap companion for a file */
+int pf_remove_swp(const char *path);
+
 /* Portable binary file copy */
 int pf_copy_file(const char *src, const char *dst);
 

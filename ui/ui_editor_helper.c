@@ -1507,3 +1507,89 @@ int do_search_in_files(TeApp *app)
 
     return 1;
 }
+
+/* Remove the autosave swap companion for a file */
+void ui_editor_swp_remove(const char *path)
+{
+    pf_remove_swp(path);
+}
+
+/* Check for a newer swap file and offer to recover it */
+int ui_editor_swp_recover(TeApp *app, const char *path)
+{
+    char swp_path[1024];
+    long swp_mtime;
+    long orig_mtime;
+    FILE *fp = NULL;
+    int rc;
+    Ed *ed = NULL;
+
+    if (!app || !path || !path[0])
+        return 0;
+
+    pf_swap_path(path, swp_path, sizeof(swp_path));
+
+    if (!swp_path[0])
+        return 0;
+
+    swp_mtime = pf_get_file_mtime(swp_path);
+
+    /* No swap file */
+    if (swp_mtime < 0)
+        return 0;
+
+    orig_mtime = pf_get_file_mtime(path);
+
+    /* Swap is older than original, remove stale swap */
+    if (orig_mtime >= 0 && swp_mtime <= orig_mtime)
+    {
+        pf_remove_swp(path);
+        return 0;
+    }
+
+    /* User declined, discard stale swap */
+    if (ui_popup_confirm("Recover", "Auto-save swap found, recover it?") != 1)
+    {
+        pf_remove_swp(path);
+        return 0;
+    }
+
+    ed = te_app_get_editor(app);
+
+    if (!ed)
+        return -1;
+
+    fp = fopen(swp_path, "rb");
+
+    if (!fp)
+        return -1;
+
+    ed_clear_undo_redo(ed);
+    rc = ed_load_stream(ed, fp);
+    fclose(fp);
+
+    if (rc != 0)
+        return -1;
+
+    te_app_set_filename(app, path);
+    ed_set_modified(ed, 1);
+
+    return 1;
+}
+
+/* Remove swap companions for all tabs in the app */
+void ui_editor_swp_cleanup_all(TeApp *app)
+{
+    int i;
+
+    if (!app)
+        return;
+
+    for (i = 0; i < app->tab_count; i++)
+    {
+        TeTab *tab = app->tabs[i];
+
+        if (tab && tab->filename[0])
+            pf_remove_swp(tab->filename);
+    }
+}

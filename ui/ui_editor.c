@@ -2627,6 +2627,9 @@ static int do_save(TeApp *app)
     /* Clear modified flag */
     ed_set_modified(te_app_get_editor(app), 0);
 
+    /* Swap is no longer needed after a successful save */
+    ui_editor_swp_remove(te_app_get_filename(app));
+
     te_status(app, "Saved: %s", te_app_get_filename(app));
 
 #ifdef HAVE_HUNSPELL
@@ -3042,8 +3045,10 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     {
         TeTab *tab = NULL;
         EdInfo info;
+        char closed_filename[TAB_FILENAME_MAX];
 
         tab = app->tabs[app->active_tab];
+        closed_filename[0] = '\0';
 
         if (tab)
         {
@@ -3054,9 +3059,15 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
                 if (ui_popup_confirm("Close tab", "Tab has unsaved changes. Close anyway?") != 1)
                     return 1;
             }
+
+            strncpy(closed_filename, tab->filename, sizeof(closed_filename) - 1);
+            closed_filename[sizeof(closed_filename) - 1] = '\0';
         }
 
         te_app_close_tab(app, app->active_tab);
+
+        if (closed_filename[0])
+            ui_editor_swp_remove(closed_filename);
 
         /* If no tabs left, create a new empty tab */
         if (app->tab_count == 0)
@@ -4159,6 +4170,8 @@ void ui_editor_run(TeApp *app)
             curs_set(0);
             TE_BRACKET_PASTE_OFF();
 
+            ui_editor_swp_cleanup_all(app);
+
             break;
         }
 
@@ -4184,6 +4197,8 @@ void ui_editor_run(TeApp *app)
 
             curs_set(0);
             TE_BRACKET_PASTE_OFF();
+
+            ui_editor_swp_cleanup_all(app);
 
             return;
         }

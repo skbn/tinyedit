@@ -1425,8 +1425,26 @@ int ui_files_open_path(TeApp *app, const char *path)
     size_t outsz;
     char *utf8 = NULL;
     int detected;
+    int recovered;
 
     if (!app || !path || !path[0])
+        return -1;
+
+    recovered = ui_editor_swp_recover(app, path);
+
+    if (recovered == 1)
+    {
+        detected = ui_editor_detect_wrap_hyphens(app);
+
+        if (detected > 0)
+            te_status(app, "Recovered: %s (%d wrap-hyphens)", path, detected);
+        else
+            te_status(app, "Recovered: %s", path);
+
+        return 0;
+    }
+
+    if (recovered < 0)
         return -1;
 
     /* Read file */
