@@ -23,6 +23,7 @@
 #include "../components/config.h"
 #include "../components/editor.h"
 #include "ui_editor_helper.h"
+#include "ui_spell.h"
 #include "../wrapper.h"
 
 #ifdef HAVE_TRANSLATE
@@ -135,6 +136,8 @@ TeApp *te_app_new(void)
     app->spell_suggestion_count = 0;
     app->spell_scroll_offset = 0;
 
+    ui_spell_cache_init(&app->spell_cache);
+
 #ifdef HAVE_HYPHEN
     app->hyph_handle = NULL;
     app->hyph_wrap_enabled = 0; /* Will be set from config after loading */
@@ -209,6 +212,8 @@ void te_app_free(TeApp *app)
 #endif
 
 #ifdef HAVE_HUNSPELL
+    ui_spell_cache_clear(&app->spell_cache);
+
     if (app->spell_handle)
     {
         spell_free((SpellChecker *)app->spell_handle);
@@ -322,6 +327,32 @@ void te_app_switch_tab(TeApp *app, int index)
         return;
 
     app->active_tab = index;
+}
+
+/* Return the index of the first tab with unsaved changes, or -1 if none */
+int te_app_first_modified_tab(TeApp *app)
+{
+    int i;
+
+    if (!app)
+        return -1;
+
+    for (i = 0; i < app->tab_count; i++)
+    {
+        TeTab *tab = app->tabs[i];
+
+        if (tab && tab->editor)
+        {
+            EdInfo info;
+
+            ed_get_info(tab->editor, &info);
+
+            if (info.modified)
+                return i;
+        }
+    }
+
+    return -1;
 }
 
 /* Helper functions to access active tab data */

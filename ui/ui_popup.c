@@ -356,6 +356,9 @@ int ui_popup_list(const char *title, const char **items, int count, int initial)
                 top = 0;
         }
     }
+
+    standend();
+    popup_restore_cursor();
 }
 
 int ui_popup_input_wcs(const char *title, const char *prompt, wchar_t *wbuf, int wcap)
@@ -445,6 +448,9 @@ int ui_popup_input_wcs(const char *title, const char *prompt, wchar_t *wbuf, int
         if (input_handle_key(&state, ch, is_key) == 1)
             continue;
     }
+
+    standend();
+    popup_restore_cursor();
 }
 
 /* Wide-char version of input widget */

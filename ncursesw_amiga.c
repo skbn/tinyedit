@@ -3162,6 +3162,7 @@ int mvwgetnstr(WINDOW *w, int y, int x, char *s, int n)
 {
     if (wmove(w, y, x) == ERR)
         return ERR;
+
     return wgetnstr(w, s, n);
 }
 

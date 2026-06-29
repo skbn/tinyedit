@@ -68,7 +68,7 @@ static const char *HELP_LINES[] =
         "    Ctrl+Z           Undo",
         "    Alt+Z            Redo",
         "    Ins / Alt+I      Toggle insert / overwrite",
-        "    Ctrl+W           Rewrap FTN reply",
+        "    Ctrl+W           Rewrap paragraph",
         "    Tab              Insert tab",
         "    Alt+Q            Toggle wrap mode",
         "    Alt+D            Toggle line numbers",
@@ -144,6 +144,26 @@ static int s_soft_top_sub = 0;
 static int s_soft_desired_vcol = -1;
 static int s_soft_last_width = -1;
 static int s_tab_width = 4; /* visual tab stop width, copied from config */
+
+/* Insert a full Unicode codepoint; on Win32 wchar_t is 16-bit, so split into a surrogate pair */
+static void editor_insert_cp(Ed *ed, unsigned long cp)
+{
+    if (cp < 0x10000)
+    {
+        ed_insert_char(ed, (wchar_t)cp);
+    }
+    else
+    {
+#ifdef PLATFORM_WIN32
+        unsigned long v = cp - 0x10000;
+
+        ed_insert_char(ed, (wchar_t)(0xD800 + (v >> 10)));
+        ed_insert_char(ed, (wchar_t)(0xDC00 + (v & 0x3FF)));
+#else
+        ed_insert_char(ed, (wchar_t)cp);
+#endif
+    }
+}
 
 void soft_reset_desired(void)
 {
@@ -1184,6 +1204,7 @@ void ed_auto_rewrap_after_edit(TeApp *app)
         return;
 
     width = editor_eff_wrap(app);
+
     if (width <= 0)
         return;
 
@@ -2608,6 +2629,12 @@ static int do_save(TeApp *app)
 
     te_status(app, "Saved: %s", te_app_get_filename(app));
 
+#ifdef HAVE_HUNSPELL
+    /* If the user edited the custom dictionary file directly, reload it so new words are recognized immediately */
+    if (app->cfg.spell_custom_dict[0] && strcmp(te_app_get_filename(app), app->cfg.spell_custom_dict) == 0)
+        spell_load_from_config(app);
+#endif
+
     return r;
 }
 
@@ -2753,7 +2780,7 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         if (cp >= 0)
         {
             ed_block_clear(te_app_get_editor(app));
-            ed_insert_char(te_app_get_editor(app), (wchar_t)cp);
+            editor_insert_cp(te_app_get_editor(app), (unsigned long)cp);
 
             clear_search_highlights(app);
         }
@@ -2976,6 +3003,12 @@ static int handle_control_keys(TeApp *app, int ch, int is_key)
     /* Alt+E : toggle hyphen wrap */
     if (ch == KEY_ALT('E'))
     {
+        if (!app->hyph_handle)
+        {
+            te_status(app, "No hyphenation dictionary loaded (configure HYPH_DICT_*)");
+            return 1;
+        }
+
         if (app->hard_wrap)
         {
             app->hyph_wrap_enabled = !app->hyph_wrap_enabled;
@@ -3716,14 +3749,14 @@ static void redraw_editor(TeApp *app)
     refresh();
 }
 
-/* Auto-save buffer to .swp companion file */
+/* Auto-save buffer to .swp companion file using streaming */
 static void do_autosave_to_swp(TeApp *app)
 {
     TeTab *tab = NULL;
     const char *fn = NULL;
     char swp_path[1024];
-    char *content = NULL;
-    int content_len = 0;
+    char tmp_path[1024];
+    size_t swp_len;
 
     if (!app)
         return;
@@ -3744,67 +3777,29 @@ static void do_autosave_to_swp(TeApp *app)
     if (!swp_path[0])
         return;
 
-    /* Marshall buffer to UTF-8 */
+    swp_len = strlen(swp_path);
+
+    if (swp_len + 5 >= sizeof(tmp_path))
     {
-        EdInfo info;
-        char *buf = NULL;
-        size_t cap = 4096, len = 0;
-        int li;
-
-        ed_get_info(tab->editor, &info);
-        buf = (char *)malloc(cap);
-
-        if (!buf)
-            return;
-
-        for (li = 0; li < info.line_count; li++)
-        {
-            const wchar_t *l = ed_line_wcs(tab->editor, li);
-            int n = ed_line_len(tab->editor, li);
-            char *u;
-
-            if (l && n > 0)
-            {
-                u = wcs_to_utf8(l, n);
-
-                if (u)
-                {
-                    size_t ul = strlen(u);
-
-                    if (len + ul + 2 > cap)
-                    {
-                        size_t new_cap = (len + ul + 2) * 2;
-                        char *nb = (char *)realloc(buf, new_cap);
-
-                        if (!nb)
-                        {
-                            free(u);
-                            free(buf);
-                            return;
-                        }
-
-                        buf = nb;
-                        cap = new_cap;
-                    }
-
-                    memcpy(buf + len, u, ul);
-                    len += ul;
-                    free(u);
-                }
-            }
-
-            if (li + 1 < info.line_count)
-                buf[len++] = '\n';
-        }
-
-        content = buf;
-        content_len = (int)len;
+        te_status(app, "Auto-save failed: %s", swp_path);
+        return;
     }
 
-    if (pf_atomic_write(swp_path, content, content_len) != 0)
-        te_status(app, "Auto-save failed: %s", swp_path);
+    memcpy(tmp_path, swp_path, swp_len);
+    memcpy(tmp_path + swp_len, ".tmp", 5); /* includes NUL */
 
-    free(content);
+    /* Stream editor content to temp file, then atomically rename to .swp */
+    if (ed_save_to_file(tab->editor, tmp_path, NULL) != 0)
+    {
+        te_status(app, "Auto-save failed: %s", swp_path);
+        return;
+    }
+
+    if (pf_atomic_rename(tmp_path, swp_path) != 0)
+    {
+        pf_remove_file(tmp_path);
+        te_status(app, "Auto-save failed: %s", swp_path);
+    }
 }
 
 void ui_editor_run(TeApp *app)
@@ -4132,6 +4127,8 @@ void ui_editor_run(TeApp *app)
         /* ESC : exit search mode or quit */
         if (!is_key && ch == 27)
         {
+            int mod_idx;
+
             if (app->search.is_mode || app->search.only_mode)
             {
                 clear_search_highlights(app);
@@ -4144,11 +4141,16 @@ void ui_editor_run(TeApp *app)
                 continue;
             }
 
-            ed_get_info(te_app_get_editor(app), &info);
+            mod_idx = te_app_first_modified_tab(app);
 
-            if (info.modified)
+            if (mod_idx >= 0)
             {
-                int r = ui_popup_confirm("Quit", "Discard changes and quit?");
+                int r;
+
+                te_app_switch_tab(app, mod_idx);
+                screen_dirty = 1;
+
+                r = ui_popup_confirm("Quit", "Discard changes and quit?");
 
                 if (r != 1)
                     continue;
@@ -4163,12 +4165,18 @@ void ui_editor_run(TeApp *app)
         /* F10 : quit */
         if (is_key && ch == KEY_F(10))
         {
-            EdInfo info;
-            ed_get_info(te_app_get_editor(app), &info);
+            int mod_idx;
 
-            if (info.modified)
+            mod_idx = te_app_first_modified_tab(app);
+
+            if (mod_idx >= 0)
             {
-                int r = ui_popup_confirm("Quit", "Discard changes and quit?");
+                int r;
+
+                te_app_switch_tab(app, mod_idx);
+                screen_dirty = 1;
+
+                r = ui_popup_confirm("Quit", "Discard changes and quit?");
 
                 if (r != 1)
                     continue;

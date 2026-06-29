@@ -16,7 +16,11 @@
 #include <wchar.h>
 
 #ifndef SPELL_CACHE_N
-#define SPELL_CACHE_N 64
+#ifdef PLATFORM_AMIGA
+#define SPELL_CACHE_N 512
+#else
+#define SPELL_CACHE_N 2048
+#endif
 #endif
 
 #ifndef SPELL_MAX_WORD

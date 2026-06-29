@@ -532,28 +532,59 @@ int main(int argc, char **argv)
     /* Load file if given */
     if (argc >= 2)
     {
-        TeTab *tab = NULL;
-
-        content = load_file(argv[1], app);
-
-        tab = te_tab_new_with_content(argv[1], content);
+        TeTab *tab = te_tab_new();
 
         if (tab)
         {
+            int is_utf8 = (!app->charset_in[0] || strcasecmp(app->charset_in, "UTF-8") == 0 || strcasecmp(app->charset_in, "UTF8") == 0);
+
             tab->show_line_numbers = cfg.show_line_numbers;
 
             ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
+
             te_app_add_tab(app, tab);
             te_app_switch_tab(app, 0);
+            te_app_set_filename(app, argv[1]);
+
+            if (is_utf8)
+            {
+                FILE *fp = fopen(argv[1], "rb");
+                int rc;
+
+                if (fp)
+                {
+                    ed_clear_undo_redo(tab->editor);
+                    rc = ed_load_stream(tab->editor, fp);
+                    fclose(fp);
+
+                    if (rc != 0)
+                        te_status(app, "Memory error during load");
+                }
+                else
+                {
+                    te_status(app, "Cannot read: %s", argv[1]);
+                }
+            }
+            else
+            {
+                content = load_file(argv[1], app);
+
+                if (content)
+                {
+                    ed_load(tab->editor, content);
+                    free(content);
+                }
+                else
+                {
+                    te_status(app, "Cannot read: %s", argv[1]);
+                }
+            }
 
             detected = ui_editor_detect_wrap_hyphens(app);
 
             if (detected > 0)
                 te_status(app, "Detected %d wrap-hyphens", detected);
         }
-
-        if (content)
-            free(content);
     }
     else
     {

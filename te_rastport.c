@@ -231,6 +231,7 @@ void TE_GlobalCleanup(void)
     if (s_cgx_owned && CyberGfxBase)
     {
         CloseLibrary(CyberGfxBase);
+
         CyberGfxBase = NULL;
         s_cgx_owned = 0;
     }
@@ -437,6 +438,7 @@ LONG TE_FontAdd(struct TERenderContext *dc, CONST_STRPTR fontPath, LONG pointSiz
     if (!te_set_face_size(fnt))
     {
         FT_Done_Face(fnt->face);
+
         fnt->face = NULL;
         return 0;
     }
@@ -458,8 +460,7 @@ void TE_FontRemove(struct TERenderContext *dc, CONST_STRPTR fontPath, LONG point
 
     for (i = 0; i < dc->numFonts; i++)
     {
-        if (dc->fonts[i].pointSize == pointSize &&
-            strcmp(dc->fonts[i].path, (const char *)fontPath) == 0)
+        if (dc->fonts[i].pointSize == pointSize && strcmp(dc->fonts[i].path, (const char *)fontPath) == 0)
         {
             if (dc->fonts[i].face)
                 FT_Done_Face(dc->fonts[i].face);
@@ -723,6 +724,7 @@ void TE_UpdatePalette(struct TERenderContext *dc, struct Screen *screen)
         return;
 
     te_flush_clut_mirrors(dc);
+
     dc->aaRampValid = 0;
     dc->clutValid = 0;
 
@@ -813,6 +815,7 @@ static void te_rebuild_aa_ramp(struct TERenderContext *dc)
     {
         int t = i;
         int u = 15 - i;
+
         UBYTE rr = (UBYTE)((fr * t + br * u) / 15);
         UBYTE gg = (UBYTE)((fg * t + bg * u) / 15);
         UBYTE bb_ = (UBYTE)((fb * t + bb * u) / 15);
@@ -1087,9 +1090,9 @@ static void te_blit_to_cache(FT_Bitmap *bm, UBYTE *dst, int dstW, int dstH, int 
 
 static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *fnt, FT_UInt gi, ULONG cp)
 {
-    struct TEGlyph *g;
+    struct TEGlyph *g = NULL;
     FT_GlyphSlot slot;
-    FT_Bitmap *bm;
+    FT_Bitmap *bm = NULL;
     int format;
     int load_flags;
     int srcW, srcH, dstW, dstH, pitch;
@@ -1169,6 +1172,7 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
 
         if (dstW < 1)
             dstW = 1;
+
         if (dstH < 1)
             dstH = 1;
     }
@@ -1227,8 +1231,8 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
 static struct TEGlyph *te_make_notfound(struct TERenderContext *dc)
 {
     /* Build tofu-style rectangle outline glyph at primary font's cell size. Uses pure FMT_MONO so it always blits cheaply */
-    struct TEFont *primary;
-    struct TEGlyph *g;
+    struct TEFont *primary = NULL;
+    struct TEGlyph *g = NULL;
     int w, h, pitch;
     int x, y;
 
@@ -1241,6 +1245,7 @@ static struct TEGlyph *te_make_notfound(struct TERenderContext *dc)
         return NULL;
 
     h = primary->height;
+
     if (h <= 0)
         h = (int)primary->pointSize;
 
@@ -1297,8 +1302,8 @@ static struct TEGlyph *te_make_notfound(struct TERenderContext *dc)
 
 static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
 {
-    struct TEGlyph *g;
-    struct TEFont *fnt;
+    struct TEGlyph *g = NULL;
+    struct TEFont *fnt = NULL;
     FT_UInt gi = 0;
     unsigned int h;
     int i;
@@ -1349,7 +1354,7 @@ static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
 
 static struct TEGlyph *te_get_notfound(struct TERenderContext *dc)
 {
-    struct TEGlyph *g;
+    struct TEGlyph *g = NULL;
     unsigned int h;
 
     h = te_hash_cp_style(TE_NOTFOUND_CP, 0);
@@ -1488,6 +1493,7 @@ static void te_draw_indexed_pixels(struct TERenderContext *dc, struct RastPort *
 
                 SetAPen(rp, pen);
                 WritePixel(rp, dx + x, dy + y);
+
                 pen_dirty = 1;
             }
         }
@@ -1506,7 +1512,7 @@ static void te_draw_rtg(struct TERenderContext *dc, struct RastPort *rp, struct 
     int dxc, dyc, dwc, dhc;
     UBYTE fr, fgc, fb;
     UBYTE br, bgc, bb;
-    UBYTE *buf;
+    UBYTE *buf = NULL;
     ULONG need;
     int x, y;
 
@@ -1531,8 +1537,7 @@ static void te_draw_rtg(struct TERenderContext *dc, struct RastPort *rp, struct 
     if (dwc <= 0 || dhc <= 0)
         return;
 
-    /* Ensure the scratch buffer is big enough for dwc * dhc RGB24
-     * pixels.  Grow only -- subsequent glyphs reuse the allocation */
+    /* Ensure the scratch buffer is big enough for dwc * dhc RGB24  pixels. Grow only -- subsequent glyphs reuse the allocation */
     need = (ULONG)dwc * (ULONG)dhc * 3UL;
 
     if (need > dc->scratchBytes)
@@ -1620,13 +1625,7 @@ static void te_draw_rtg(struct TERenderContext *dc, struct RastPort *rp, struct 
     }
 
     /* One WritePixelArray for whole glyph. No lock, no per-pixel SetAPen */
-    WritePixelArray(buf,
-                    0, 0,
-                    dwc * 3,
-                    rp,
-                    dxc, dyc,
-                    dwc, dhc,
-                    RECTFMT_RGB);
+    WritePixelArray(buf, 0, 0, dwc * 3, rp, dxc, dyc, dwc, dhc, RECTFMT_RGB);
 }
 
 static void te_draw_glyph(struct TERenderContext *dc, struct RastPort *rp, struct TEGlyph *g, int penX, int baseY)
@@ -1734,7 +1733,8 @@ static int te_decode_utf8(const UBYTE *p, const UBYTE *end, ULONG *cp_out, int *
 
 void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDrawPosition *pos, CONST_STRPTR utf8, ULONG maxChars)
 {
-    const UBYTE *p, *end;
+    const UBYTE *p = NULL;
+    const UBYTE *end = NULL;
     ULONG count = 0;
     int penX, penY;
 
@@ -1799,7 +1799,7 @@ void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDra
 
 void TE_GetMetrics(struct TERenderContext *dc, struct TEGlyphMetrics *out)
 {
-    struct TEFont *primary;
+    struct TEFont *primary = NULL;
     int advance = 0;
     FT_UInt gi;
 
@@ -1843,7 +1843,8 @@ void TE_GetMetrics(struct TERenderContext *dc, struct TEGlyphMetrics *out)
 
 void TE_MeasureText(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars, struct TEGlyphMetrics *out)
 {
-    const UBYTE *p, *end;
+    const UBYTE *p = NULL;
+    const UBYTE *end = NULL;
     LONG count = 0;
     int width = 0;
 
@@ -1888,7 +1889,8 @@ void TE_MeasureText(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars
 
 void TE_GetCharOffsets(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars, LONG *arrayout)
 {
-    const UBYTE *p, *end;
+    const UBYTE *p = NULL;
+    const UBYTE *end = NULL;
     LONG count = 0;
     int width = 0;
 
@@ -1902,7 +1904,7 @@ void TE_GetCharOffsets(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxCh
     {
         ULONG cp;
         int consumed = 0;
-        struct TEGlyph *g;
+        struct TEGlyph *g = NULL;
 
         if (maxChars >= 0 && count >= maxChars)
             break;

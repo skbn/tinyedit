@@ -203,17 +203,166 @@ void ui_spell_free_app_suggestions(TeApp *app)
     }
 }
 
+/* Hash a wchar_t word for the spell-check cache */
+static unsigned int spell_cache_hash(const wchar_t *word, int word_len)
+{
+    unsigned int h = 5381;
+    int i;
+
+    for (i = 0; i < word_len; i++)
+        h = ((h << 5) + h) + (unsigned int)word[i];
+
+    return h;
+}
+
+void ui_spell_cache_init(TeSpellCache *cache)
+{
+    int i;
+
+    if (!cache)
+        return;
+
+    for (i = 0; i < TE_SPELL_CACHE_SIZE; i++)
+    {
+        cache->entries[i].word = NULL;
+        cache->entries[i].len = 0;
+        cache->entries[i].incorrect = 0;
+    }
+}
+
+void ui_spell_cache_clear(TeSpellCache *cache)
+{
+    int i;
+
+    if (!cache)
+        return;
+
+    for (i = 0; i < TE_SPELL_CACHE_SIZE; i++)
+    {
+        if (cache->entries[i].word)
+            free(cache->entries[i].word);
+
+        cache->entries[i].word = NULL;
+        cache->entries[i].len = 0;
+        cache->entries[i].incorrect = 0;
+    }
+}
+
+int ui_spell_cache_lookup(TeSpellCache *cache, const wchar_t *word, int word_len, int *out_incorrect)
+{
+    unsigned int h;
+    int idx;
+    int start;
+    TeSpellCacheEntry *e = NULL;
+
+    if (!cache || !word || word_len <= 0 || !out_incorrect)
+        return 0;
+
+    h = spell_cache_hash(word, word_len);
+    idx = (int)(h % (unsigned int)TE_SPELL_CACHE_SIZE);
+    start = idx;
+
+    for (;;)
+    {
+        e = &cache->entries[idx];
+
+        if (!e->word)
+            return 0;
+
+        if (e->len == word_len && wmemcmp(e->word, word, word_len) == 0)
+        {
+            *out_incorrect = e->incorrect;
+            return 1;
+        }
+
+        idx = (idx + 1) % TE_SPELL_CACHE_SIZE;
+
+        if (idx == start)
+            return 0;
+    }
+}
+
+void ui_spell_cache_put(TeSpellCache *cache, const wchar_t *word, int word_len, int incorrect)
+{
+    unsigned int h;
+    int idx;
+    int start;
+    int empty_idx = -1;
+    TeSpellCacheEntry *e = NULL;
+    wchar_t *copy = NULL;
+
+    if (!cache || !word || word_len <= 0)
+        return;
+
+    h = spell_cache_hash(word, word_len);
+    idx = (int)(h % (unsigned int)TE_SPELL_CACHE_SIZE);
+    start = idx;
+
+    for (;;)
+    {
+        e = &cache->entries[idx];
+
+        if (!e->word)
+        {
+            if (empty_idx == -1)
+                empty_idx = idx;
+
+            break;
+        }
+
+        if (e->len == word_len && wmemcmp(e->word, word, word_len) == 0)
+        {
+            e->incorrect = incorrect;
+            return;
+        }
+
+        idx = (idx + 1) % TE_SPELL_CACHE_SIZE;
+
+        if (idx == start)
+        {
+            empty_idx = start;
+            break;
+        }
+    }
+
+    if (empty_idx == -1)
+        empty_idx = start;
+
+    e = &cache->entries[empty_idx];
+
+    if (e->word)
+        free(e->word);
+
+    copy = (wchar_t *)malloc(sizeof(wchar_t) * ((size_t)word_len + 1));
+
+    if (!copy)
+        return;
+
+    wmemcpy(copy, word, word_len);
+    copy[word_len] = L'\0';
+
+    e->word = copy;
+    e->len = word_len;
+    e->incorrect = incorrect;
+}
+
 /* Simple word check for highlighting - returns 1 if incorrect, 0 if correct */
 int ui_spell_check_word_simple(TeApp *app, const wchar_t *word, int word_len)
 {
     char *word_utf8 = NULL;
     int result;
+    int cached;
 
     if (!app || !app->spell_handle || !app->spell_active)
         return 0;
 
     if (word_len <= 0 || word_len >= 256)
         return 0;
+
+    cached = ui_spell_cache_lookup(&app->spell_cache, word, word_len, &result);
+
+    if (cached)
+        return result;
 
     word_utf8 = wcs_to_utf8(word, word_len);
 
@@ -224,7 +373,11 @@ int ui_spell_check_word_simple(TeApp *app, const wchar_t *word, int word_len)
 
     free(word_utf8);
 
-    return !result; /* Return 1 if incorrect, 0 if correct */
+    result = !result; /* Return 1 if incorrect, 0 if correct */
+
+    ui_spell_cache_put(&app->spell_cache, word, word_len, result);
+
+    return result;
 }
 
 /* Show spell correction suggestions popup */
@@ -278,12 +431,14 @@ int spell_load_from_config(TeApp *app)
         thes_set_speller((ThesHandle *)app->thes_handle, NULL);
 #endif
 
-    /* Free existing handle */
+    /* Free existing handle and clear cached results */
     if (app->spell_handle)
     {
         spell_free(app->spell_handle);
         app->spell_handle = NULL;
     }
+
+    ui_spell_cache_clear(&app->spell_cache);
 
     /* Check if spell checker is enabled in config */
     if (!app->cfg.spell_enabled)
@@ -605,6 +760,8 @@ int spell_check_word(TeApp *app)
             if (spell_add_to_custom_dict(app->spell_handle, check_buf, app->cfg.spell_custom_dict) == 0)
             {
                 app->spell_word_status = 1;
+
+                ui_spell_cache_clear(&app->spell_cache);
                 te_status(app, "Added '%s' to dictionary", check_buf);
             }
             else
@@ -630,6 +787,8 @@ int spell_check_word(TeApp *app)
         if (spell_add_to_custom_dict(app->spell_handle, check_buf, app->cfg.spell_custom_dict) == 0)
         {
             app->spell_word_status = 1; /* now considered correct */
+
+            ui_spell_cache_clear(&app->spell_cache);
             te_status(app, "Added '%s' to dictionary", check_buf);
         }
         else

@@ -166,6 +166,42 @@ typedef struct
     int whole_word;           /* Search whole word flag */
 } TeSearch;
 
+/*
+ * UI-level spell-check result cache, keyed by exact wchar_t word
+ * UI cache hit > return result
+ * UI cache miss > spell_check() > internal cache hit/miss > save result in UI cache
+ *
+ * UI cache (the first layer):
+ * If the word is there, it returns the result without calling Hunspell
+ *
+ * If it's not there, it moves to the next layer
+ * When it's full, it overwrites the oldest entry (it doesn't delegate to the other cache)
+ * Hunspell's internal cache (SPELL_CACHE_N): It's checked inside spell_check(), only when the UI cache fails
+ * If the word was in the internal cache, it avoids the affix/lowercase handling
+ *
+ * If the user edited the custom dictionary file directly, reload it so new words are recognized immediately
+ */
+
+#ifndef TE_SPELL_CACHE_SIZE
+#ifdef PLATFORM_AMIGA
+#define TE_SPELL_CACHE_SIZE 2048
+#else
+#define TE_SPELL_CACHE_SIZE 8192
+#endif
+#endif
+
+typedef struct
+{
+    wchar_t *word; /* NULL = empty slot */
+    int len;
+    int incorrect; /* 1 = misspelled, 0 = correct */
+} TeSpellCacheEntry;
+
+typedef struct
+{
+    TeSpellCacheEntry entries[TE_SPELL_CACHE_SIZE];
+} TeSpellCache;
+
 /* Generic inline text input widget (wchar_t only) */
 typedef struct
 {
@@ -215,6 +251,7 @@ typedef struct
     char **spell_suggestions;        /* Suggestions from Hunspell */
     int spell_suggestion_count;      /* Number of suggestions */
     int spell_scroll_offset;         /* Scroll offset for suggestions */
+    TeSpellCache spell_cache;        /* Cache for visible-word spell-check results */
 
 #ifdef HAVE_HYPHEN
     void *hyph_handle;     /* HyphDict */
@@ -260,6 +297,7 @@ TeTab *te_app_get_active_tab(TeApp *app);
 int te_app_add_tab(TeApp *app, TeTab *tab);
 int te_app_close_tab(TeApp *app, int index);
 void te_app_switch_tab(TeApp *app, int index);
+int te_app_first_modified_tab(TeApp *app);
 
 /* ui_editor.c */
 void ui_editor_run(TeApp *app);

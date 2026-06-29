@@ -52,6 +52,7 @@ typedef struct
 #else
 #include "../hyph_wrap/hyph_wrap.h"
 #endif
+#include "ui_hyph.h"
 
 /* Thunk adapting hyph_breakpoints() to EdHyphenFn. user_data is HyphDict* */
 int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count)
@@ -87,6 +88,51 @@ int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos,
 /* Static variables that need to be accessible */
 static int s_soft_vtop = 0;
 
+#ifdef PLATFORM_WIN32
+/* Windows wcswidth() does not know East Asian Wide / Fullwidth / emoji /
+ * box-drawing / block glyphs. Return 2 for those ranges, fall back otherwise */
+static int ed_char_vwidth(wchar_t ch)
+{
+    unsigned int cp = (unsigned int)ch;
+    int w;
+
+    if (cp < 0x1100)
+        return 1;
+
+    if (cp >= 0x2500 && cp <= 0x257F)
+        return 1; /* Box Drawing - narrow, same as ncurses Linux */
+
+    if ((cp >= 0x1100 && cp <= 0x115F) ||
+        (cp >= 0x2190 && cp <= 0x21FF) ||
+        (cp >= 0x2329 && cp <= 0x232A) ||
+        (cp >= 0x2580 && cp <= 0x259F) ||
+        (cp >= 0x25A0 && cp <= 0x25FF) ||
+        (cp >= 0x2600 && cp <= 0x26FF) ||
+        (cp >= 0x2700 && cp <= 0x27BF) ||
+        (cp >= 0x2B00 && cp <= 0x2BFF) ||
+        (cp >= 0x2E80 && cp <= 0x303E) ||
+        (cp >= 0x3041 && cp <= 0x33FF) ||
+        (cp >= 0x3400 && cp <= 0x4DBF) ||
+        (cp >= 0x4E00 && cp <= 0x9FFF) ||
+        (cp >= 0xA000 && cp <= 0xA4CF) ||
+        (cp >= 0xAC00 && cp <= 0xD7A3) ||
+        (cp >= 0xF900 && cp <= 0xFAFF) ||
+        (cp >= 0xFE30 && cp <= 0xFE4F) ||
+        (cp >= 0xFF00 && cp <= 0xFF60) ||
+        (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+        cp >= 0x1F000)
+        return 2;
+
+    w = wcswidth(&ch, 1);
+
+    return (w > 0) ? w : 1;
+}
+
+#define CHAR_VWIDTH(c) ed_char_vwidth(c)
+#else
+#define CHAR_VWIDTH(c) ((wcswidth(&(c), 1) > 0) ? wcswidth(&(c), 1) : 1)
+#endif
+
 /* Visual width in display columns: wide chars=2, narrow=1, control=1 */
 int wcs_vwidth(const wchar_t *s, int n)
 {
@@ -97,14 +143,7 @@ int wcs_vwidth(const wchar_t *s, int n)
         return 0;
 
     for (i = 0; i < n; i++)
-    {
-        int w = wcswidth(&s[i], 1);
-
-        if (w == 2)
-            v += 2;
-        else
-            v += 1; /* narrow, zero-width, control -> 1 */
-    }
+        v += CHAR_VWIDTH(s[i]);
 
     return v;
 }
@@ -141,10 +180,7 @@ void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_w
         }
         else
         {
-            int w = wcswidth(&s[i], 1);
-
-            if (w <= 0)
-                w = 1;
+            int w = CHAR_VWIDTH(s[i]);
 
             buf[out_len] = s[i];
             out_len++;
@@ -176,10 +212,7 @@ int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width)
         }
         else
         {
-            int w = wcswidth(&s[i], 1);
-
-            if (w <= 0)
-                w = 1;
+            int w = CHAR_VWIDTH(s[i]);
 
             v += w;
             col += w;
@@ -1038,21 +1071,54 @@ int ui_editor_export(TeApp *app)
     return 1;
 }
 
+#ifdef HAVE_HYPHEN
+static int ftn_reply_hyph_cb(void *user_data, const wchar_t *word, int word_wlen, int col_limit)
+{
+    TeApp *app = (TeApp *)user_data;
+
+    return hyph_find_break(app, word, word_wlen, col_limit);
+}
+#endif
+
 int ftn_reply(TeApp *app)
 {
+    Ed *ed = te_app_get_editor(app);
     int col = editor_eff_wrap(app);
     int rc;
+    int (*hyph_cb)(void *, const wchar_t *, int, int) = NULL;
+    void *hyph_data = NULL;
 
     if (col <= 0)
         col = (app->wrap_col > 0) ? app->wrap_col : 75;
 
-    rc = ed_rewrap_ftn_reply(te_app_get_editor(app), col);
+    rc = ed_rewrap_ftn_reply(ed, col);
 
     if (rc == 0)
     {
         clear_search_highlights(app);
         te_status(app, "FTN reply rewrapped");
+        ed_ensure_visible(ed);
+        return 1;
     }
+
+#ifdef HAVE_HYPHEN
+    if (app->hyph_wrap_enabled && app->hyph_handle)
+    {
+        hyph_cb = ftn_reply_hyph_cb;
+        hyph_data = app;
+    }
+#endif
+
+    rc = ed_rewrap_paragraph_ex(ed, col, hyph_cb, hyph_data);
+
+    clear_search_highlights(app);
+
+    if (rc == 0)
+        te_status(app, "Paragraph rewrapped");
+    else
+        te_status(app, "Nothing to rewrap");
+
+    ed_ensure_visible(ed);
 
     return 1;
 }

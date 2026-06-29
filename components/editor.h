@@ -41,7 +41,9 @@ typedef struct
     int len;      /* character count (not bytes) */
     int cap;      /* allocated wchar_t slots */
     int word_count;
-    int has_wrap_hyphen; /* 1 if last char is an artificial wrap-hyphen */
+    int has_wrap_hyphen;  /* 1 if last char is an artificial wrap-hyphen */
+    int wrap_count_cache; /* -1 = invalid, otherwise cached visual rows */
+    int wrap_cache_width; /* width for which wrap_count_cache is valid */
 } EdLine;
 
 typedef enum

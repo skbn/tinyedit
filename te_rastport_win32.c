@@ -719,12 +719,13 @@ static void te_blit_to_cache(FT_Bitmap *bm, unsigned char *dst, int dstW, int ds
 static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *fnt, FT_UInt gi, ULONG cp)
 {
     struct TEGlyph *g = NULL;
-    FT_GlyphSlot slot;
+    FT_GlyphSlot slot = NULL;
     FT_Bitmap *bm = NULL;
     int format;
     int load_flags;
     int srcW, srcH, dstW, dstH, pitch;
     FT_Render_Mode rmode;
+    double cell_scale = 1.0;
 
     if (!dc || !fnt || !fnt->face)
         return NULL;
@@ -797,6 +798,69 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
 
         if (dstH < 1)
             dstH = 1;
+
+        /* Scale glyphs to fit the monospace cell: up to 2 cells wide, 1 cell high, and aligned to the primary font baseline */
+        if (dc->metrics_valid && dc->metrics_width > 0 && dc->metrics_height > 0)
+        {
+            int maxW = 2 * dc->metrics_width;
+            int maxH = dc->metrics_height;
+            double baseY = (double)dc->metrics_base;
+            double unscaled_bearingY = (double)slot->bitmap_top * (double)fnt->scaleNum / (double)fnt->scaleDen;
+            double descender = (double)dstH - unscaled_bearingY;
+            double maxDescender = (double)maxH - baseY;
+            int needs_scale = 0;
+
+            if (dstW > maxW)
+            {
+                cell_scale = (double)maxW / (double)dstW;
+                needs_scale = 1;
+            }
+
+            if (dstH > maxH)
+            {
+                double scale_y = (double)maxH / (double)dstH;
+
+                if (scale_y < cell_scale)
+                {
+                    cell_scale = scale_y;
+                    needs_scale = 1;
+                }
+            }
+
+            if (unscaled_bearingY > baseY)
+            {
+                double scale_b = baseY / unscaled_bearingY;
+
+                if (scale_b < cell_scale)
+                {
+                    cell_scale = scale_b;
+                    needs_scale = 1;
+                }
+            }
+
+            if (descender > 0.0 && descender > maxDescender)
+            {
+                double scale_d = maxDescender / descender;
+
+                if (scale_d < cell_scale)
+                {
+                    cell_scale = scale_d;
+                    needs_scale = 1;
+                }
+            }
+
+            if (needs_scale)
+            {
+                dstW = (int)((double)dstW * cell_scale + 0.5);
+                dstH = (int)((double)dstH * cell_scale + 0.5);
+
+                if (dstW < 1)
+                    dstW = 1;
+
+                if (dstH < 1)
+                    dstH = 1;
+            }
+        }
     }
 
     switch (format)
@@ -842,9 +906,13 @@ static struct TEGlyph *te_make_glyph(struct TERenderContext *dc, struct TEFont *
     g->width = dstW;
     g->height = dstH;
     g->pitch = pitch;
-    g->bearingX = (int)((slot->bitmap_left * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen);
-    g->bearingY = (int)((slot->bitmap_top * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen);
-    g->advance = (int)(((slot->advance.x >> 6) * fnt->scaleNum + fnt->scaleDen / 2) / fnt->scaleDen);
+    g->bearingX = (int)((double)slot->bitmap_left * (double)fnt->scaleNum * cell_scale / (double)fnt->scaleDen + 0.5);
+    g->bearingY = (int)((double)slot->bitmap_top * (double)fnt->scaleNum * cell_scale / (double)fnt->scaleDen + 0.5);
+    g->advance = (int)((double)(slot->advance.x >> 6) * (double)fnt->scaleNum * cell_scale / (double)fnt->scaleDen + 0.5);
+
+    /* Make sure the rounded bearing does not push the glyph above the cell */
+    if (dc->metrics_valid && g->bearingY > dc->metrics_base)
+        g->bearingY = dc->metrics_base;
 
     if (g->advance <= 0)
         g->advance = dstW;
@@ -1360,9 +1428,15 @@ void TE_MeasureText(struct TERenderContext *dc, const char *utf8, LONG maxChars,
         if (g)
         {
             if (dc->flags & TE_FLAG_FIXEDWIDTH)
-                width += cellW;
+            {
+                /* Fixed-width: use the glyph's own width if it exceeds one cell, otherwise fall back to the standard cell width */
+                int glyphW = g->width > 0 ? g->width : 0;
+                width += (glyphW > cellW) ? glyphW : cellW;
+            }
             else
+            {
                 width += g->advance > 0 ? g->advance : g->width;
+            }
         }
     }
 

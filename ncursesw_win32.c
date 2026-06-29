@@ -89,19 +89,6 @@ static int s_use_te = 0;
 /* Cursor border color (0..15) */
 static int s_cursor_color = COLOR_WHITE;
 
-/* Shadow buffer for dirty-cell optimization */
-static Cell *s_shadow = NULL;
-static int s_shadow_w = 0, s_shadow_h = 0;
-static int s_shadow_dirty = 1;
-
-#define SHADOW_BLEED_CELLS 4
-#define SHADOW_DIRTY_MAX_COLS 1024
-static unsigned char s_dirty_row[SHADOW_DIRTY_MAX_COLS];
-static unsigned char s_dirty_tmp[SHADOW_DIRTY_MAX_COLS];
-
-/* Last rendered cursor position (for erase-on-move) */
-static int s_last_cur_y = -1, s_last_cur_x = -1;
-
 /* Active fg/bg color indices */
 static int s_cur_fg_idx = COLOR_WHITE, s_cur_bg_idx = COLOR_BLACK;
 
@@ -145,16 +132,19 @@ static COLORREF s_rgb_map[16] =
 
 /* Forward declarations */
 static void render_all(void);
-static int compute_dirty_row(int r);
 
 /* Return 1 if cp is 2-cell-wide glyph (East Asian Wide/Fullwidth + emoji). MSVCRT's wcswidth() is unreliable, so we use table-driven check */
 static int is_wide_cp(unsigned int cp)
 {
+    /* ANSI art (CP437) uses a strict 1-cell grid, no double-width glyphs */
+    if (s_ansi_mode)
+        return 0;
+
     /* Combining marks and control: not wide */
     if (cp < 0x1100)
         return 0;
 
-    /* Ranges for real-world text and emoji. Others not wide; dirty propagation handles overflow */
+    /* Ranges for real-world text and emoji */
     if (cp >= 0x1100 && cp <= 0x115F)
         return 1; /* Hangul Jamo */
 
@@ -164,8 +154,11 @@ static int is_wide_cp(unsigned int cp)
     if (cp >= 0x2329 && cp <= 0x232A)
         return 1; /* Angle brackets */
 
-    if (cp >= 0x2500 && cp <= 0x259F)
-        return 1; /* Box Drawing, Block Elements */
+    if (cp >= 0x2500 && cp <= 0x257F)
+        return 0; /* Box Drawing - narrow, same as ncurses Linux */
+
+    if (cp >= 0x2580 && cp <= 0x259F)
+        return 1; /* Block Elements - wide, rendered with GDI */
 
     if (cp >= 0x25A0 && cp <= 0x25FF)
         return 1; /* Geometric Shapes */
@@ -248,43 +241,6 @@ static int is_wide_cp(unsigned int cp)
     return 0;
 }
 
-/* Return 1 if cp needs full-row context to render correctly (Arabic, Hebrew, Indic shaping) */
-static int is_complex_cp(unsigned int cp)
-{
-    /* Hebrew */
-    if (cp >= 0x0590 && cp <= 0x05FF)
-        return 1;
-
-    /* Arabic and related scripts */
-    if (cp >= 0x0600 && cp <= 0x08FF)
-        return 1;
-
-    /* Indic scripts (Devanagari, Bengali, Tamil, Thai, Tibetan, ...) */
-    if (cp >= 0x0900 && cp <= 0x0FFF)
-        return 1;
-
-    /* Myanmar */
-    if (cp >= 0x1000 && cp <= 0x109F)
-        return 1;
-
-    /* Khmer, Mongolian and related scripts */
-    if (cp >= 0x1780 && cp <= 0x1AAF)
-        return 1;
-
-    /* Hebrew presentation forms */
-    if (cp >= 0xFB1D && cp <= 0xFB4F)
-        return 1;
-
-    /* Arabic presentation forms */
-    if (cp >= 0xFB50 && cp <= 0xFDFF)
-        return 1;
-
-    if (cp >= 0xFE70 && cp <= 0xFEFF)
-        return 1;
-
-    return 0;
-}
-
 /* Encode codepoint to UTF-16; returns 1 for BMP, 2 for surrogate pair (buf needs 2 wchar_t) */
 static int cp_to_utf16(unsigned int cp, wchar_t *buf)
 {
@@ -306,19 +262,201 @@ static int cp_to_utf16(unsigned int cp, wchar_t *buf)
 /* Draw glyph centered in a cell_w-pixel-wide slot; glyph overflows right if wider than slot */
 static void draw_glyph_in_cell(int cx, int cy, int cell_w, const wchar_t *buf, int len)
 {
-    SIZE sz;
-    int draw_x = cx;
-
-    if (GetTextExtentPoint32W(hMemDC, buf, len, &sz))
-    {
-        if (sz.cx > 0 && sz.cx < cell_w)
-            draw_x = cx + (cell_w - sz.cx) / 2;
-    }
-
-    TextOutW(hMemDC, draw_x, cy, buf, len);
+    TextOutW(hMemDC, cx, cy, buf, len);
 }
 
-/* Draw a single codepoint using the FreeType renderer, centered in the cell */
+/* Block glyph (U+2580..U+259F) - draw with GDI for pixel-perfect tiling */
+static int is_block_glyph(unsigned int cp)
+{
+    return (cp >= 0x2580 && cp <= 0x259F);
+}
+
+static void draw_block_glyph(int x, int y, int cw, int ch, unsigned int cp, COLORREF fg)
+{
+    HBRUSH hBrush;
+    RECT rc;
+    int xm = x + cw / 2;
+    int ym = y + ch / 2;
+    int x1 = x + cw - 1;
+    int y1 = y + ch - 1;
+
+    if (cw < 2 || ch < 2)
+        return;
+
+    hBrush = CreateSolidBrush(fg);
+
+    switch (cp)
+    {
+    /* Half blocks */
+    case 0x2580: /* ▀ UPPER HALF */
+        SetRect(&rc, x, y, x1 + 1, ym);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2584: /* ▄ LOWER HALF */
+        SetRect(&rc, x, ym, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2588: /* █ FULL BLOCK */
+        SetRect(&rc, x, y, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x258C: /* ▌ LEFT HALF */
+        SetRect(&rc, x, y, xm, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2590: /* ▐ RIGHT HALF */
+        SetRect(&rc, xm, y, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+
+    /* Lower-N-eighths blocks (▁ ▂ ▃ ▅ ▆ ▇) */
+    case 0x2581:
+        SetRect(&rc, x, y + ch * 7 / 8, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2582:
+        SetRect(&rc, x, y + ch * 6 / 8, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2583:
+        SetRect(&rc, x, y + ch * 5 / 8, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2585:
+        SetRect(&rc, x, y + ch * 3 / 8, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2586:
+        SetRect(&rc, x, y + ch * 2 / 8, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2587:
+        SetRect(&rc, x, y + ch * 1 / 8, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+
+    /* Left-N-eighths blocks (▉ ▊ ▋ ▍ ▎ ▏) */
+    case 0x2589:
+        SetRect(&rc, x, y, x + cw * 7 / 8, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x258A:
+        SetRect(&rc, x, y, x + cw * 6 / 8, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x258B:
+        SetRect(&rc, x, y, x + cw * 5 / 8, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x258D:
+        SetRect(&rc, x, y, x + cw * 3 / 8, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x258E:
+        SetRect(&rc, x, y, x + cw * 2 / 8, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x258F:
+        SetRect(&rc, x, y, x + cw / 8, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+
+    /* One-eighth top and right (▔ ▕) */
+    case 0x2594:
+        SetRect(&rc, x, y, x1 + 1, y + ch / 8);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2595:
+        SetRect(&rc, x + cw * 7 / 8, y, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+
+    /* Shaded blocks (░ ▒ ▓) — patterned fills */
+    case 0x2591:
+    case 0x2592:
+    case 0x2593:
+    {
+        static const BYTE pat_25[8] = {0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22};
+        static const BYTE pat_50[8] = {0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55};
+        static const BYTE pat_75[8] = {0x77, 0xDD, 0x77, 0xDD, 0x77, 0xDD, 0x77, 0xDD};
+        const BYTE *pat = (cp == 0x2591) ? pat_25 : (cp == 0x2592) ? pat_50
+                                                                   : pat_75;
+
+        HBITMAP hbm = CreateBitmap(8, 8, 1, 1, pat);
+        HBRUSH hPatBrush = CreatePatternBrush(hbm);
+        HBRUSH hOldBrush = (HBRUSH)SelectObject(hMemDC, hPatBrush);
+        COLORREF oldBk = SetBkColor(hMemDC, s_rgb_map[s_cur_bg_idx]);
+        COLORREF oldFg = SetTextColor(hMemDC, fg);
+        POINT oldOrg;
+
+        SetBrushOrgEx(hMemDC, x % 8, y % 8, &oldOrg);
+        PatBlt(hMemDC, x, y, cw, ch, PATCOPY);
+        SetBrushOrgEx(hMemDC, oldOrg.x, oldOrg.y, NULL);
+        SetTextColor(hMemDC, oldFg);
+        SetBkColor(hMemDC, oldBk);
+        SelectObject(hMemDC, hOldBrush);
+
+        DeleteObject(hPatBrush);
+        DeleteObject(hbm);
+        DeleteObject(hBrush);
+        return;
+    }
+
+    /* Quadrants (▖ ▗ ▘ ▙ ▚ ▛ ▜ ▝ ▞ ▟) */
+    case 0x2596: /* ▖ lower left */
+        SetRect(&rc, x, ym, xm, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2597: /* ▗ lower right */
+        SetRect(&rc, xm, ym, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2598: /* ▘ upper left */
+        SetRect(&rc, x, y, xm, ym);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x2599: /* ▙ upper left + lower */
+        SetRect(&rc, x, y, xm, ym);
+        FillRect(hMemDC, &rc, hBrush);
+        SetRect(&rc, xm, ym, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x259A: /* ▚ upper left + lower right */
+        SetRect(&rc, x, y, xm, ym);
+        FillRect(hMemDC, &rc, hBrush);
+        SetRect(&rc, xm, ym, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x259B: /* ▛ upper left + lower left */
+        SetRect(&rc, x, y, xm, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x259C: /* ▜ upper right + lower right */
+        SetRect(&rc, xm, y, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x259D: /* ▝ upper right */
+        SetRect(&rc, xm, y, x1 + 1, ym);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x259E: /* ▞ upper right + lower left */
+        SetRect(&rc, xm, y, x1 + 1, ym);
+        FillRect(hMemDC, &rc, hBrush);
+        SetRect(&rc, x, ym, xm, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    case 0x259F: /* ▟ upper right + lower left + lower right */
+        SetRect(&rc, xm, y, x1 + 1, ym);
+        FillRect(hMemDC, &rc, hBrush);
+        SetRect(&rc, x, ym, x1 + 1, y1 + 1);
+        FillRect(hMemDC, &rc, hBrush);
+        break;
+    }
+
+    DeleteObject(hBrush);
+}
+
+/* Draw a single codepoint using the FreeType renderer */
 static void draw_glyph_te(int cx, int cy, int cell_w, unsigned int cp)
 {
     char utf8[8];
@@ -356,15 +494,26 @@ static void draw_glyph_te(int cx, int cy, int cell_w, unsigned int cp)
         utf8[3] = (char)(0x80 | (cp & 0x3F));
         len = 4;
     }
+
     utf8[len] = '\0';
 
-    /* Center glyph horizontally if narrower than cell */
+    /* Center only real wide glyphs; narrow glyphs (e.g. Box Drawing) stay left-aligned */
     x = cx;
-
     TE_MeasureText(s_te_dc, utf8, 1, &metrics);
 
-    if (metrics.width > 0 && metrics.width < cell_w)
-        x = cx + (cell_w - metrics.width) / 2;
+    if (s_te_dc && !s_ansi_mode)
+    {
+        struct TEGlyphMetrics cell_metrics;
+        int cell_width = cell_w;
+
+        TE_GetMetrics(s_te_dc, &cell_metrics);
+
+        if (cell_metrics.width > 0)
+            cell_width = cell_metrics.width;
+
+        if (metrics.width > cell_width && cell_w > cell_width && metrics.width < cell_w)
+            x = cx + (cell_w - metrics.width) / 2;
+    }
 
     TE_RenderText(s_te_dc, hMemDC, x, cy + fb, utf8, 1);
 }
@@ -722,6 +871,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         {
             /* restore on failure */
             free(new_cells);
+
             stdscr->cells = old_cells;
             stdscr->_maxy = old_lines;
             stdscr->_maxx = old_cols;
@@ -740,10 +890,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         rect.right = COLS * fw;
         rect.bottom = LINES * fh;
         hBrush = CreateSolidBrush(RGB(0, 0, 0));
+
         FillRect(hMemDC, &rect, hBrush);
         DeleteObject(hBrush);
 
-        s_shadow_dirty = 1;
         render_all();
         hdc = GetDC(hWnd);
 
@@ -951,11 +1101,17 @@ static void render_cell(int row, int col, Cell *cell)
     FillRect(hMemDC, &rect, hBrush);
     DeleteObject(hBrush);
 
-    /* render glyph centered in cell, surrogate-pair aware */
+    /* render glyph, surrogate-pair aware */
     if (draw_cp >= 0x20)
     {
-        if (s_use_te && s_te_dc)
+        if (is_block_glyph(draw_cp))
+        {
+            draw_block_glyph(rect.left, rect.top, cell_w, fh, draw_cp, s_rgb_map[s_cur_fg_idx]);
+        }
+        else if (s_use_te && s_te_dc)
+        {
             draw_glyph_te(rect.left, rect.top, cell_w, draw_cp);
+        }
         else
         {
             int wlen = cp_to_utf16(draw_cp, buf);
@@ -967,7 +1123,6 @@ static void render_cell(int row, int col, Cell *cell)
 /* Force complete redraw (call after font change) */
 void win32_force_redraw(void)
 {
-    s_shadow_dirty = 1;
     render_all();
 }
 
@@ -997,6 +1152,7 @@ static int utf16be_to_utf8(const unsigned char *src, int src_len, char *dst, int
 {
     int i;
     int dst_pos = 0;
+    unsigned short low;
 
     for (i = 0; i < src_len; i += 2)
     {
@@ -1008,13 +1164,14 @@ static int utf16be_to_utf8(const unsigned char *src, int src_len, char *dst, int
             break;
 
         wc = (unsigned short)((src[i] << 8) | src[i + 1]);
+        low = 0;
 
         if (wc >= 0xD800 && wc <= 0xDBFF)
         {
             if (i + 3 >= src_len)
                 break;
 
-            unsigned short low = (unsigned short)((src[i + 2] << 8) | src[i + 3]);
+            low = (unsigned short)((src[i + 2] << 8) | src[i + 3]);
 
             if (low < 0xDC00 || low > 0xDFFF)
                 break;
@@ -1252,35 +1409,20 @@ int win32_get_font_family_name(const char *path, char *out, int out_sz)
 int win32_add_font_file(const char *path)
 {
     wchar_t *wpath = NULL;
-    int count;
 
     if (!path || !path[0])
         return 0;
 
-    fprintf(stderr, "[win32_add_font_file] path=%s\n", path);
-
     if (s_added_font_count >= WIN32_ADDED_FONTS_MAX)
-    {
-        fprintf(stderr, "[win32_add_font_file] too many fonts\n");
         return -1;
-    }
 
     wpath = utf8_to_wcs(path, NULL);
 
     if (!wpath)
-    {
-        fprintf(stderr, "[win32_add_font_file] utf8_to_wcs failed\n");
         return -1;
-    }
 
-    count = AddFontResourceExW(wpath, FR_PRIVATE, 0);
-
-    fprintf(stderr, "[win32_add_font_file] AddFontResourceExW returned %d\n", count);
-
+    AddFontResourceExW(wpath, FR_PRIVATE, 0);
     free(wpath);
-
-    if (count <= 0)
-        fprintf(stderr, "[win32_add_font_file] GDI rejected font, will still try FreeType\n");
 
     strncpy(s_added_fonts[s_added_font_count], path, MAX_PATH - 1);
 
@@ -1311,497 +1453,55 @@ void win32_clear_font_files(void)
     s_added_font_count = 0;
 }
 
-/* Fill s_dirty_row[] for row r; returns 1 if anything needs redrawing */
-static int compute_dirty_row(int r)
-{
-    int c;
-    int any = 0;
-    int cols = COLS;
-    int countdown = 0;
-    int has_wide;
-
-    if (cols > SHADOW_DIRTY_MAX_COLS)
-        cols = SHADOW_DIRTY_MAX_COLS;
-
-    /* diff against shadow buffer */
-    if (!s_shadow || s_shadow_dirty)
-    {
-        for (c = 0; c < cols; c++)
-            s_dirty_tmp[c] = 1;
-
-        any = (cols > 0);
-    }
-    else
-    {
-        Cell *row_sh = &s_shadow[r * COLS];
-
-        for (c = 0; c < cols; c++)
-        {
-            Cell *cc = CELL(stdscr, r, c);
-            int d = (cc->ch != row_sh[c].ch) || (cc->attrs != row_sh[c].attrs) || (cc->full_cp != row_sh[c].full_cp);
-
-            s_dirty_tmp[c] = (unsigned char)d;
-            any |= d;
-        }
-    }
-
-    if (!any)
-    {
-        for (c = 0; c < cols; c++)
-            s_dirty_row[c] = 0;
-
-        return 0;
-    }
-
-    /* wide or complex-script row: force full-row repaint for correct shaping */
-    has_wide = 0;
-
-    for (c = 0; c < cols; c++)
-    {
-        Cell *cc = CELL(stdscr, r, c);
-        ULONG ch = (ULONG)cc->ch;
-
-        if (ch != WIN32_CELL_WIDE_TRAILING)
-        {
-            if (is_wide_cp((unsigned int)ch) || is_complex_cp((unsigned int)ch))
-            {
-                has_wide = 1;
-                break;
-            }
-        }
-
-        /* these ranges are also caught by is_wide_cp but kept here for safety */
-        if ((ch >= 0x2190 && ch <= 0x21FF) ||
-            (ch >= 0x2500 && ch <= 0x259F) ||
-            (ch >= 0x25A0 && ch <= 0x25FF) ||
-            (ch >= 0x2600 && ch <= 0x26FF) ||
-            (ch >= 0x2700 && ch <= 0x27BF) ||
-            (ch >= 0x2B00 && ch <= 0x2BFF))
-        {
-            has_wide = 1;
-            break;
-        }
-    }
-
-    if (has_wide)
-    {
-        for (c = 0; c < cols; c++)
-            s_dirty_row[c] = 1;
-
-        return 1;
-    }
-
-    /* bleed dirty region by ±SHADOW_BLEED_CELLS to cover subpixel overflow */
-    for (c = 0; c < cols; c++)
-    {
-        if (s_dirty_tmp[c])
-            countdown = SHADOW_BLEED_CELLS + 1;
-
-        s_dirty_row[c] = (unsigned char)(countdown > 0);
-
-        if (countdown > 0)
-            countdown--;
-    }
-
-    countdown = 0;
-
-    for (c = cols - 1; c >= 0; c--)
-    {
-        if (s_dirty_tmp[c])
-            countdown = SHADOW_BLEED_CELLS + 1;
-
-        if (countdown > 0)
-        {
-            s_dirty_row[c] = 1;
-            countdown--;
-        }
-    }
-
-    return 1;
-}
-
-/* Render all dirty cells to hMemDC, then blit to window */
+/* Render all cells to hMemDC, then blit to window */
 static void render_all(void)
 {
     int r, c;
-    Cell *cell;
-    int last_pair = -1;
-    int last_attrs = -1;
-    char *text_buf = NULL;
-    int cy_cell, cx_cell, prev_y, prev_x;
 
     if (!stdscr || !stdscr->cells || !hMemDC)
         return;
 
-    /* reallocate shadow buffer if screen size changed */
-    if (!s_shadow || s_shadow_w != COLS || s_shadow_h != LINES)
-    {
-        if (s_shadow)
-            free(s_shadow);
-
-        s_shadow = (Cell *)calloc((size_t)(LINES * COLS), sizeof(Cell));
-
-        if (!s_shadow)
-        {
-            /* no shadow: full redraw every frame */
-            s_shadow_w = 0;
-            s_shadow_h = 0;
-            s_shadow_dirty = 1;
-        }
-        else
-        {
-            s_shadow_w = COLS;
-            s_shadow_h = LINES;
-            s_shadow_dirty = 1;
-        }
-    }
-
-    /* temp wchar_t buffer for batched TextOutW */
-    text_buf = (char *)malloc((COLS + 1) * sizeof(wchar_t));
-
-    if (!text_buf)
-        return;
-
     for (r = 0; r < LINES; r++)
     {
-        /* skip clean rows */
-        if (!compute_dirty_row(r))
-            continue;
-
-        c = 0;
-
-        while (c < COLS)
+        for (c = 0; c < COLS; c++)
         {
-            int run_start, run_pair, run_attrs;
-            int run_len;
-            int run_has_wide;
-            RECT rect;
-            HBRUSH hBrush;
-
-            cell = CELL(stdscr, r, c);
-
-            /* skip clean cell */
-            if (!s_dirty_row[c])
-            {
-                c++;
-                continue;
-            }
-
-            /* start a same-color run */
-            run_start = c;
-            run_pair = (cell->attrs & A_COLOR) >> 8;
-            run_attrs = cell->attrs;
-            run_len = 0;
-            run_has_wide = 0;
-
-            while (c < COLS && run_len < COLS)
-            {
-                Cell *cc;
-                int p;
-                wchar_t wc;
-                int is_wide; /* unused in accumulation loop but declared for scope */
-
-                cc = CELL(stdscr, r, c);
-
-                if (!s_dirty_row[c])
-                    break;
-
-                p = (cc->attrs & A_COLOR) >> 8;
-
-                /* break run on color or reverse-video change */
-                if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
-                    break;
-
-                /* trailing cell: count it for FillRect area but write no glyph */
-                if (cc->ch == WIN32_CELL_WIDE_TRAILING)
-                {
-                    if (s_shadow)
-                        s_shadow[r * COLS + c] = *cc;
-
-                    run_len++; /* area count only */
-                    c++;
-
-                    continue;
-                }
-
-                /* codepoints >= U+10000 need surrogate pairs -> per-cell path */
-                if (cc->full_cp || cc->ch >= 0x10000)
-                {
-                    run_has_wide = 1;
-                    break;
-                }
-
-                wc = (wchar_t)cc->ch;
-                ((wchar_t *)text_buf)[run_len++] = wc;
-
-                if (s_shadow)
-                    s_shadow[r * COLS + c] = *cc;
-
-                c++;
-            }
-
-            if (run_len <= 0)
-            {
-                c = run_start + 1;
-                continue;
-            }
-
-            /* check for trailing/wide cells; force per-cell render if found */
-            if (!run_has_wide)
-            {
-                int u2;
-                Cell *cc2;
-
-                for (u2 = 0; u2 < run_len; u2++)
-                {
-                    cc2 = CELL(stdscr, r, run_start + u2);
-
-                    if (cc2->ch == WIN32_CELL_WIDE_TRAILING)
-                    {
-                        run_has_wide = 1;
-                        break;
-                    }
-                }
-            }
-
-            /* FreeType renderer draws per glyph so it can pick the right fallback font */
-            if (s_use_te && s_te_dc)
-                run_has_wide = 1;
-
-            if (run_pair != last_pair || run_attrs != last_attrs)
-            {
-                apply_colors(run_pair, run_attrs);
-                last_pair = run_pair;
-                last_attrs = run_attrs;
-            }
-
-            if (run_has_wide)
-            {
-                /* per-cell render: each glyph pinned to its cell column */
-                int u;
-                int actual_pos = run_start;
-                Cell *cc;
-                wchar_t wc;
-                int cx;
-                int cy;
-                int is_wide;
-
-                for (u = 0; u < run_len; u++)
-                {
-                    unsigned int draw_cp;
-
-                    cc = CELL(stdscr, r, actual_pos);
-                    wc = (wchar_t)cc->ch;
-                    cx = actual_pos * fw;
-                    cy = r * fh;
-
-                    /* trailing: no glyph */
-                    if (wc == WIN32_CELL_WIDE_TRAILING)
-                    {
-                        actual_pos++;
-                        continue;
-                    }
-
-                    /* Use full 32-bit codepoint if available */
-                    draw_cp = cc->full_cp ? (unsigned int)cc->full_cp : (unsigned int)wc;
-
-                    /* wide glyph: 2-cell allocation */
-                    is_wide = is_wide_cp(draw_cp);
-
-                    /* clear background (1 or 2 cells) */
-                    rect.left = cx;
-                    rect.top = cy;
-                    rect.right = cx + (is_wide ? 2 * fw : fw);
-                    rect.bottom = cy + fh;
-
-                    hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
-
-                    FillRect(hMemDC, &rect, hBrush);
-                    DeleteObject(hBrush);
-
-                    /* render glyph centered in cell */
-                    if (draw_cp >= 0x20)
-                    {
-                        int cell_w_pixels = is_wide ? 2 * fw : fw;
-
-                        if (s_use_te && s_te_dc)
-                            draw_glyph_te(cx, cy, cell_w_pixels, draw_cp);
-                        else
-                        {
-                            wchar_t buf[2];
-                            int wlen = cp_to_utf16(draw_cp, buf);
-
-                            draw_glyph_in_cell(cx, cy, cell_w_pixels, buf, wlen);
-                        }
-                    }
-
-                    /* advance past trailing cell for wide glyphs */
-                    if (is_wide)
-                        actual_pos += 2;
-                    else
-                        actual_pos++;
-                }
-            }
-            else
-            {
-                /* batched TextOutW for normal (narrow BMP) runs */
-                rect.left = run_start * fw;
-                rect.top = r * fh;
-                rect.right = rect.left + run_len * fw;
-                rect.bottom = rect.top + fh;
-
-                hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
-
-                FillRect(hMemDC, &rect, hBrush);
-                DeleteObject(hBrush);
-
-                /* draw the run */
-                TextOutW(hMemDC, rect.left, rect.top, (LPCWSTR)text_buf, run_len);
-            }
+            Cell *cell = CELL(stdscr, r, c);
+            render_cell(r, c, cell);
         }
-
-        /* reset color tracking per row */
-        last_pair = -1;
-        last_attrs = -1;
     }
-
-    free(text_buf);
-
-    s_shadow_dirty = 0;
 
     /* draw cursor as a rectangle border */
-    cy_cell = stdscr ? stdscr->_cury : -1;
-    cx_cell = stdscr ? stdscr->_curx : -1;
-    prev_y = s_last_cur_y;
-    prev_x = s_last_cur_x;
-
-    /* erase old cursor border */
-    if (s_shadow && prev_y >= 0 && prev_x >= 0 && prev_y < LINES && prev_x < COLS && (prev_y != cy_cell || prev_x != cx_cell))
+    if (s_cursor_vis && stdscr && stdscr->_cury >= 0 && stdscr->_cury < LINES && stdscr->_curx >= 0 && stdscr->_curx < COLS)
     {
-        Cell *cell = CELL(stdscr, prev_y, prev_x);
-        int sync_lead = prev_x;
-        int row_has_complex = 0;
-        int cc_col;
-
-        /* skip bleed repaint on complex-script rows (main loop already did full-row repaint) */
-        for (cc_col = 0; cc_col < COLS; cc_col++)
-        {
-            Cell *cb = CELL(stdscr, prev_y, cc_col);
-            ULONG ch = (ULONG)cb->ch;
-
-            if (ch != WIN32_CELL_WIDE_TRAILING && is_complex_cp((unsigned int)ch))
-            {
-                row_has_complex = 1;
-                break;
-            }
-        }
-
-        if (!row_has_complex)
-        {
-            /* repaint bleed window around old cursor to remove ClearType residue */
-            int b;
-            int bleed_lo = prev_x - SHADOW_BLEED_CELLS;
-            int bleed_hi = prev_x + SHADOW_BLEED_CELLS;
-
-            if (bleed_lo < 0)
-                bleed_lo = 0;
-
-            if (bleed_hi >= COLS)
-                bleed_hi = COLS - 1;
-
-            for (b = bleed_lo; b <= bleed_hi; b++)
-            {
-                Cell *cb = CELL(stdscr, prev_y, b);
-
-                if (cb->ch == WIN32_CELL_WIDE_TRAILING && b > 0)
-                {
-                    /* render from lead: trailing alone is a no-op in render_cell */
-                    Cell *lead = CELL(stdscr, prev_y, b - 1);
-
-                    render_cell(prev_y, b - 1, lead);
-                }
-                else
-                {
-                    render_cell(prev_y, b, cb);
-                }
-            }
-        }
-
-        /* if prev cursor was on a trailing cell, sync the lead */
-        if (cell->ch == WIN32_CELL_WIDE_TRAILING && prev_x > 0)
-            sync_lead = prev_x - 1;
-
-        s_shadow[prev_y * COLS + sync_lead] = *CELL(stdscr, prev_y, sync_lead);
-
-        /* also resync the trailing companion */
-        if (sync_lead + 1 < COLS)
-        {
-            Cell *trail = CELL(stdscr, prev_y, sync_lead + 1);
-
-            if (trail->ch == WIN32_CELL_WIDE_TRAILING)
-                s_shadow[prev_y * COLS + sync_lead + 1] = *trail;
-        }
-    }
-
-    /* draw cursor outline */
-    if (s_cursor_vis && cy_cell >= 0 && cy_cell < LINES && cx_cell >= 0 && cx_cell < COLS)
-    {
-        HPEN hPen, oldPen;
-        int cx, cy;
+        int cy = stdscr->_cury;
+        int cx = stdscr->_curx;
+        int cx_pixel, cy_pixel;
         int cursor_w = fw;
-        int draw_x_cell = cx_cell;
-        int trailing_x_cell = -1; /* -1 = none */
+        int draw_x_cell = cx;
+        Cell *cur = CELL(stdscr, cy, cx);
         RECT rc;
 
-        /* cursor width: 2*fw on wide glyph, fw otherwise */
-        if (stdscr && stdscr->cells)
+        if (cur->ch == WIN32_CELL_WIDE_TRAILING && cx > 0)
         {
-            Cell *cur = CELL(stdscr, cy_cell, cx_cell);
+            draw_x_cell = cx - 1;
+            cursor_w = 2 * fw;
+        }
+        else if (cx + 1 < COLS)
+        {
+            Cell *nxt = CELL(stdscr, cy, cx + 1);
 
-            if (cur->ch == WIN32_CELL_WIDE_TRAILING && cx_cell > 0)
-            {
-                draw_x_cell = cx_cell - 1;
-                trailing_x_cell = cx_cell;
+            if (nxt->ch == WIN32_CELL_WIDE_TRAILING)
                 cursor_w = 2 * fw;
-            }
-            else if (cx_cell + 1 < COLS)
-            {
-                Cell *nxt = CELL(stdscr, cy_cell, cx_cell + 1);
-
-                if (nxt->ch == WIN32_CELL_WIDE_TRAILING)
-                {
-                    trailing_x_cell = cx_cell + 1;
-                    cursor_w = 2 * fw;
-                }
-            }
         }
 
-        cx = draw_x_cell * fw;
-        cy = cy_cell * fh;
+        cx_pixel = draw_x_cell * fw;
+        cy_pixel = cy * fh;
 
-        /* XOR block cursor preserves underlying text */
-        rc.left = cx;
-        rc.top = cy;
-        rc.right = cx + cursor_w;
-        rc.bottom = cy + fh;
+        rc.left = cx_pixel;
+        rc.top = cy_pixel;
+        rc.right = cx_pixel + cursor_w;
+        rc.bottom = cy_pixel + fh;
         InvertRect(hMemDC, &rc);
-
-        /* dirty the cursor cells so next render repaints under it */
-        if (s_shadow)
-        {
-            s_shadow[cy_cell * COLS + draw_x_cell].ch ^= 0x10000;
-
-            if (cursor_w > fw && draw_x_cell + 1 < COLS)
-                s_shadow[cy_cell * COLS + draw_x_cell + 1].ch ^= 0x10000;
-        }
-
-        s_last_cur_y = cy_cell;
-        s_last_cur_x = cx_cell;
-    }
-    else
-    {
-        s_last_cur_y = -1;
-        s_last_cur_x = -1;
     }
 
     /* blit to window */
@@ -1916,10 +1616,7 @@ WINDOW *initscr(void)
 
             for (i = 0; i < s_added_font_count; i++)
             {
-                if (TE_FontAdd(s_te_dc, s_added_fonts[i], (LONG)s_win_font_size, 0))
-                    fprintf(stderr, "[win32_init_screen] TE_FontAdd OK: %s\n", s_added_fonts[i]);
-                else
-                    fprintf(stderr, "[win32_init_screen] TE_FontAdd failed: %s\n", s_added_fonts[i]);
+                TE_FontAdd(s_te_dc, s_added_fonts[i], (LONG)s_win_font_size, 0);
             }
 
             TE_GetMetrics(s_te_dc, &metrics);
@@ -1930,7 +1627,6 @@ WINDOW *initscr(void)
                 fw = metrics.width;
                 fh = metrics.height;
                 fb = metrics.baseY;
-                fprintf(stderr, "[win32_init_screen] TE metrics fw=%d fh=%d fb=%d\n", fw, fh, fb);
             }
             else
             {
@@ -2021,20 +1717,9 @@ WINDOW *initscr(void)
     DeleteObject(hBrush);
 
     /* Create font */
-    fprintf(stderr, "[win32_init_screen] CreateFont size=%dx%d name=%s\n", fw, fh, win_font_name);
-
     hFont = CreateFont(fh, fw, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, TEXT(win_font_name));
 
     s_hfont_is_stock = 0;
-
-    if (!hFont)
-    {
-        fprintf(stderr, "[win32_init_screen] CreateFont failed\n");
-    }
-    else
-    {
-        fprintf(stderr, "[win32_init_screen] CreateFont OK\n");
-    }
 
     if (!hFont)
     {
@@ -2044,8 +1729,8 @@ WINDOW *initscr(void)
 
     SelectObject(hMemDC, hFont);
 
-    /* read back actual font metrics */
-    if (GetTextMetrics(hMemDC, &tm))
+    /* Read back actual font metrics */
+    if (GetTextMetrics(hMemDC, &tm) && !s_use_te)
     {
         fw = tm.tmAveCharWidth;
         fh = tm.tmHeight;
@@ -2139,12 +1824,6 @@ int endwin(void)
         TE_ContextRelease(s_te_dc);
         s_te_dc = NULL;
         s_use_te = 0;
-    }
-
-    if (s_shadow)
-    {
-        free(s_shadow);
-        s_shadow = NULL;
     }
 
     if (stdscr)
@@ -2414,7 +2093,6 @@ int waddch(WINDOW *win, const chtype ch)
     int r, c;
     chtype ch_out;
     attr_t attrs;
-    wchar_t wc;
     int cw;
 
     if (!win)
@@ -2425,6 +2103,10 @@ int waddch(WINDOW *win, const chtype ch)
 
     if (r < 0 || r >= win->_maxy || c < 0 || c >= win->_maxx)
         return ERR;
+
+    /* Emoji / supplementary-plane: do not truncate to 16 bits */
+    if (ch > 0xFFFFUL)
+        return waddch32(win, ch);
 
     ch_out = ch & A_CHARTEXT;
     attrs = (ch & A_ATTRIBUTES) | win->attrs;
@@ -2444,10 +2126,8 @@ int waddch(WINDOW *win, const chtype ch)
         }
     }
 
-    wc = (wchar_t)ch_out;
-
-    /* Tab: advance to next tab stop, filling span cells with space */
-    if (ch_out == '\t')
+    /* Tab expands to tab stop; in ANSI mode '\t' is one CP437 cell */
+    if (!s_ansi_mode && ch_out == '\t')
     {
         int tab_w = s_tab_size - (c % s_tab_size);
         int j;
@@ -2693,59 +2373,6 @@ int waddstr(WINDOW *win, const char *str)
     if (!str)
         return ERR;
     return waddnstr(win, str, (int)strlen(str));
-}
-
-/* Decode one UTF-8 sequence; returns 0 on success, -1 on error (fallback to Latin-1) */
-static int utf8_decode_one(const unsigned char *p, int max, wchar_t *out, int *consumed)
-{
-    unsigned char b0;
-
-    if (max <= 0)
-    {
-        *out = 0;
-        *consumed = 0;
-        return -1;
-    }
-
-    b0 = p[0];
-
-    /* ASCII */
-    if (b0 < 0x80)
-    {
-        *out = (wchar_t)b0;
-        *consumed = 1;
-        return 0;
-    }
-
-    /* 2-byte */
-    if ((b0 & 0xE0) == 0xC0 && max >= 2 && (p[1] & 0xC0) == 0x80)
-    {
-        *out = (wchar_t)(((b0 & 0x1F) << 6) | (p[1] & 0x3F));
-        *consumed = 2;
-        return 0;
-    }
-
-    /* 3-byte */
-    if ((b0 & 0xF0) == 0xE0 && max >= 3 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80)
-    {
-        *out = (wchar_t)(((b0 & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F));
-        *consumed = 3;
-        return 0;
-    }
-
-    /* 4-byte: wchar_t is 16-bit on Windows, replace with U+FFFD */
-    if ((b0 & 0xF8) == 0xF0 && max >= 4 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80)
-    {
-        *out = (wchar_t)0xFFFD;
-        *consumed = 4;
-        return 0;
-    }
-
-    /* malformed: emit as Latin-1 */
-    *out = (wchar_t)b0;
-    *consumed = 1;
-
-    return -1;
 }
 
 static int utf8_decode_one_cp(const unsigned char *p, int max, unsigned long *out, int *consumed)
@@ -3961,8 +3588,6 @@ int win32_set_font_name(const char *font_name)
 {
     const char *src = (font_name && font_name[0]) ? font_name : "Consolas";
 
-    fprintf(stderr, "[win32_set_font_name] name=%s\n", src);
-
     strncpy(win_font_name, src, WIN_FONT_NAME_MAX - 1);
     win_font_name[WIN_FONT_NAME_MAX - 1] = '\0';
 
@@ -3983,6 +3608,13 @@ int win32_set_cursor_pen(int color)
     s_cursor_color = color;
 
     return old;
+}
+
+/* Toggle ANSI art mode (CP437 art): every cell is 1 column wide */
+void win32_set_ansi_mode(int use_ansi)
+{
+    s_ansi_mode = use_ansi ? 1 : 0;
+    win32_force_redraw();
 }
 
 /* Copy a rectangle of cells from src to dst */

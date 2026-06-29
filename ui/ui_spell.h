@@ -26,6 +26,12 @@ int spell_load_from_config(TeApp *app);
 int spell_check_word(TeApp *app);
 int ui_spell_check_word_simple(TeApp *app, const wchar_t *word, int word_len);
 
+/* UI-level spell-check cache */
+void ui_spell_cache_init(TeSpellCache *cache);
+void ui_spell_cache_clear(TeSpellCache *cache);
+int ui_spell_cache_lookup(TeSpellCache *cache, const wchar_t *word, int word_len, int *out_incorrect);
+void ui_spell_cache_put(TeSpellCache *cache, const wchar_t *word, int word_len, int incorrect);
+
 #endif
 
 #endif /* UI_SPELL_H */

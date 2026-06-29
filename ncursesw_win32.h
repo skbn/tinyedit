@@ -523,6 +523,7 @@ int win32_add_font_file(const char *path);
 void win32_clear_font_files(void);
 int win32_get_font_family_name(const char *path, char *out, int out_sz);
 int win32_set_cursor_pen(int color);
+void win32_set_ansi_mode(int use_ansi);
 void win32_force_redraw(void);
 
 /* Border/line */
