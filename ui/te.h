@@ -32,6 +32,138 @@
 #include "tabs.h"
 #include "wm.h"
 
+/*
+ * UI-level spell-check result cache, keyed by exact wchar_t word
+ * UI cache hit > return result
+ * UI cache miss > spell_check() > internal cache hit/miss > save result in UI cache
+ *
+ * UI cache (the first layer):
+ * If the word is there, it returns the result without calling Hunspell
+ *
+ * If it's not there, it moves to the next layer
+ * When it's full, it overwrites the oldest entry (it doesn't delegate to the other cache)
+ * Hunspell's internal cache (SPELL_CACHE_N): It's checked inside spell_check(), only when the UI cache fails
+ * If the word was in the internal cache, it avoids the affix/lowercase handling
+ *
+ * If the user edited the custom dictionary file directly, reload it so new words are recognized immediately
+ */
+
+#ifndef TE_SPELL_CACHE_SIZE
+#ifdef PLATFORM_AMIGA
+#define TE_SPELL_CACHE_SIZE 2048
+#else
+#define TE_SPELL_CACHE_SIZE 8192
+#endif
+#endif
+
+typedef struct
+{
+    wchar_t *word; /* NULL = empty slot */
+    int len;
+    int incorrect; /* 1 = misspelled, 0 = correct */
+} TeSpellCacheEntry;
+
+typedef struct
+{
+    TeSpellCacheEntry entries[TE_SPELL_CACHE_SIZE];
+} TeSpellCache;
+
+/* Search state */
+typedef struct
+{
+    wchar_t query[64];        /* last search query */
+    wchar_t last_replace[64]; /* last replacement text */
+    int *rows;                /* malloc'd match row indices */
+    int *cols;                /* malloc'd match col indices */
+    int count;                /* number of matches */
+    int is_mode;              /* 0=normal, 1=search mode */
+    int only_mode;            /* 1=only search mode activated by F5 */
+    int current_match;        /* Current match index (0-based) for navigation */
+    int match_current;        /* Current match number (1-based) for display */
+    int match_total;          /* Total number of matches for display */
+    int case_sensitive;       /* Search case sensitivity flag */
+    int whole_word;           /* Search whole word flag */
+} TeSearch;
+
+/* Generic inline text input widget (wchar_t only) */
+typedef struct
+{
+    wchar_t *buf;
+    int bufsz;
+    int cursor;
+    int len;
+} InputState;
+
+/* App state */
+typedef struct
+{
+    TeWindowManager *wm;
+    TeTab **tabs;
+    int tab_count;
+    int tab_cap;
+    int active_tab;
+    int hard_wrap;
+    int wrap_col;
+    int show_line_numbers;
+    int show_tabs;
+    int show_translate;
+    int show_spell;
+    int spell_panel_mode;    /* -1=hidden, 0=spell, 1=translate, 2=dict */
+    int tabs_panel_active;   /* Navigation mode in tabs panel */
+    int tabs_panel_selected; /* Currently selected tab in panel */
+
+    char *dict_result;
+    char dict_word[128];
+    int dict_scroll;
+
+    int bracket_match_row;
+    int bracket_match_col;
+
+    char status[256];
+    char cfg_path[512];
+
+    TeConfig cfg;
+    TeSearch search;
+
+#ifdef HAVE_HUNSPELL
+    void *spell_handle;              /* Hunspell handle (void* to avoid including hunspell.h here) */
+    int spell_enabled;               /* Spell checker enabled in config */
+    int spell_active;                /* Spell checker active (manual control) */
+    wchar_t spell_current_word[256]; /* Current word being checked (wchar_t) */
+    int spell_word_status;           /* 0=not checked, 1=correct, 2=incorrect */
+    char **spell_suggestions;        /* Suggestions from Hunspell */
+    int spell_suggestion_count;      /* Number of suggestions */
+    int spell_scroll_offset;         /* Scroll offset for suggestions */
+    TeSpellCache spell_cache;        /* Cache for visible-word spell-check results */
+
+#ifdef HAVE_HYPHEN
+    void *hyph_handle;     /* HyphDict */
+    int hyph_wrap_enabled; /* Use hyphenation in hard-wrap mode */
+#endif
+
+#ifdef HAVE_MYTHES
+    void *thes_handle; /* ThesHandle */
+#endif
+
+#endif /* HAVE_HUNSPELL */
+
+#ifdef HAVE_TRANSLATE
+    void *translate_handle;    /* TranslateHandle* (opaque) */
+    int translate_enabled;     /* Translator enabled in config */
+    int translate_active;      /* Translator active (manual toggle) */
+    int translate_http_inited; /* flag: http_client_init was called */
+#endif
+
+    char charset_in[32];
+    char charset_out[32];
+
+    /* Editor assistance toggles. Default off; enabled via setup UI
+     * Each one independent: smart_quotes, repeat_check, auto_cap */
+    int assist_smart_quotes; /* '  -> ‘/’ ; "  -> “/”            */
+    int assist_repeat_check; /* warn/highlight on "the the" etc */
+    int assist_auto_cap;     /* capitalize after ". ", "? ", "! " */
+} TeApp;
+
 /* CTRL(x) */
 #ifndef CTRL
 #define CTRL(ch) ((ch) - 64)
@@ -151,138 +283,6 @@
         printf("\033[?2004l"); \
         fflush(stdout);        \
     } while (0)
-
-/* Search state */
-typedef struct
-{
-    wchar_t query[64];        /* last search query */
-    wchar_t last_replace[64]; /* last replacement text */
-    int *rows;                /* malloc'd match row indices */
-    int *cols;                /* malloc'd match col indices */
-    int count;                /* number of matches */
-    int is_mode;              /* 0=normal, 1=search mode */
-    int only_mode;            /* 1=only search mode activated by F5 */
-    int current_match;        /* Current match index (0-based) for navigation */
-    int match_current;        /* Current match number (1-based) for display */
-    int match_total;          /* Total number of matches for display */
-    int case_sensitive;       /* Search case sensitivity flag */
-    int whole_word;           /* Search whole word flag */
-} TeSearch;
-
-/*
- * UI-level spell-check result cache, keyed by exact wchar_t word
- * UI cache hit > return result
- * UI cache miss > spell_check() > internal cache hit/miss > save result in UI cache
- *
- * UI cache (the first layer):
- * If the word is there, it returns the result without calling Hunspell
- *
- * If it's not there, it moves to the next layer
- * When it's full, it overwrites the oldest entry (it doesn't delegate to the other cache)
- * Hunspell's internal cache (SPELL_CACHE_N): It's checked inside spell_check(), only when the UI cache fails
- * If the word was in the internal cache, it avoids the affix/lowercase handling
- *
- * If the user edited the custom dictionary file directly, reload it so new words are recognized immediately
- */
-
-#ifndef TE_SPELL_CACHE_SIZE
-#ifdef PLATFORM_AMIGA
-#define TE_SPELL_CACHE_SIZE 2048
-#else
-#define TE_SPELL_CACHE_SIZE 8192
-#endif
-#endif
-
-typedef struct
-{
-    wchar_t *word; /* NULL = empty slot */
-    int len;
-    int incorrect; /* 1 = misspelled, 0 = correct */
-} TeSpellCacheEntry;
-
-typedef struct
-{
-    TeSpellCacheEntry entries[TE_SPELL_CACHE_SIZE];
-} TeSpellCache;
-
-/* Generic inline text input widget (wchar_t only) */
-typedef struct
-{
-    wchar_t *buf;
-    int bufsz;
-    int cursor;
-    int len;
-} InputState;
-
-/* App state */
-typedef struct
-{
-    TeWindowManager *wm;
-    TeTab **tabs;
-    int tab_count;
-    int tab_cap;
-    int active_tab;
-    int hard_wrap;
-    int wrap_col;
-    int show_line_numbers;
-    int show_tabs;
-    int show_translate;
-    int show_spell;
-    int spell_panel_mode;    /* -1=hidden, 0=spell, 1=translate, 2=dict */
-    int tabs_panel_active;   /* Navigation mode in tabs panel */
-    int tabs_panel_selected; /* Currently selected tab in panel */
-
-    char *dict_result;
-    char dict_word[128];
-    int dict_scroll;
-
-    int bracket_match_row;
-    int bracket_match_col;
-
-    char status[256];
-    char cfg_path[512];
-
-    TeConfig cfg;
-    TeSearch search;
-
-#ifdef HAVE_HUNSPELL
-    void *spell_handle;              /* Hunspell handle (void* to avoid including hunspell.h here) */
-    int spell_enabled;               /* Spell checker enabled in config */
-    int spell_active;                /* Spell checker active (manual control) */
-    wchar_t spell_current_word[256]; /* Current word being checked (wchar_t) */
-    int spell_word_status;           /* 0=not checked, 1=correct, 2=incorrect */
-    char **spell_suggestions;        /* Suggestions from Hunspell */
-    int spell_suggestion_count;      /* Number of suggestions */
-    int spell_scroll_offset;         /* Scroll offset for suggestions */
-    TeSpellCache spell_cache;        /* Cache for visible-word spell-check results */
-
-#ifdef HAVE_HYPHEN
-    void *hyph_handle;     /* HyphDict */
-    int hyph_wrap_enabled; /* Use hyphenation in hard-wrap mode */
-#endif
-
-#ifdef HAVE_MYTHES
-    void *thes_handle; /* ThesHandle */
-#endif
-
-#endif /* HAVE_HUNSPELL */
-
-#ifdef HAVE_TRANSLATE
-    void *translate_handle;    /* TranslateHandle* (opaque) */
-    int translate_enabled;     /* Translator enabled in config */
-    int translate_active;      /* Translator active (manual toggle) */
-    int translate_http_inited; /* flag: http_client_init was called */
-#endif
-
-    char charset_in[32];
-    char charset_out[32];
-
-    /* Editor assistance toggles. Default off; enabled via setup UI
-     * Each one independent: smart_quotes, repeat_check, auto_cap */
-    int assist_smart_quotes; /* '  -> ‘/’ ; "  -> “/”            */
-    int assist_repeat_check; /* warn/highlight on "the the" etc */
-    int assist_auto_cap;     /* capitalize after ". ", "? ", "! " */
-} TeApp;
 
 /* Helper functions to access active tab data */
 Ed *te_app_get_editor(TeApp *app);

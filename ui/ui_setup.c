@@ -206,6 +206,7 @@ static const SetupField st_fields[] =
         {0, "Smart indent", FT_BOOL, F_OFF(smart_indent), 0},
         {0, "Auto-close brackets", FT_BOOL, F_OFF(autoclose), 0},
         {0, "Match brackets", FT_BOOL, F_OFF(show_brackets), 0},
+        {0, "Syntax enabled", FT_BOOL, F_OFF(syntax_enabled), 0},
         {0, "Word move mode", FT_CYCLE, F_OFF(word_move_mode), 0},
         /* Text assists */
         {0, "Smart quotes", FT_BOOL, F_OFF(assist_smart_quotes), 0},
@@ -249,6 +250,11 @@ static const SetupField st_fields[] =
         {1, "Bracket Match", FT_COLORPAIR, F_OFF(color_fg) + COL_BRACKET_MATCH * sizeof(int), 0},
         {1, "Current Line", FT_COLORPAIR, F_OFF(color_fg) + COL_CURRENT_LINE * sizeof(int), 0},
         {1, "Guides", FT_COLORPAIR, F_OFF(color_fg) + COL_GUIDE * sizeof(int), 0},
+        {1, "Syntax Keyword", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_KEYWORD * sizeof(int), 0},
+        {1, "Syntax String", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_STRING * sizeof(int), 0},
+        {1, "Syntax Comment", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_COMMENT * sizeof(int), 0},
+        {1, "Syntax Number", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_NUMBER * sizeof(int), 0},
+        {1, "Syntax Preproc", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_PREPROC * sizeof(int), 0},
         {1, "Cursor color", FT_INT, F_OFF(cursor_color), 0},
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "Default BG", FT_INT, F_OFF(default_bg_color), 0},

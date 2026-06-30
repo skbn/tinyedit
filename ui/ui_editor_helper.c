@@ -198,6 +198,74 @@ void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_w
     }
 
     mvaddnwstr(y, x, buf, out_len);
+
+    attrset(COLOR_PAIR(COL_NORMAL));
+}
+
+/* Draw wide string with tab expansion and per-character syntax colors */
+void ui_draw_wcs_line_with_tabs_and_colors(int y, int x, const wchar_t *s, int n, int tab_width, const SyntaxClass *classes, int start_col)
+{
+    int i;
+    int col = start_col;
+    int out_len = 0;
+    int buf_start_col = start_col;
+    int current_color = -1;
+    wchar_t buf[4096];
+    int max_len = (int)(sizeof(buf) / sizeof(buf[0]));
+
+    if (!s || n <= 0 || tab_width < 1)
+        return;
+
+    if (n > max_len / 2)
+        n = max_len / 2;
+
+    for (i = 0; i <= n; i++)
+    {
+        int color = (i < n) ? ui_syntax_color_pair(classes[i]) : -1;
+
+        if (i == n || color != current_color)
+        {
+            if (out_len > 0)
+            {
+                int draw_x = x + (buf_start_col - start_col);
+
+                attrset(COLOR_PAIR(current_color));
+                mvaddnwstr(y, draw_x, buf, out_len);
+                attrset(COLOR_PAIR(COL_NORMAL));
+
+                out_len = 0;
+            }
+
+            if (i < n)
+            {
+                current_color = color;
+                buf_start_col = col;
+            }
+        }
+
+        if (i < n)
+        {
+            if (s[i] == L'\t')
+            {
+                int w = tab_width - (col % tab_width);
+                int j;
+
+                for (j = 0; j < w && out_len < max_len - 1; j++)
+                    buf[out_len++] = L' ';
+
+                col += w;
+            }
+            else
+            {
+                int w = CHAR_VWIDTH(s[i]);
+
+                buf[out_len++] = s[i];
+                col += w;
+            }
+        }
+    }
+
+    attrset(COLOR_PAIR(COL_NORMAL));
 }
 
 /* Visual width with tab-stop support */

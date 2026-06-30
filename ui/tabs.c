@@ -33,6 +33,7 @@ TeTab *te_tab_new(void)
 
     tab->modified = 0;
     tab->show_line_numbers = 0;
+    tab->syntax_lang = -1;
     tab->filename[0] = '\0';
     tab->charset_in[0] = '\0';
     tab->charset_out[0] = '\0';

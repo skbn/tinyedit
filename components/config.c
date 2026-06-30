@@ -256,6 +256,21 @@ static int pair_by_name(const char *s)
     if (strcasecmp(s, "GUIDES") == 0)
         return COL_GUIDE;
 
+    if (strcasecmp(s, "SYNTAXKEYWORD") == 0)
+        return COL_SYNTAX_KEYWORD;
+
+    if (strcasecmp(s, "SYNTAXSTRING") == 0)
+        return COL_SYNTAX_STRING;
+
+    if (strcasecmp(s, "SYNTAXCOMMENT") == 0)
+        return COL_SYNTAX_COMMENT;
+
+    if (strcasecmp(s, "SYNTAXNUMBER") == 0)
+        return COL_SYNTAX_NUMBER;
+
+    if (strcasecmp(s, "SYNTAXPREPROC") == 0)
+        return COL_SYNTAX_PREPROC;
+
     return -1;
 }
 
@@ -275,6 +290,7 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->show_line_numbers = 0;  /* line numbers disabled by default */
     cfg->show_whitespace = 0;    /* whitespace markers off by default */
     cfg->show_brackets = 0;      /* bracket highlight off by default */
+    cfg->syntax_enabled = 1;     /* syntax highlighting on by default */
     cfg->highlight_line = 0;     /* current line highlight off */
     cfg->word_count = 0;         /* word count off */
     cfg->autoclose = 0;          /* bracket auto-close off */
@@ -449,9 +465,22 @@ void te_cfg_defaults(TeConfig *cfg)
     /* COL_GUIDE (11) */
     cfg->color_fg[COL_GUIDE] = 6;
     cfg->color_bg[COL_GUIDE] = 0;
-}
 
-/* Load */
+    cfg->color_fg[COL_SYNTAX_KEYWORD] = 3;
+    cfg->color_bg[COL_SYNTAX_KEYWORD] = 0;
+
+    cfg->color_fg[COL_SYNTAX_STRING] = 2;
+    cfg->color_bg[COL_SYNTAX_STRING] = 0;
+
+    cfg->color_fg[COL_SYNTAX_COMMENT] = 6;
+    cfg->color_bg[COL_SYNTAX_COMMENT] = 0;
+
+    cfg->color_fg[COL_SYNTAX_NUMBER] = 5;
+    cfg->color_bg[COL_SYNTAX_NUMBER] = 0;
+
+    cfg->color_fg[COL_SYNTAX_PREPROC] = 3;
+    cfg->color_bg[COL_SYNTAX_PREPROC] = 0;
+}
 
 int te_cfg_load(TeConfig *cfg, const char *path)
 {
@@ -573,6 +602,10 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         else if (strcasecmp(word, "SHOWBRACKETS") == 0)
         {
             cfg->show_brackets = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "SYNTAX_ENABLED") == 0)
+        {
+            cfg->syntax_enabled = parse_yesno(rest);
         }
         else if (strcasecmp(word, "HIGHLIGHTLINE") == 0)
         {
@@ -1172,6 +1205,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "LINENUMBERS") == 0 ||
                 strcasecmp(word, "SHOWWHITESPACE") == 0 ||
                 strcasecmp(word, "SHOWBRACKETS") == 0 ||
+                strcasecmp(word, "SYNTAX_ENABLED") == 0 ||
                 strcasecmp(word, "HIGHLIGHTLINE") == 0 ||
                 strcasecmp(word, "WORDCOUNT") == 0 ||
                 strcasecmp(word, "AUTOCLOSE") == 0 ||
@@ -1234,6 +1268,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "LINENUMBERS %s\n", cfg->show_line_numbers ? "YES" : "NO");
     fprintf(out, "SHOWWHITESPACE %s\n", cfg->show_whitespace ? "YES" : "NO");
     fprintf(out, "SHOWBRACKETS %s\n", cfg->show_brackets ? "YES" : "NO");
+    fprintf(out, "SYNTAX_ENABLED %s\n", cfg->syntax_enabled ? "YES" : "NO");
     fprintf(out, "HIGHLIGHTLINE %s\n", cfg->highlight_line ? "YES" : "NO");
     fprintf(out, "WORDCOUNT %s\n", cfg->word_count ? "YES" : "NO");
     fprintf(out, "AUTOCLOSE %s\n", cfg->autoclose ? "YES" : "NO");
@@ -1293,6 +1328,11 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "COLOR BRACKETMATCH %s %s\n", color_name(cfg->color_fg[COL_BRACKET_MATCH]), color_name(cfg->color_bg[COL_BRACKET_MATCH]));
     fprintf(out, "COLOR CURRENTLINE %s %s\n", color_name(cfg->color_fg[COL_CURRENT_LINE]), color_name(cfg->color_bg[COL_CURRENT_LINE]));
     fprintf(out, "COLOR GUIDES %s %s\n", color_name(cfg->color_fg[COL_GUIDE]), color_name(cfg->color_bg[COL_GUIDE]));
+    fprintf(out, "COLOR SYNTAXKEYWORD %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_KEYWORD]), color_name(cfg->color_bg[COL_SYNTAX_KEYWORD]));
+    fprintf(out, "COLOR SYNTAXSTRING %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_STRING]), color_name(cfg->color_bg[COL_SYNTAX_STRING]));
+    fprintf(out, "COLOR SYNTAXCOMMENT %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_COMMENT]), color_name(cfg->color_bg[COL_SYNTAX_COMMENT]));
+    fprintf(out, "COLOR SYNTAXNUMBER %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_NUMBER]), color_name(cfg->color_bg[COL_SYNTAX_NUMBER]));
+    fprintf(out, "COLOR SYNTAXPREPROC %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_PREPROC]), color_name(cfg->color_bg[COL_SYNTAX_PREPROC]));
 
     /* COLORMAP for Amiga */
     if (cfg->color_map_initialized)

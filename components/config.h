@@ -29,8 +29,13 @@
 #define COL_BRACKET_MATCH 9
 #define COL_CURRENT_LINE 10 /* Background for current line highlight (universal: works on any ncurses) */
 #define COL_GUIDE 11        /* Dim color for column ruler, indent guides, wrap indicator */
+#define COL_SYNTAX_KEYWORD 12
+#define COL_SYNTAX_STRING 13
+#define COL_SYNTAX_COMMENT 14
+#define COL_SYNTAX_NUMBER 15
+#define COL_SYNTAX_PREPROC 16
 
-#define TE_CFG_COLOR_MAX 64 /* COL_* are 1..9; slot 0 unused */
+#define TE_CFG_COLOR_MAX 64 /* COL_* are 1..16; slot 0 unused */
 
 typedef struct
 {
@@ -57,6 +62,9 @@ typedef struct
 
     /* Bracket matching highlight. Same-line only for now */
     int show_brackets;
+
+    /* Syntax highlighting: 0 = disabled, 1 = enabled */
+    int syntax_enabled;
 
     /* Highlight current line: */
     int highlight_line;

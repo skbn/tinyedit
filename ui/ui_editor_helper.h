@@ -13,6 +13,7 @@
 #define UI_EDITOR_HELPER_H
 
 #include "te.h"
+#include "ui_syntax.h"
 
 /* Additional helper functions */
 int charset_select(TeApp *app);
@@ -80,5 +81,8 @@ int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width);
 
 /* Draw wide string with tab expansion */
 void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_width);
+
+/* Draw wide string with tab expansion and per-character syntax colors */
+void ui_draw_wcs_line_with_tabs_and_colors(int y, int x, const wchar_t *s, int n, int tab_width, const SyntaxClass *classes, int start_col);
 
 #endif /* UI_EDITOR_HELPER_H */

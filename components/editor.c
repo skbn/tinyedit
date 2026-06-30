@@ -364,6 +364,8 @@ static void doc_clear(Ed *ed)
     ed->count = 0;
     ed->word_count_total = 0;
     ed->word_count_initialized = 0;
+    ed->syntax_state_dirty_from = 0;
+    ed->syntax_state_lang = -1;
 }
 
 /* Prefix sum implementation */
@@ -925,6 +927,8 @@ Ed *ed_new(void)
     }
 
     ed->count = 1;
+    ed->syntax_state_dirty_from = -1;
+    ed->syntax_state_lang = -1;
 
     if (prefix_init(ed) != 0)
     {
@@ -949,6 +953,7 @@ void ed_free(Ed *ed)
     free(ed->lines);
     free(ed->killbuf);
     free(ed->auto_rewrap_pre_snapshot);
+    free(ed->syntax_state_cache);
 
     prefix_free(ed);
 
@@ -981,6 +986,8 @@ void ed_load(Ed *ed, const char *utf8_text)
     ed->modified = 0;
     ed->block.active = 0;
     ed->undo_open = 0;
+    ed->syntax_state_dirty_from = 0;
+    ed->syntax_state_lang = -1;
 
     if (!utf8_text || !*utf8_text)
     {
@@ -1074,6 +1081,8 @@ int ed_load_stream(Ed *ed, FILE *fp)
     ed->modified = 0;
     ed->block.active = 0;
     ed->undo_open = 0;
+    ed->syntax_state_dirty_from = 0;
+    ed->syntax_state_lang = -1;
 
     acc_cap = 4096;
     acc = (char *)malloc(acc_cap);
@@ -1908,7 +1917,8 @@ int ed_insert_char(Ed *ed, wchar_t ch)
 
     ln->has_wrap_hyphen = 0;
     ed->col++;
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
 
     ed_prefix_invalidate_from(ed, ed->row);
 
@@ -1942,7 +1952,8 @@ int ed_enter(Ed *ed)
 
     ed->row++;
     ed->col = 0;
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
 
     ed_prefix_invalidate_from(ed, ed->row - 1);
     ed_ensure_visible(ed);
@@ -1981,7 +1992,8 @@ int ed_backspace(Ed *ed)
 
         ln->has_wrap_hyphen = 0;
         ed->col--;
-        ed->modified = 1;
+
+        ed_set_modified(ed, 1);
 
         ed_prefix_invalidate_from(ed, ed->row);
     }
@@ -1997,7 +2009,8 @@ int ed_backspace(Ed *ed)
         line_free(doc_remove_line(ed, ed->row));
 
         ed->row--;
-        ed->modified = 1;
+
+        ed_set_modified(ed, 1);
         ed_prefix_invalidate_from(ed, ed->row);
 
         ed_ensure_visible(ed);
@@ -2036,7 +2049,8 @@ int ed_delete(Ed *ed)
         line_delete(ed, ln, ed->col);
 
         ln->has_wrap_hyphen = 0;
-        ed->modified = 1;
+
+        ed_set_modified(ed, 1);
         ed_prefix_invalidate_from(ed, ed->row);
     }
     else if (ed->row < ed->count - 1)
@@ -2050,7 +2064,8 @@ int ed_delete(Ed *ed)
         line_free(doc_remove_line(ed, ed->row + 1));
 
         ln->has_wrap_hyphen = 0;
-        ed->modified = 1;
+
+        ed_set_modified(ed, 1);
         ed_prefix_invalidate_from(ed, ed->row);
     }
 
@@ -2134,7 +2149,7 @@ int ed_delete_line(Ed *ed)
         }
     }
 
-    ed->modified = 1;
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, deleted_row);
     ed_ensure_visible(ed);
 
@@ -2175,7 +2190,7 @@ int ed_delete_to_eol(Ed *ed)
         }
     }
 
-    ed->modified = 1;
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, ed->row);
 
     return 0;
@@ -2248,7 +2263,8 @@ int ed_delete_word_left(Ed *ed)
     }
 
     ed->undo_open = 0;
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, ed->row);
 
     return 0;
@@ -2315,7 +2331,8 @@ int ed_delete_word_right(Ed *ed)
     }
 
     ed->undo_open = 0;
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
 
     ed_prefix_invalidate_from(ed, ed->row);
 
@@ -2346,7 +2363,8 @@ int ed_duplicate_line(Ed *ed)
         return -1;
 
     ed->row++;
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, ed->row - 1);
     ed_ensure_visible(ed);
 
@@ -2437,7 +2455,8 @@ int ed_move_line_up(Ed *ed)
     }
 
     ed_clamp(ed);
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, top - 1);
 
     snapshot_after = ed_range_to_string(ed, start, bot + 1);
@@ -2533,7 +2552,8 @@ int ed_move_line_down(Ed *ed)
     }
 
     ed_clamp(ed);
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, top);
 
     snapshot_after = ed_range_to_string(ed, start, bot + 2);
@@ -2889,7 +2909,7 @@ int ed_block_cut(Ed *ed)
     ed_clamp(ed);
     ed->undo_open = 0;
 
-    ed->modified = 1;
+    ed_set_modified(ed, 1);
 
     ed_prefix_invalidate_from(ed, r1);
     ed_ensure_visible(ed);
@@ -2991,7 +3011,7 @@ int ed_block_delete(Ed *ed)
     ed_clamp(ed);
     ed->undo_open = 0;
 
-    ed->modified = 1;
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, r1);
     ed_ensure_visible(ed);
 
@@ -4160,7 +4180,8 @@ int ed_undo(Ed *ed)
 
     ed_clamp(ed);
     ed_ensure_visible(ed);
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, min_row);
 
     return 0;
@@ -4203,7 +4224,7 @@ int ed_redo(Ed *ed)
     ed_clamp(ed);
     ed_ensure_visible(ed);
 
-    ed->modified = 1;
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, min_row);
 
     return 0;
@@ -4266,7 +4287,12 @@ void ed_toggle_insert(Ed *ed)
 void ed_set_modified(Ed *ed, int modified)
 {
     if (ed)
+    {
         ed->modified = modified;
+
+        if (modified)
+            ed->syntax_state_dirty_from = 0;
+    }
 }
 
 int ed_get_hard_wrap(const Ed *ed)
@@ -4508,7 +4534,8 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
 
     /* Single-line paste: cursor advances by pasted text length; multi-line paste already computed absolute new_col */
     ed->col = new_col + (new_row == orig_row ? orig_col : 0);
-    ed->modified = 1;
+
+    ed_set_modified(ed, 1);
 
     ed_clamp(ed);
     ed_prefix_invalidate_from(ed, ed->row);
@@ -4707,7 +4734,7 @@ int ed_sort_block_lines(Ed *ed)
 
     free(arr);
 
-    ed->modified = 1;
+    ed_set_modified(ed, 1);
 
     ed_prefix_invalidate_from(ed, r1);
     ed_ensure_visible(ed);
@@ -4848,7 +4875,7 @@ int ed_convert_block_case(Ed *ed, int mode)
         }
     }
 
-    ed->modified = 1;
+    ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, r1);
     ed->undo_open = 0;
 

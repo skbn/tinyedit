@@ -483,6 +483,11 @@ void te_init_colors(const TeConfig *cfg)
         init_pair(COL_BRACKET_MATCH, COLOR_BLACK, COLOR_YELLOW);
         init_pair(COL_CURRENT_LINE, COLOR_WHITE, COLOR_BLUE);
         init_pair(COL_GUIDE, COLOR_CYAN, COLOR_BLACK);
+        init_pair(COL_SYNTAX_KEYWORD, COLOR_YELLOW, COLOR_BLACK);
+        init_pair(COL_SYNTAX_STRING, COLOR_GREEN, COLOR_BLACK);
+        init_pair(COL_SYNTAX_COMMENT, COLOR_CYAN, COLOR_BLACK);
+        init_pair(COL_SYNTAX_NUMBER, COLOR_MAGENTA, COLOR_BLACK);
+        init_pair(COL_SYNTAX_PREPROC, COLOR_BLUE, COLOR_BLACK);
     }
 }
 
@@ -583,26 +588,32 @@ void te_draw_titlebar(TeApp *app)
         char sp_buf[32];
         char hy_buf[32];
         char tr_buf[32];
+        char syntax_buf[32];
+        static const char *syntax_names[] = {"Auto", "C", "C++", "x86 asm", "m68k asm", "Amiga C"};
 
         sp_buf[0] = '\0';
         hy_buf[0] = '\0';
         tr_buf[0] = '\0';
+        syntax_buf[0] = '\0';
 
         ed_get_info(tab->editor, &info);
+
+        if (app->cfg.syntax_enabled)
+            snprintf(syntax_buf, sizeof(syntax_buf), "[%s] ", syntax_names[tab->syntax_lang + 1]);
 
 #ifdef HAVE_HUNSPELL
         if (app->spell_enabled && app->spell_active && app->spell_handle)
             snprintf(sp_buf, sizeof(sp_buf), "SP ");
 #endif
 #ifdef HAVE_HYPHEN
-        if (app->hyph_wrap_enabled && app->hyph_handle)
+        if (app->hard_wrap && app->hyph_wrap_enabled && app->hyph_handle)
             snprintf(hy_buf, sizeof(hy_buf), "HY ");
 #endif
 #ifdef HAVE_TRANSLATE
         if (app->translate_active && app->translate_handle)
             snprintf(tr_buf, sizeof(tr_buf), "TR [%s]->[%s] ", app->cfg.translate_from_lang, app->cfg.translate_to_lang);
 #endif
-        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", sp_buf, hy_buf, tr_buf, info.insert_mode ? "INS" : "OVR");
+        snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", syntax_buf, sp_buf, hy_buf, tr_buf, info.insert_mode ? "INS" : "OVR");
     }
     else
     {

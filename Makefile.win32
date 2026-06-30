@@ -85,7 +85,8 @@ UI_OBJS   = $(OBJDIR)/te_app.o \
             $(OBJDIR)/ui_setup.o \
             $(OBJDIR)/ui_glyph_picker.o \
             $(OBJDIR)/ui_mouse.o \
-            $(OBJDIR)/ui_tabs.o $(OBJDIR)/tabs.o $(OBJDIR)/wm.o
+            $(OBJDIR)/ui_tabs.o $(OBJDIR)/tabs.o $(OBJDIR)/wm.o \
+            $(OBJDIR)/ui_syntax.o
 
 # Hyphen and Thesaurus UI objects
 ifeq ($(USE_HUNSPELL),1)
@@ -234,6 +235,9 @@ $(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_assist.o: $(UIDIR)/ui_assist.c $(UIDIR)/ui_assist.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_syntax.o: $(UIDIR)/ui_syntax.c $(UIDIR)/ui_syntax.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 # Translator objects (only if USE_TRANSLATE=1)

@@ -28,6 +28,7 @@
 #include "ui_files.h"
 #include "ui_editor_helper.h"
 #include "ui_setup.h"
+#include "ui_syntax.h"
 #include "ui_spell.h"
 #include "ui_dict.h"
 #include "ui_dict_picker.h"
@@ -47,6 +48,8 @@
 #if defined(HAVE_HUNSPELL) && defined(HAVE_MYTHES)
 #include "ui_thes.h"
 #endif
+
+#define SYNTAX_CACHE_STEP 2048
 
 /* Help text */
 static const char *HELP_LINES[] =
@@ -1337,6 +1340,176 @@ static int spell_word_incorrect(TeApp *app, int line_idx, const wchar_t *line, i
 }
 #endif
 
+static SyntaxState state_after_line(const wchar_t *line, int len, SyntaxState state, SyntaxLang lang)
+{
+    int i;
+
+    for (i = 0; i < len; i++)
+    {
+        if (state == SYNTAX_STATE_COMMENT)
+        {
+            if (i + 1 < len && line[i] == L'*' && line[i + 1] == L'/')
+            {
+                state = SYNTAX_STATE_NORMAL;
+                i++;
+            }
+
+            continue;
+        }
+
+        if (state == SYNTAX_STATE_STRING)
+        {
+            if (line[i] == L'\\' && i + 1 < len)
+                i++;
+            else if (ui_syntax_is_str_quote(line[i]))
+                state = SYNTAX_STATE_NORMAL;
+
+            continue;
+        }
+
+        if (state == SYNTAX_STATE_CHAR)
+        {
+            if (line[i] == L'\\' && i + 1 < len)
+                i++;
+            else if (ui_syntax_is_char_quote(line[i]))
+                state = SYNTAX_STATE_NORMAL;
+
+            continue;
+        }
+
+        if (lang == SYNTAX_LANG_C || lang == SYNTAX_LANG_CPP || lang == SYNTAX_LANG_M68K_C)
+        {
+            if (i + 1 < len && line[i] == L'/' && line[i + 1] == L'*')
+            {
+                state = SYNTAX_STATE_COMMENT;
+                i++;
+
+                continue;
+            }
+
+            if (i + 1 < len && line[i] == L'/' && line[i + 1] == L'/')
+                break;
+
+            if (ui_syntax_is_str_quote(line[i]))
+            {
+                state = SYNTAX_STATE_STRING;
+                continue;
+            }
+
+            if (ui_syntax_is_char_quote(line[i]))
+            {
+                state = SYNTAX_STATE_CHAR;
+                continue;
+            }
+        }
+        else if (lang == SYNTAX_LANG_X86_ASM || lang == SYNTAX_LANG_M68K_ASM)
+        {
+            if (line[i] == L';' || (i + 1 < len && line[i] == L'/' && line[i + 1] == L'/'))
+                break;
+
+            if (ui_syntax_is_str_quote(line[i]))
+            {
+                state = SYNTAX_STATE_STRING;
+                continue;
+            }
+
+            if (ui_syntax_is_char_quote(line[i]))
+            {
+                state = SYNTAX_STATE_CHAR;
+                continue;
+            }
+        }
+    }
+
+    if (state == SYNTAX_STATE_STRING || state == SYNTAX_STATE_CHAR)
+        state = SYNTAX_STATE_NORMAL;
+
+    return state;
+}
+
+static SyntaxState compute_syntax_state_at(Ed *ed, int row, SyntaxLang lang)
+{
+    int r;
+    int count;
+    SyntaxState state;
+    int *cache = NULL;
+
+    if (lang <= SYNTAX_LANG_NONE || row <= 0)
+        return SYNTAX_STATE_NORMAL;
+
+    if (!ed)
+        return SYNTAX_STATE_NORMAL;
+
+    count = ed->count;
+
+    if (row > count)
+        row = count;
+
+    if (ed->syntax_state_alloc < count)
+    {
+        int new_alloc = count + SYNTAX_CACHE_STEP;
+        int *new_cache = (int *)realloc(ed->syntax_state_cache, (size_t)new_alloc * sizeof(int));
+
+        if (!new_cache)
+            return SYNTAX_STATE_NORMAL;
+
+        for (r = ed->syntax_state_alloc; r < new_alloc; r++)
+            new_cache[r] = -1;
+
+        ed->syntax_state_cache = new_cache;
+        ed->syntax_state_alloc = new_alloc;
+    }
+
+    cache = ed->syntax_state_cache;
+
+    if (ed->syntax_state_lang != (int)lang)
+    {
+        for (r = 0; r < ed->syntax_state_alloc; r++)
+            cache[r] = -1;
+
+        ed->syntax_state_lang = (int)lang;
+    }
+
+    if (ed->syntax_state_dirty_from >= 0)
+    {
+        for (r = ed->syntax_state_dirty_from; r < ed->syntax_state_alloc; r++)
+            cache[r] = -1;
+
+        ed->syntax_state_dirty_from = -1;
+    }
+
+    if (cache[row] >= 0)
+        return (SyntaxState)cache[row];
+
+    cache[0] = SYNTAX_STATE_NORMAL;
+
+    state = SYNTAX_STATE_NORMAL;
+    r = 0;
+
+    for (r = row - 1; r >= 0; r--)
+    {
+        if (cache[r] >= 0)
+        {
+            state = (SyntaxState)cache[r];
+            break;
+        }
+    }
+
+    if (r < 0)
+        r = 0;
+
+    for (; r < row; r++)
+    {
+        const wchar_t *line = ed_line_wcs(ed, r);
+        int len = ed_line_len(ed, r);
+
+        state = state_after_line(line, len, state, lang);
+        cache[r + 1] = (int)state;
+    }
+
+    return state;
+}
+
 /* Draw editor body */
 static void draw_body(TeApp *app)
 {
@@ -1358,6 +1531,15 @@ static void draw_body(TeApp *app)
     int show_lnum = te_app_get_show_line_numbers(app);
     int match_row;
     int match_col;
+    TeTab *tab = te_app_get_active_tab(app);
+    SyntaxLang lang = SYNTAX_LANG_NONE;
+    SyntaxState syntax_state = SYNTAX_STATE_NORMAL;
+    SyntaxClass *shared_classes = NULL;
+    int shared_classes_cap = 0;
+    Ed *ed = te_app_get_editor(app);
+
+    if (app->cfg.syntax_enabled)
+        lang = (tab && tab->syntax_lang != SYNTAX_LANG_NONE) ? tab->syntax_lang : ui_syntax_lang_from_filename(te_app_get_filename(app));
 
     standend();
 
@@ -1381,6 +1563,9 @@ static void draw_body(TeApp *app)
     ed_set_page(te_app_get_editor(app), body_rows);
     ed_ensure_visible(te_app_get_editor(app));
     ed_get_info(te_app_get_editor(app), &info);
+
+    if (!soft && lang > SYNTAX_LANG_NONE)
+        syntax_state = compute_syntax_state_at(ed, info.top, lang);
 
     /* Bracket matching: find partner bracket across buffer */
     match_row = -1;
@@ -1542,6 +1727,9 @@ static void draw_body(TeApp *app)
         /* Ensure cursor is inside viewport. Adjust s_soft_top_line/sub */
         soft_ensure_visible(app, width, body_rows);
 
+        if (lang > SYNTAX_LANG_NONE)
+            syntax_state = compute_syntax_state_at(ed, s_soft_top_line, lang);
+
         /* Clear body region */
         for (sr = 0; sr < body_rows; sr++)
         {
@@ -1561,6 +1749,7 @@ static void draw_body(TeApp *app)
             int pos = 0;
             int s = 0;         /* sub-row index within line */
             int first_seg = 1; /* first painted sub-row for line number */
+            SyntaxClass *line_classes = NULL;
 
             if (!l || len <= 0)
             {
@@ -1590,6 +1779,27 @@ static void draw_body(TeApp *app)
                 li++;
                 sub_skip = 0;
                 continue;
+            }
+
+            if (lang > SYNTAX_LANG_NONE && l && len > 0)
+            {
+                if (len > shared_classes_cap)
+                {
+                    int new_cap = len + 256;
+                    SyntaxClass *new_classes = (SyntaxClass *)realloc(shared_classes, (size_t)new_cap * sizeof(SyntaxClass));
+
+                    if (new_classes)
+                    {
+                        shared_classes = new_classes;
+                        shared_classes_cap = new_cap;
+                    }
+                }
+
+                if (len <= shared_classes_cap)
+                {
+                    line_classes = shared_classes;
+                    syntax_state = ui_syntax_classify(l, len, line_classes, syntax_state, lang);
+                }
             }
 
             while (sr < body_rows)
@@ -1625,7 +1835,12 @@ static void draw_body(TeApp *app)
                     }
 
                     if (seg_len > 0)
-                        ui_draw_wcs_line_with_tabs(offset_y + sr, offset_x + ln_offset, &l[seg_start], seg_len, s_tab_width);
+                    {
+                        if (line_classes)
+                            ui_draw_wcs_line_with_tabs_and_colors(offset_y + sr, offset_x + ln_offset, &l[seg_start], seg_len, s_tab_width, &line_classes[seg_start], seg_start_vcol);
+                        else
+                            ui_draw_wcs_line_with_tabs(offset_y + sr, offset_x + ln_offset, &l[seg_start], seg_len, s_tab_width);
+                    }
 
                     /* Paint tabs and trailing spaces as visible glyphs */
                     if (app->cfg.show_whitespace && seg_len > 0)
@@ -1681,6 +1896,7 @@ static void draw_body(TeApp *app)
                         attron(COLOR_PAIR(COL_BRACKET_MATCH) | A_BOLD);
                         mvaddnwstr(offset_y + sr, col_x, &l[tc], 1);
                         attroff(COLOR_PAIR(COL_BRACKET_MATCH) | A_BOLD);
+
                         standend();
                     }
 
@@ -1838,16 +2054,6 @@ static void draw_body(TeApp *app)
                         }
                     }
 
-                    /* Wrap indicator */
-                    /*if (app->cfg.wrap_indicator && has_more_subrows && x_screen_end > 0)
-                    {
-                        int wx = x_screen_end - 1;
-                        wchar_t wrap_mark[2] = {L'\x21B5', L'\0'};
-                        attron(COLOR_PAIR(COL_GUIDE));
-                        mvaddnwstr(offset_y + sr, wx, wrap_mark, 1);
-                        attroff(COLOR_PAIR(COL_GUIDE));
-                    }*/
-
                     /* Draw wrap indicator */
                     if (app->cfg.wrap_indicator && has_more_subrows && x_screen_end > 0)
                     {
@@ -1942,6 +2148,7 @@ static void draw_body(TeApp *app)
             int line_vw;
             int x_text_end;
             int x_screen_end;
+            SyntaxClass *line_classes = NULL;
 
             move(offset_y + i, offset_x);
             clrtoeol();
@@ -1963,6 +2170,27 @@ static void draw_body(TeApp *app)
             wl = ed_line_wcs(te_app_get_editor(app), line_idx);
             line_len = ed_line_len(te_app_get_editor(app), line_idx);
 
+            if (lang > SYNTAX_LANG_NONE && wl && line_len > 0)
+            {
+                if (line_len > shared_classes_cap)
+                {
+                    int new_cap = line_len + 256;
+                    SyntaxClass *new_classes = (SyntaxClass *)realloc(shared_classes, (size_t)new_cap * sizeof(SyntaxClass));
+
+                    if (new_classes)
+                    {
+                        shared_classes = new_classes;
+                        shared_classes_cap = new_cap;
+                    }
+                }
+
+                if (line_len <= shared_classes_cap)
+                {
+                    line_classes = shared_classes;
+                    syntax_state = ui_syntax_classify(wl, line_len, line_classes, syntax_state, lang);
+                }
+            }
+
             if (wl && line_len > 0)
             {
                 /* Limit line length to available width */
@@ -1971,7 +2199,10 @@ static void draw_body(TeApp *app)
                 if (line_len > max_chars)
                     line_len = max_chars;
 
-                ui_draw_wcs_line_with_tabs(offset_y + i, offset_x + ln_offset, wl, line_len, s_tab_width);
+                if (line_classes)
+                    ui_draw_wcs_line_with_tabs_and_colors(offset_y + i, offset_x + ln_offset, wl, line_len, s_tab_width, line_classes, 0);
+                else
+                    ui_draw_wcs_line_with_tabs(offset_y + i, offset_x + ln_offset, wl, line_len, s_tab_width);
             }
 
             /* Highlight matched bracket partner only */
@@ -2206,6 +2437,8 @@ static void draw_body(TeApp *app)
 
     attroff(COLOR_PAIR(COL_NORMAL));
     standend();
+
+    free(shared_classes);
 }
 
 /* Position terminal cursor on editor cursor */
@@ -2310,6 +2543,26 @@ static void position_cursor(TeApp *app)
 
     /* Use normal cursor visibility */
     curs_set(1);
+}
+
+static void cycle_syntax_lang(TeApp *app)
+{
+    static const char *names[] = {"Auto", "C", "C++", "x86 asm", "m68k asm", "Amiga C"};
+    TeTab *tab = te_app_get_active_tab(app);
+
+    if (!tab)
+        return;
+
+    tab->syntax_lang++;
+
+    if (tab->syntax_lang >= SYNTAX_LANG_COUNT)
+        tab->syntax_lang = SYNTAX_LANG_NONE;
+
+    te_status(app, "Syntax: %s", names[tab->syntax_lang + 1]);
+
+    draw_body(app);
+    te_draw_statusbar(app);
+    doupdate();
 }
 
 /* Mouse SGR sequence parser for SSH terminals */
@@ -2888,28 +3141,123 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 
+    if (is_key && ch == KEY_ALT_CTRL('S'))
+    {
+        cycle_syntax_lang(app);
+        return 1;
+    }
+
     return 0;
+}
+
+static int inside_block_comment(Ed *ed, int row, int col)
+{
+    int r;
+    int needed = 1;
+
+    for (r = row; r >= 0; r--)
+    {
+        const wchar_t *rl = ed_line_wcs(ed, r);
+        int rl_len = ed_line_len(ed, r);
+        int c;
+        int start;
+
+        if (!rl)
+            continue;
+
+        start = (r == row) ? col - 1 : rl_len - 1;
+
+        for (c = start; c >= 0; c--)
+        {
+            if (c + 1 >= rl_len)
+                continue;
+
+            if (rl[c] == L'*' && rl[c + 1] == L'/')
+                needed++;
+            else if (rl[c] == L'/' && rl[c + 1] == L'*')
+            {
+                /* The current row's opener must be fully before the cursor */
+                if (r == row && c + 1 >= col)
+                    continue;
+
+                needed--;
+
+                if (needed <= 0)
+                    return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int insert_block_comment_prefix(Ed *ed, const wchar_t *prev_line, int prev_llen, int prev_col, int skip_leading_ws)
+{
+    int leading_ws = 0;
+    int k;
+    int line_starts_with_opener = 0;
+    int line_has_star_prefix = 0;
+    int line_has_closer = 0;
+
+    if (!prev_line || prev_llen <= 0)
+        return 0;
+
+    for (k = 0; k < prev_llen; k++)
+    {
+        if (prev_line[k] == L' ' || prev_line[k] == L'\t')
+            leading_ws++;
+        else
+            break;
+    }
+
+    if (leading_ws + 1 < prev_llen && prev_line[leading_ws] == L'/' && prev_line[leading_ws + 1] == L'*')
+        line_starts_with_opener = 1;
+
+    if (leading_ws < prev_llen && prev_line[leading_ws] == L'*')
+        line_has_star_prefix = 1;
+
+    if (prev_llen >= 2 && prev_line[prev_llen - 2] == L'*' && prev_line[prev_llen - 1] == L'/')
+        line_has_closer = 1;
+
+    if (line_has_closer)
+        return 0;
+
+    if (!line_starts_with_opener && !line_has_star_prefix)
+        return 0;
+
+    if (!skip_leading_ws)
+    {
+        for (k = 0; k < leading_ws; k++)
+            ed_insert_char(ed, L' ');
+    }
+
+    if (line_starts_with_opener)
+        ed_insert_char(ed, L' ');
+
+    ed_insert_char(ed, L'*');
+    ed_insert_char(ed, L' ');
+
+    return 1;
 }
 
 /* Insert a new line, optionally copying the leading whitespace from the current line when smart-indent is enabled */
 static void do_smart_enter(TeApp *app)
 {
     Ed *ed = te_app_get_editor(app);
+    EdInfo si_info;
+    const wchar_t *si_line;
+    int si_llen;
+    wchar_t indent[64];
+    int indent_n = 0;
+    int k;
+    int k2;
+
+    ed_get_info(ed, &si_info);
+    si_line = ed_line_wcs(ed, si_info.row);
+    si_llen = ed_line_len(ed, si_info.row);
 
     if (app->cfg.smart_indent)
     {
-        EdInfo si_info;
-        const wchar_t *si_line;
-        int si_llen;
-        wchar_t indent[64];
-        int indent_n = 0;
-        int k;
-        int k2;
-
-        ed_get_info(ed, &si_info);
-        si_line = ed_line_wcs(ed, si_info.row);
-        si_llen = ed_line_len(ed, si_info.row);
-
         if (si_line)
         {
             for (k = 0; k < si_llen && k < (int)(sizeof(indent) / sizeof(wchar_t)) - 1; k++)
@@ -2930,6 +3278,10 @@ static void do_smart_enter(TeApp *app)
     {
         ed_enter(ed);
     }
+
+    /* Continue C-style block comments */
+    if (inside_block_comment(ed, si_info.row, si_info.col))
+        insert_block_comment_prefix(ed, si_line, si_llen, si_info.col, app->cfg.smart_indent);
 }
 
 /* Handle control key combinations */
@@ -3727,7 +4079,34 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
                 }
             }
 
-            /* Editor assists: smart quotes, auto-cap. Independent of wrap mode -- they only touch the buffer */
+            /* Auto-close block comment opener /* -> /*|*\/ */
+            if (app->cfg.autoclose && wch == L'*')
+            {
+                wchar_t slash = L'\0';
+
+                ed_get_info(te_app_get_editor(app), &ac_info);
+
+                ac_line = ed_line_wcs(te_app_get_editor(app), ac_info.row);
+                ac_llen = ed_line_len(te_app_get_editor(app), ac_info.row);
+
+                if (ac_line && ac_info.col >= 2 && ac_info.col - 2 < ac_llen)
+                    slash = ac_line[ac_info.col - 2];
+
+                next = L'\0';
+
+                if (ac_line && ac_info.col < ac_llen)
+                    next = ac_line[ac_info.col];
+
+                if (slash == L'/' && next != L'/')
+                {
+                    ed_insert_char(te_app_get_editor(app), L'*');
+                    ed_insert_char(te_app_get_editor(app), L'/');
+
+                    ed_set_pos(te_app_get_editor(app), ac_info.row, ac_info.col);
+                }
+            }
+
+            /* Editor assists: smart quotes, auto-cap. Independent of wrap mode they only touch the buffer */
             ui_assist_on_char(app, (wchar_t)wch);
 
             /* Hard-wrap: reflow paragraph when a word separator is inserted */

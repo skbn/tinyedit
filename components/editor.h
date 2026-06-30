@@ -113,9 +113,14 @@ struct Ed
     int prefix_valid;      /* 0 = invalid, 1 = valid */
     int prefix_width;      /* width for which prefix was calculated */
     int prefix_dirty_from; /* -1 = clean, >=0 = dirty from this line onwards */
-    int prefix_start;      /* start line of current prefix range (for range rebuild) */
-    int prefix_end;        /* end line of current prefix range (for range rebuild) */
-    int prefix_base;       /* visual rows before prefix_start (for absolute positioning) */
+
+    int *syntax_state_cache;     /* cached syntax state at start of each line, -1 = unknown */
+    int syntax_state_alloc;      /* allocated capacity */
+    int syntax_state_dirty_from; /* -1 = clean, >=0 = dirty from this line onwards */
+    int syntax_state_lang;       /* language for which cache is valid, -1 = invalid */
+    int prefix_start;            /* start line of current prefix range (for range rebuild) */
+    int prefix_end;              /* end line of current prefix range (for range rebuild) */
+    int prefix_base;             /* visual rows before prefix_start (for absolute positioning) */
 
     int word_count_total;       /* cached total word count */
     int word_count_initialized; /* 1 = word counts are valid, 0 = lazy init pending */
