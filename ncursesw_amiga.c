@@ -2765,7 +2765,7 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
         memset(&ie2, 0, sizeof(ie2));
         ie2.ie_Class = IECLASS_RAWKEY;
         ie2.ie_Code = code;
-        ie2.ie_Qualifier = qual & ~(IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND | IEQUALIFIER_LALT | IEQUALIFIER_RALT);
+        ie2.ie_Qualifier = qual & ~(IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND | IEQUALIFIER_LALT | IEQUALIFIER_RALT | IEQUALIFIER_CONTROL);
 
         if (iaddr)
             ie2.ie_EventAddress = (APTR)(*((ULONG *)iaddr));

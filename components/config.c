@@ -271,6 +271,9 @@ static int pair_by_name(const char *s)
     if (strcasecmp(s, "SYNTAXPREPROC") == 0)
         return COL_SYNTAX_PREPROC;
 
+    if (strcasecmp(s, "SYNTAXOPERATOR") == 0)
+        return COL_SYNTAX_OPERATOR;
+
     return -1;
 }
 
@@ -480,6 +483,9 @@ void te_cfg_defaults(TeConfig *cfg)
 
     cfg->color_fg[COL_SYNTAX_PREPROC] = 3;
     cfg->color_bg[COL_SYNTAX_PREPROC] = 0;
+
+    cfg->color_fg[COL_SYNTAX_OPERATOR] = 2;
+    cfg->color_bg[COL_SYNTAX_OPERATOR] = 0;
 }
 
 int te_cfg_load(TeConfig *cfg, const char *path)
@@ -1333,6 +1339,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "COLOR SYNTAXCOMMENT %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_COMMENT]), color_name(cfg->color_bg[COL_SYNTAX_COMMENT]));
     fprintf(out, "COLOR SYNTAXNUMBER %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_NUMBER]), color_name(cfg->color_bg[COL_SYNTAX_NUMBER]));
     fprintf(out, "COLOR SYNTAXPREPROC %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_PREPROC]), color_name(cfg->color_bg[COL_SYNTAX_PREPROC]));
+    fprintf(out, "COLOR SYNTAXOPERATOR %s %s\n", color_name(cfg->color_fg[COL_SYNTAX_OPERATOR]), color_name(cfg->color_bg[COL_SYNTAX_OPERATOR]));
 
     /* COLORMAP for Amiga */
     if (cfg->color_map_initialized)

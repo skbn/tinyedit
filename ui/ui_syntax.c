@@ -293,6 +293,9 @@ int ui_syntax_color_pair(SyntaxClass cls)
     case SYNTAX_CLASS_PREPROC:
         return COL_SYNTAX_PREPROC;
 
+    case SYNTAX_CLASS_OPERATOR:
+        return COL_SYNTAX_OPERATOR;
+
     default:
         return COL_NORMAL;
     }
@@ -322,6 +325,43 @@ static int is_number_char(wchar_t ch, int base)
     return iswdigit(ch) || ch == L'.' || ch == L'e' || ch == L'E' || ch == L'+' || ch == L'-';
 }
 
+static int classify_operator(const wchar_t *line, int len, int i)
+{
+    wchar_t c = line[i];
+    wchar_t n = (i + 1 < len) ? line[i + 1] : L'\0';
+
+    if (i + 1 < len)
+    {
+        if ((c == L'=' && (n == L'=' || n == L'>')) ||
+            (c == L'!' && n == L'=') ||
+            (c == L'<' && (n == L'=' || n == L'<')) ||
+            (c == L'>' && (n == L'=' || n == L'>')) ||
+            (c == L'+' && (n == L'+' || n == L'=')) ||
+            (c == L'-' && (n == L'-' || n == L'=' || n == L'>')) ||
+            (c == L'*' && n == L'=') ||
+            (c == L'/' && n == L'=') ||
+            (c == L'%' && n == L'=') ||
+            (c == L'&' && (n == L'&' || n == L'=')) ||
+            (c == L'|' && (n == L'|' || n == L'=')) ||
+            (c == L'^' && n == L'=') ||
+            (c == L':' && n == L':'))
+        {
+            return 2;
+        }
+    }
+
+    if (c == L'+' || c == L'-' || c == L'*' || c == L'/' || c == L'%' ||
+        c == L'=' || c == L'<' || c == L'>' || c == L'!' || c == L'&' ||
+        c == L'|' || c == L'^' || c == L'~' || c == L'.' || c == L',' ||
+        c == L';' || c == L':' || c == L'?' || c == L'(' || c == L')' ||
+        c == L'[' || c == L']' || c == L'{' || c == L'}')
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 static int classify_number(const wchar_t *line, int len, int i)
 {
     int base = 10;
@@ -349,6 +389,7 @@ static int classify_number(const wchar_t *line, int len, int i)
 SyntaxState ui_syntax_classify(const wchar_t *line, int len, SyntaxClass *classes, SyntaxState start_state, SyntaxLang lang)
 {
     int i = 0;
+    int op_len;
     SyntaxState state = start_state;
 
     while (i < len)
@@ -523,6 +564,18 @@ SyntaxState ui_syntax_classify(const wchar_t *line, int len, SyntaxClass *classe
                 for (i = start; i < end; i++)
                     classes[i] = SYNTAX_CLASS_NORMAL;
             }
+
+            continue;
+        }
+
+        op_len = classify_operator(line, len, i);
+
+        if (op_len > 0)
+        {
+            int op_end = i + op_len;
+
+            for (; i < op_end; i++)
+                classes[i] = SYNTAX_CLASS_OPERATOR;
 
             continue;
         }

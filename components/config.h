@@ -34,8 +34,9 @@
 #define COL_SYNTAX_COMMENT 14
 #define COL_SYNTAX_NUMBER 15
 #define COL_SYNTAX_PREPROC 16
+#define COL_SYNTAX_OPERATOR 17
 
-#define TE_CFG_COLOR_MAX 64 /* COL_* are 1..16; slot 0 unused */
+#define TE_CFG_COLOR_MAX 64 /* COL_* are 1..17; slot 0 unused */
 
 typedef struct
 {

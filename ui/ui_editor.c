@@ -139,6 +139,11 @@ static const char *HELP_LINES[] =
         "  Other:",
         "    F4 / Alt+T       Setup / configuration",
         "    Alt+U            Unicode glyph picker",
+#ifdef PLATFORM_AMIGA
+        "    Alt+Shift+S      Cycle syntax language",
+#else
+        "    Ctrl+Alt+S       Cycle syntax language",
+#endif
 };
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
 
@@ -3141,7 +3146,13 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 
+#ifdef PLATFORM_AMIGA
+    /* Alt+Shift+S : cycle syntax language (Ctrl+Alt+S is used by AmigaOS) */
+    if (is_key && ch == KEY_SHIFT('S'))
+#else
+    /* Ctrl+Alt+S : cycle syntax language */
     if (is_key && ch == KEY_ALT_CTRL('S'))
+#endif
     {
         cycle_syntax_lang(app);
         return 1;

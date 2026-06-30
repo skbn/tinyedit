@@ -255,6 +255,7 @@ static const SetupField st_fields[] =
         {1, "Syntax Comment", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_COMMENT * sizeof(int), 0},
         {1, "Syntax Number", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_NUMBER * sizeof(int), 0},
         {1, "Syntax Preproc", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_PREPROC * sizeof(int), 0},
+        {1, "Syntax Operator", FT_COLORPAIR, F_OFF(color_fg) + COL_SYNTAX_OPERATOR * sizeof(int), 0},
         {1, "Cursor color", FT_INT, F_OFF(cursor_color), 0},
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "Default BG", FT_INT, F_OFF(default_bg_color), 0},

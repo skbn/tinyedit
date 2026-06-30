@@ -488,6 +488,7 @@ void te_init_colors(const TeConfig *cfg)
         init_pair(COL_SYNTAX_COMMENT, COLOR_CYAN, COLOR_BLACK);
         init_pair(COL_SYNTAX_NUMBER, COLOR_MAGENTA, COLOR_BLACK);
         init_pair(COL_SYNTAX_PREPROC, COLOR_BLUE, COLOR_BLACK);
+        init_pair(COL_SYNTAX_OPERATOR, COLOR_RED, COLOR_BLACK);
     }
 }
 

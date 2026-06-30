@@ -22,6 +22,7 @@ static int do_smart_quotes(TeApp *app, wchar_t just_typed)
     Ed *ed = NULL;
     EdInfo info;
     const wchar_t *line = NULL;
+    int line_len = 0;
     wchar_t replacement;
     wchar_t prev_ch;
     int prev_is_word;
@@ -32,6 +33,12 @@ static int do_smart_quotes(TeApp *app, wchar_t just_typed)
 
     if (just_typed != L'\'' && just_typed != L'"')
         return 0;
+
+#ifdef PLATFORM_AMIGA
+    /* Without TTF, keep normal ASCII straight quotes */
+    if (!app->cfg.ttf_enabled)
+        return 0;
+#endif
 
     ed = te_app_get_editor(app);
     ed_get_info(ed, &info);
@@ -67,6 +74,23 @@ static int do_smart_quotes(TeApp *app, wchar_t just_typed)
     ed_set_pos(ed, info.row, info.col - 1);
     ed_delete(ed);
     ed_insert_char(ed, replacement);
+
+    /* If auto-close inserted a matching closing quote, convert it too so the pair matches */
+    ed_get_info(ed, &info);
+
+    line = ed_line_wcs(ed, info.row);
+    line_len = ed_line_len(ed, info.row);
+
+    if (line && info.col < line_len && line[info.col] == just_typed)
+    {
+        wchar_t close_quote = (just_typed == L'\'') ? (wchar_t)0x2019 : (wchar_t)0x201D;
+
+        ed_set_pos(ed, info.row, info.col);
+        ed_delete(ed);
+
+        ed_insert_char(ed, close_quote);
+        ed_set_pos(ed, info.row, info.col);
+    }
 
     return 1;
 }
