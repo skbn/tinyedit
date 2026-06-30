@@ -95,6 +95,7 @@ static const char *HELP_LINES[] =
         "  Files:",
         "    F7 / Alt+O       Insert file at cursor",
         "    Ctrl+L           Open file (new tab)",
+        "    Ctrl+Alt+R       Open recent file",
         "    Ctrl+N           New file (new tab)",
         "    F2 / Ctrl+S      Save",
         "    ESC / F10        Quit (confirm if modified)",
@@ -2630,6 +2631,8 @@ static int do_save(TeApp *app)
     /* Swap is no longer needed after a successful save */
     ui_editor_swp_remove(te_app_get_filename(app));
 
+    ui_editor_recent_add(te_app_get_filename(app));
+
     te_status(app, "Saved: %s", te_app_get_filename(app));
 
 #ifdef HAVE_HUNSPELL
@@ -2873,6 +2876,14 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
             te_status(app, "Case converted");
         else
             te_status(app, "Convert case: error");
+
+        return 1;
+    }
+
+    /* Ctrl+Alt+R : open recent files */
+    if (is_key && ch == KEY_ALT_CTRL('R'))
+    {
+        ui_editor_recent_open(app);
 
         return 1;
     }
@@ -4170,6 +4181,7 @@ void ui_editor_run(TeApp *app)
             curs_set(0);
             TE_BRACKET_PASTE_OFF();
 
+            ui_editor_session_save(app);
             ui_editor_swp_cleanup_all(app);
 
             break;
@@ -4198,6 +4210,7 @@ void ui_editor_run(TeApp *app)
             curs_set(0);
             TE_BRACKET_PASTE_OFF();
 
+            ui_editor_session_save(app);
             ui_editor_swp_cleanup_all(app);
 
             return;

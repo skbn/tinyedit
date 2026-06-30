@@ -33,7 +33,16 @@
 #endif
 #endif
 
+#if defined(PLATFORM_AMIGA)
 #define SIF_MAX_HITS 2000
+#else
+#define SIF_MAX_HITS 1000000
+#endif
+
+#define RECENT_MAX 20
+
+static char *s_recent_files[RECENT_MAX];
+static int s_recent_count = 0;
 
 typedef struct
 {
@@ -1573,6 +1582,7 @@ int ui_editor_swp_recover(TeApp *app, const char *path)
 
     te_app_set_filename(app, path);
     ed_set_modified(ed, 1);
+    ui_editor_recent_add(path);
 
     return 1;
 }
@@ -1592,4 +1602,278 @@ void ui_editor_swp_cleanup_all(TeApp *app)
         if (tab && tab->filename[0])
             pf_remove_swp(tab->filename);
     }
+}
+
+/* Add a path to the recent list without saving to disk */
+static void recent_add_internal(const char *path)
+{
+    int i;
+    int found;
+    char *moved = NULL;
+
+    if (!path || !path[0])
+        return;
+
+    found = -1;
+
+    for (i = 0; i < s_recent_count; i++)
+    {
+        if (strcmp(s_recent_files[i], path) == 0)
+        {
+            found = i;
+            break;
+        }
+    }
+
+    if (found >= 0)
+    {
+        moved = s_recent_files[found];
+
+        for (i = found; i > 0; i--)
+            s_recent_files[i] = s_recent_files[i - 1];
+
+        s_recent_files[0] = moved;
+        return;
+    }
+
+    if (s_recent_count == RECENT_MAX)
+    {
+        free(s_recent_files[s_recent_count - 1]);
+        s_recent_count--;
+    }
+
+    for (i = s_recent_count; i > 0; i--)
+        s_recent_files[i] = s_recent_files[i - 1];
+
+    s_recent_files[0] = strdup(path);
+    s_recent_count++;
+}
+
+/* Load recent files from config directory */
+void ui_editor_recent_load(void)
+{
+    char cfg_dir[512];
+    char path[1024];
+    char line[1024];
+    FILE *fp = NULL;
+
+    port_get_config_dir(cfg_dir, sizeof(cfg_dir));
+    pf_path_join(path, sizeof(path), cfg_dir, "recent");
+
+    fp = fopen(path, "rb");
+
+    if (!fp)
+        return;
+
+    while (fgets(line, sizeof(line), fp))
+    {
+        size_t len = strlen(line);
+
+        if (len > 0 && line[len - 1] == '\n')
+            line[len - 1] = '\0';
+
+        if (line[0])
+            recent_add_internal(line);
+    }
+
+    fclose(fp);
+}
+
+/* Save recent files to config directory */
+void ui_editor_recent_save(void)
+{
+    char cfg_dir[512];
+    char path[1024];
+    FILE *fp = NULL;
+    int i;
+
+    port_get_config_dir(cfg_dir, sizeof(cfg_dir));
+    pf_path_join(path, sizeof(path), cfg_dir, "recent");
+
+    fp = fopen(path, "wb");
+
+    if (!fp)
+        return;
+
+    for (i = 0; i < s_recent_count; i++)
+    {
+        fputs(s_recent_files[i], fp);
+        fputc('\n', fp);
+    }
+
+    fclose(fp);
+}
+
+/* Add a path to recent files and persist the list */
+void ui_editor_recent_add(const char *path)
+{
+    recent_add_internal(path);
+    ui_editor_recent_save();
+}
+
+/* Free the in-memory recent files list */
+void ui_editor_recent_free(void)
+{
+    int i;
+
+    for (i = 0; i < s_recent_count; i++)
+    {
+        free(s_recent_files[i]);
+        s_recent_files[i] = NULL;
+    }
+
+    s_recent_count = 0;
+}
+
+/* Show recent files popup and open the selected one */
+int ui_editor_recent_open(TeApp *app)
+{
+    const char **items;
+    int i;
+    int sel;
+
+    if (!app || s_recent_count == 0)
+    {
+        te_status(app, "No recent files");
+        return 0;
+    }
+
+    items = (const char **)malloc((size_t)s_recent_count * sizeof(char *));
+
+    if (!items)
+    {
+        te_status(app, "Memory error");
+        return -1;
+    }
+
+    for (i = 0; i < s_recent_count; i++)
+        items[i] = s_recent_files[i];
+
+    sel = ui_popup_list("Recent files", items, s_recent_count, 0);
+
+    free(items);
+
+    if (sel < 0 || sel >= s_recent_count)
+        return 0;
+
+    return ui_files_open_path(app, s_recent_files[sel]);
+}
+
+/* Save open tabs and active tab to config directory */
+void ui_editor_session_save(TeApp *app)
+{
+    char cfg_dir[512];
+    char path[1024];
+    FILE *fp = NULL;
+    int i;
+
+    if (!app)
+        return;
+
+    port_get_config_dir(cfg_dir, sizeof(cfg_dir));
+    pf_path_join(path, sizeof(path), cfg_dir, "session");
+
+    fp = fopen(path, "wb");
+
+    if (!fp)
+        return;
+
+    for (i = 0; i < app->tab_count; i++)
+    {
+        TeTab *tab = app->tabs[i];
+
+        if (!tab || !tab->filename[0])
+            continue;
+
+        if (i == app->active_tab)
+            fputs("active ", fp);
+
+        fputs(tab->filename, fp);
+        fputc('\n', fp);
+    }
+
+    fclose(fp);
+}
+
+/* Restore open tabs and active tab from config directory */
+void ui_editor_session_restore(TeApp *app)
+{
+    char cfg_dir[512];
+    char path[1024];
+    char line[1024];
+    FILE *fp = NULL;
+    int active_idx;
+    int opened;
+    int is_active;
+    const char *fn = NULL;
+    size_t len;
+
+    if (!app)
+        return;
+
+    port_get_config_dir(cfg_dir, sizeof(cfg_dir));
+    pf_path_join(path, sizeof(path), cfg_dir, "session");
+
+    fp = fopen(path, "rb");
+
+    if (!fp)
+        return;
+
+    active_idx = 0;
+    opened = 0;
+
+    while (fgets(line, sizeof(line), fp))
+    {
+        len = strlen(line);
+
+        if (len > 0 && line[len - 1] == '\n')
+            line[len - 1] = '\0';
+
+        if (strncmp(line, "active ", 7) == 0)
+        {
+            is_active = 1;
+            fn = line + 7;
+        }
+        else
+        {
+            is_active = 0;
+            fn = line;
+        }
+
+        if (!fn[0])
+            continue;
+
+        if (!pf_path_exists(fn))
+            continue;
+
+        {
+            TeTab *tab = te_tab_new();
+
+            if (!tab)
+                continue;
+
+            tab->show_line_numbers = app->cfg.show_line_numbers;
+
+            ed_set_word_move_mode(tab->editor, app->cfg.word_move_mode);
+            te_app_add_tab(app, tab);
+            te_app_switch_tab(app, app->tab_count - 1);
+        }
+
+        if (ui_files_open_path(app, fn) == 0)
+        {
+            if (is_active)
+                active_idx = app->active_tab;
+
+            opened++;
+        }
+        else
+        {
+            te_app_close_tab(app, app->tab_count - 1);
+        }
+    }
+
+    fclose(fp);
+
+    if (opened > 0)
+        te_app_switch_tab(app, active_idx);
 }

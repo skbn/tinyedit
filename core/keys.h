@@ -21,11 +21,16 @@
 #ifndef KEY_SHIFT
 #define KEY_SHIFT(c) (0x900 + ((unsigned int)(c) & 0xFF))
 #endif
+#ifndef KEY_ALT_CTRL
+#define KEY_ALT_CTRL(c) (0xB00 + ((unsigned int)(c) & 0xFF))
+#endif
 
 #define IS_ALT(k) (((unsigned int)(k) & 0xFF00) == 0x800)
 #define IS_SHIFT(k) (((unsigned int)(k) & 0xFF00) == 0x900)
+#define IS_ALT_CTRL(k) (((unsigned int)(k) & 0xFF00) == 0xB00)
 #define ALT_CHAR(k) ((int)((unsigned int)(k) & 0xFF))
 #define SHIFT_CHAR(k) ((int)((unsigned int)(k) & 0xFF))
+#define ALT_CTRL_CHAR(k) ((int)((unsigned int)(k) & 0xFF))
 
 /* Read next keystroke; folds Linux ESC+letter into KEY_ALT(c). Same protocol as get_wch() */
 int wrapper_read_key(wint_t *out_wch);

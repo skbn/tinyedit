@@ -116,6 +116,9 @@
 #define KEY_ALT_LEFT 0xA02
 #define KEY_ALT_RIGHT 0xA03
 #endif
+#ifndef KEY_ALT_CTRL
+#define KEY_ALT_CTRL(c) (0xB00 + ((unsigned int)(c) & 0xFF))
+#endif
 #ifndef KEY_CSHOME
 #define KEY_CSHOME 0x805
 #endif

@@ -1496,6 +1496,8 @@ int ui_files_open_path(TeApp *app, const char *path)
         else
             te_status(app, "Loaded: %s", path);
 
+        ui_editor_recent_add(path);
+
         return 0;
     }
 
@@ -1557,6 +1559,8 @@ int ui_files_open_path(TeApp *app, const char *path)
         te_status(app, "Loaded: %s (%d wrap-hyphens)", path, detected);
     else
         te_status(app, "Loaded: %s", path);
+
+    ui_editor_recent_add(path);
 
     return 0;
 }

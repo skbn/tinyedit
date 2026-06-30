@@ -37,6 +37,14 @@ void ui_editor_swp_remove(const char *path);
 int ui_editor_swp_recover(TeApp *app, const char *path);
 void ui_editor_swp_cleanup_all(TeApp *app);
 
+/* Recent files and session helpers */
+void ui_editor_recent_load(void);
+void ui_editor_recent_add(const char *path);
+void ui_editor_recent_free(void);
+int ui_editor_recent_open(TeApp *app);
+void ui_editor_session_save(TeApp *app);
+void ui_editor_session_restore(TeApp *app);
+
 /* Function key implementations */
 int ui_editor_detect_wrap_hyphens(TeApp *app);
 int search_prev(TeApp *app);

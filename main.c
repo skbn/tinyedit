@@ -529,6 +529,8 @@ int main(int argc, char **argv)
     strncpy(app->charset_out, cfg.charset[0] ? cfg.charset : "UTF-8", sizeof(app->charset_out) - 1);
     app->charset_out[sizeof(app->charset_out) - 1] = '\0';
 
+    ui_editor_recent_load();
+
     /* Load file if given */
     if (argc >= 2)
     {
@@ -603,27 +605,41 @@ int main(int argc, char **argv)
             {
                 te_status(app, "Cannot recover swap for: %s", argv[1]);
             }
+
+            ui_editor_recent_add(argv[1]);
         }
     }
     else
     {
-        TeTab *tab = te_tab_new();
+        ui_editor_session_restore(app);
 
-        if (tab)
+        if (app->tab_count == 0)
         {
-            tab->show_line_numbers = cfg.show_line_numbers;
-            ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
+            TeTab *tab = te_tab_new();
 
-            te_app_add_tab(app, tab);
-            te_app_switch_tab(app, 0);
+            if (tab)
+            {
+                tab->show_line_numbers = cfg.show_line_numbers;
+                ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
+
+                te_app_add_tab(app, tab);
+                te_app_switch_tab(app, 0);
+            }
         }
     }
 
     app->show_tabs = 0;
 
-    te_status(app, argc >= 2 ? argv[1] : "[No Name]");
+    if (argc >= 2)
+        te_status(app, argv[1]);
+    else if (app->tab_count > 0 && te_app_get_filename(app)[0])
+        te_status(app, te_app_get_filename(app));
+    else
+        te_status(app, "[No Name]");
 
     ui_editor_run(app);
+
+    ui_editor_recent_free();
 
     te_app_free(app);
 

@@ -2774,14 +2774,20 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 
         actual2 = MapRawKey(&ie2, (STRPTR)buf2, (LONG)sizeof(buf2), NULL);
 
-        if (actual2 == 1 && ((buf2[0] >= 'a' && buf2[0] <= 'z') || (buf2[0] >= 'A' && buf2[0] <= 'Z')))
+        if (actual2 == 1 && ((buf2[0] >= 'a' && buf2[0] <= 'z') || (buf2[0] >= 'A' && buf2[0] <= 'Z') || (buf2[0] >= 1 && buf2[0] <= 26)))
         {
-            /* Normalise Alt+letter chords to KEY_ALT / KEY_SHIFT */
+            /* Normalise Alt+letter chords to KEY_ALT / KEY_SHIFT / KEY_ALT_CTRL */
             int letter = (int)buf2[0];
             int shift = (qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) != 0;
+            int ctrl = (qual & IEQUALIFIER_CONTROL) != 0;
 
             if (letter >= 'a' && letter <= 'z')
                 letter = letter - 'a' + 'A';
+            else if (letter >= 1 && letter <= 26)
+                letter = letter + 64;
+
+            if (ctrl)
+                return KEY_ALT_CTRL(letter);
 
             if (shift)
                 return KEY_SHIFT(letter);

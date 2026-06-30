@@ -544,16 +544,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             int key = (int)wParam;
             int is_control_key = 0;
 
-            /* Alt+letter -> KEY_ALT; Shift+Alt+letter -> KEY_SHIFT */
+            /* Alt+letter -> KEY_ALT; Shift+Alt+letter -> KEY_SHIFT; Ctrl+Alt+letter -> KEY_ALT_CTRL */
             if ((GetKeyState(VK_MENU) & 0x8000) && ((key >= 'A' && key <= 'Z') || (key >= 'a' && key <= 'z')))
             {
                 int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
 
                 /* normalize to uppercase */
                 if (key >= 'a' && key <= 'z')
                     key = key - 'a' + 'A';
 
-                if (shift)
+                if (ctrl)
+                    key = KEY_ALT_CTRL(key);
+                else if (shift)
                     key = KEY_SHIFT(key);
                 else
                     key = KEY_ALT(key);

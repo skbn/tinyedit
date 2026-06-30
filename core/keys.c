@@ -38,7 +38,7 @@ int wrapper_read_key(wint_t *out_wch)
         return ERR;
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
-    /* Linux/xterm: fold ESC+char to KEY_ALT (Amiga/Win32 do this natively) */
+    /* Linux/xterm: fold ESC+char to KEY_ALT/KEY_SHIFT/KEY_ALT_CTRL (Amiga/Win32 do this natively) */
     if (wrc != KEY_CODE_YES && wch == 27)
     {
         wint_t wch2;
@@ -48,17 +48,29 @@ int wrapper_read_key(wint_t *out_wch)
         wrc2 = get_wch(&wch2);
         nodelay(stdscr, FALSE);
 
-        if (wrc2 != ERR && wrc2 != KEY_CODE_YES && wch2 >= 0x20 && wch2 < 0x7F)
+        if (wrc2 != ERR && wrc2 != KEY_CODE_YES)
         {
-            int letter = (int)wch2;
+            int c = (int)wch2;
 
-            /* Case-fold so KEY_ALT('l') == KEY_ALT('L') */
-            if (letter >= 'a' && letter <= 'z')
-                letter = letter - 'a' + 'A';
+            /* ESC + Ctrl+letter -> Alt+Ctrl+letter */
+            if (c >= 1 && c <= 26)
+            {
+                *out_wch = (wint_t)KEY_ALT_CTRL(c + 64);
+                return KEY_CODE_YES;
+            }
 
-            *out_wch = (wint_t)KEY_ALT(letter);
+            if (wch2 >= 0x20 && wch2 < 0x7F)
+            {
+                int letter = (int)wch2;
 
-            return KEY_CODE_YES;
+                /* Case-fold so KEY_ALT('l') == KEY_ALT('L') */
+                if (letter >= 'a' && letter <= 'z')
+                    letter = letter - 'a' + 'A';
+
+                *out_wch = (wint_t)KEY_ALT(letter);
+
+                return KEY_CODE_YES;
+            }
         }
 
         /* Bare ESC -- caller treats as cancel */

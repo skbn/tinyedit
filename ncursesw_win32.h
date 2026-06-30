@@ -224,6 +224,9 @@ extern int COLORS;
 #ifndef KEY_SHIFT
 #define KEY_SHIFT(c) (0x900 + ((unsigned int)(c) & 0xFF))
 #endif
+#ifndef KEY_ALT_CTRL
+#define KEY_ALT_CTRL(c) (0xB00 + ((unsigned int)(c) & 0xFF))
+#endif
 #ifndef KEY_CLEFT
 #define KEY_CLEFT 0x7F3
 #endif
