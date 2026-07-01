@@ -1,7 +1,5 @@
 /*
- * crashedit - Message area editor for AmigaOS
- *
- * This file is part of the crashedit project.
+ * tinyedit - Text editor for AmigaOS
  *
  * Copyright (C) 2026 Tanausú M. 39:190/101@amiganet 2:341/207@fidonet
  *
@@ -9,17 +7,6 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 2 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- * This program uses JAMLIB, which is licensed under the GNU Lesser
- * General Public License v2.1. See src/jamlib/LICENSE for details.
  */
 
 /* ncursesw_win32.c - ncursesw for Windows using GDI (own window like Amiga) */
@@ -154,110 +141,56 @@ static COLORREF s_rgb_map[16] =
 /* Forward declarations */
 static void render_all(void);
 
-/* Return 1 if cp is 2-cell-wide glyph (East Asian Wide/Fullwidth + emoji). MSVCRT's wcswidth() is unreliable, so we use table-driven check */
 static int is_wide_cp(unsigned int cp)
 {
-    /* ANSI art (CP437) uses a strict 1-cell grid, no double-width glyphs */
+    /* ANSI-art view is a strict CP437 1-cell grid: never widen. */
     if (s_ansi_mode)
         return 0;
 
-    /* Combining marks and control: not wide */
     if (cp < 0x1100)
-        return 0;
+        return 0; /* ASCII, Latin, CP437 low glyphs: 1 cell */
 
-    /* Ranges for real-world text and emoji */
     if (cp >= 0x1100 && cp <= 0x115F)
         return 1; /* Hangul Jamo */
 
-    if (cp >= 0x2190 && cp <= 0x21FF)
-        return 1; /* Arrows */
-
-    if (cp >= 0x2329 && cp <= 0x232A)
-        return 1; /* Angle brackets */
-
-    if (cp >= 0x2500 && cp <= 0x257F)
-        return 0; /* Box Drawing - narrow, same as ncurses Linux */
-
-    if (cp >= 0x2580 && cp <= 0x259F)
-        return 1; /* Block Elements - wide, rendered with GDI */
-
-    if (cp >= 0x25A0 && cp <= 0x25FF)
-        return 1; /* Geometric Shapes */
-
-    if (cp >= 0x2600 && cp <= 0x26FF)
-        return 1; /* Miscellaneous Symbols */
-
-    if (cp >= 0x2700 && cp <= 0x27BF)
-        return 1; /* Dingbats */
-
-    if (cp >= 0x2B00 && cp <= 0x2BFF)
-        return 1; /* Miscellaneous Symbols and Arrows */
+    if (cp >= 0x2190 && cp <= 0x2BFF)
+        return 0;
 
     if (cp >= 0x2E80 && cp <= 0x303E)
-        return 1; /* CJK Radicals  */
+        return 1; /* CJK Radicals, Kangxi, CJK Symbols */
 
     if (cp >= 0x3041 && cp <= 0x33FF)
-        return 1; /* Hiragana, Katakana, CJK Symbols */
+        return 1; /* Hiragana, Katakana, Bopomofo, CJK compat */
 
     if (cp >= 0x3400 && cp <= 0x4DBF)
         return 1; /* CJK Ext A */
 
     if (cp >= 0x4E00 && cp <= 0x9FFF)
-        return 1; /* CJK Unified */
+        return 1; /* CJK Unified Ideographs */
 
     if (cp >= 0xA000 && cp <= 0xA4CF)
-        return 1; /* Yi */
+        return 1; /* Yi Syllables */
 
     if (cp >= 0xAC00 && cp <= 0xD7A3)
         return 1; /* Hangul Syllables */
 
     if (cp >= 0xF900 && cp <= 0xFAFF)
-        return 1; /* CJK Compat */
+        return 1; /* CJK Compatibility Ideographs */
 
     if (cp >= 0xFE30 && cp <= 0xFE4F)
-        return 1; /* CJK Compat Forms */
+        return 1; /* CJK Compatibility Forms */
 
     if (cp >= 0xFF00 && cp <= 0xFF60)
-        return 1; /* Fullwidth ASCII */
+        return 1; /* Fullwidth Forms */
 
     if (cp >= 0xFFE0 && cp <= 0xFFE6)
         return 1; /* Fullwidth signs */
 
-    if (cp >= 0x1F000 && cp <= 0x1F02F)
-        return 1; /* Mahjong */
+    if (cp >= 0x1F300 && cp <= 0x1FAFF)
+        return 1; /* Emoji and pictographs */
 
-    if (cp >= 0x1F0A0 && cp <= 0x1F0FF)
-        return 1; /* Playing cards */
-
-    if (cp >= 0x1F100 && cp <= 0x1F64F)
-        return 1; /* Enclosed alphanumerics, emoticons */
-
-    if (cp >= 0x1F680 && cp <= 0x1F6FF)
-        return 1; /* Transport */
-
-    if (cp >= 0x1F700 && cp <= 0x1F77F)
-        return 1; /* Alchemical */
-
-    if (cp >= 0x1F780 && cp <= 0x1F7FF)
-        return 1; /* Geometric shapes ext */
-
-    if (cp >= 0x1F800 && cp <= 0x1F8FF)
-        return 1; /* Supplemental arrows-C */
-
-    if (cp >= 0x1F900 && cp <= 0x1F9FF)
-        return 1; /* Supplemental symbols and pictographs */
-
-    if (cp >= 0x1FA00 && cp <= 0x1FA6F)
-        return 1; /* Chess */
-
-    if (cp >= 0x1FA70 && cp <= 0x1FAFF)
-        return 1; /* Symbols extended-A */
-
-    if (cp >= 0x20000 && cp <= 0x2FFFD)
-        return 1; /* CJK Ext B..F */
-
-    if (cp >= 0x30000 && cp <= 0x3FFFD)
-        return 1; /* CJK Ext G */
+    if (cp >= 0x20000 && cp <= 0x3FFFD)
+        return 1; /* CJK Ext B..G (supplementary ideographs) */
 
     return 0;
 }
@@ -1717,12 +1650,67 @@ int win32_reload_ttf(const char *font_path, int new_size)
     for (i = 1; i < s_added_font_count; i++)
         TE_FontAdd(s_te_dc, s_added_fonts[i], (LONG)new_size, 0);
 
+    /* Keep the recorded primary font in sync with what we just loaded */
+    strncpy(s_added_fonts[0], font_path, MAX_PATH - 1);
+    s_added_fonts[0][MAX_PATH - 1] = '\0';
+
+    if (s_added_font_count < 1)
+        s_added_font_count = 1;
+
     TE_GetMetrics(s_te_dc, &metrics);
 
-    if (metrics.height > 0)
+    if (metrics.width > 0 && metrics.height > 0)
     {
+        int old_fw = fw;
+        int old_fh = fh;
+
+        fw = metrics.width;
         fh = metrics.height;
         fb = metrics.baseY;
+
+        /* Cell size changed: resize the physical window and its backing bitmap to match */
+        if ((fw != old_fw || fh != old_fh) && hWnd)
+        {
+            RECT client, wrect;
+            int new_win_w, new_win_h;
+            int border_w, border_h;
+
+            /* Recreate the backing bitmap at the new cell size FIRST */
+            if (hDC && hBitmap)
+            {
+                RECT rect;
+                HBRUSH hBrush;
+                HBITMAP newBitmap = CreateCompatibleBitmap(hDC, COLS * fw, LINES * fh);
+
+                if (newBitmap)
+                {
+                    DeleteObject(hBitmap);
+                    hBitmap = newBitmap;
+                    SelectObject(hMemDC, hBitmap);
+
+                    rect.left = 0;
+                    rect.top = 0;
+                    rect.right = COLS * fw;
+                    rect.bottom = LINES * fh;
+                    hBrush = CreateSolidBrush(RGB(0, 0, 0));
+
+                    FillRect(hMemDC, &rect, hBrush);
+                    DeleteObject(hBrush);
+                }
+            }
+
+            /*  Resize the physical window to keep COLS x LINES at the new cell size*/
+            GetClientRect(hWnd, &client);
+            GetWindowRect(hWnd, &wrect);
+
+            border_w = (wrect.right - wrect.left) - client.right;
+            border_h = (wrect.bottom - wrect.top) - client.bottom;
+
+            new_win_w = COLS * fw + border_w;
+            new_win_h = LINES * fh + border_h;
+
+            SetWindowPos(hWnd, NULL, 0, 0, new_win_w, new_win_h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
     }
 
     render_all();
@@ -3544,9 +3532,7 @@ void win32_set_ansi_mode(int use_ansi)
     win32_force_redraw();
 }
 
-/* Drain the Windows message queue before showing a popup. After a key like
- * Enter is pressed, Windows may still have WM_KEYUP/WM_CHAR events pending;
- * the next popup would read them and close immediately. This removes them */
+/* Drain the Windows message queue before showing a popup */
 void win32_drain_messages(void)
 {
     MSG msg;

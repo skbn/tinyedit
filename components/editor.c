@@ -207,21 +207,56 @@ static EdLine *line_new_take(Ed *ed, wchar_t *wcs, int len)
 #if defined(PLATFORM_AMIGA)
     if (ed && ed->mem_pool)
     {
-        /* Pool path: copy + free source */
-        ln = line_new(ed, wcs, len);
+        /* Pool path: copy into an EXACT-fit pool buffer (len+1), then free the source */
+        ln = (EdLine *)ed_pool_alloc(ed, sizeof(EdLine));
+
+        if (!ln)
+        {
+            free(wcs);
+            return NULL;
+        }
+
+        ln->cap = len + 1; /* exact fit, +1 for the NUL terminator */
+        ln->wcs = (wchar_t *)ed_pool_alloc(ed, (size_t)ln->cap * sizeof(wchar_t));
+
+        if (!ln->wcs)
+        {
+            ed_pool_free(ed, ln, sizeof(EdLine));
+            free(wcs);
+            return NULL;
+        }
+
+        if (len > 0)
+            memcpy(ln->wcs, wcs, (size_t)len * sizeof(wchar_t));
+
+        ln->wcs[len] = L'\0';
+        ln->len = len;
+        ln->word_count = 0;
+        ln->has_wrap_hyphen = 0;
+        ln->wrap_count_cache = -1;
+        ln->wrap_cache_width = 0;
+        ln->mem_pool = ed->mem_pool;
 
         free(wcs);
         return ln;
     }
 #endif
 
-    /* No pool (non-Amiga or pool creation failed): zero-copy adoption */
+    /* No pool (non-Amiga or pool creation failed) adopt the buffer*/
     ln = (EdLine *)malloc(sizeof(EdLine));
 
     if (!ln)
     {
         free(wcs);
         return NULL;
+    }
+
+    if (len + 1 > 0)
+    {
+        wchar_t *shrunk = (wchar_t *)realloc(wcs, (size_t)(len + 1) * sizeof(wchar_t));
+
+        if (shrunk)
+            wcs = shrunk; /* realloc-smaller: keep original on the rare failure */
     }
 
     ln->wcs = wcs;
@@ -887,6 +922,7 @@ static int prefix_rebuild_from(Ed *ed, int from_line, int width)
     else
     {
         total = 0;
+
         for (i = 0; i < from_line; i++)
             total += ed_line_wrap_count(ed->lines[i], width);
     }
@@ -1805,6 +1841,7 @@ void ed_auto_rewrap_capture_pre_snapshot(Ed *ed)
     if (paragraph_size > ED_AUTO_REWRAP_SNAPSHOT_LINE_CAP)
     {
         free(ed->auto_rewrap_pre_snapshot);
+
         ed->auto_rewrap_pre_snapshot = NULL;
         ed->auto_rewrap_pre_start = -1;
         ed->auto_rewrap_pre_end = -1;
