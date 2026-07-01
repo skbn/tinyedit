@@ -726,23 +726,31 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
                             }
 #endif
                         }
-                        else
-                        {
-                            /* Memory mode: text input */
-                            wchar_t wtmp[TE_CFG_STR_MAX];
-
-                            mbstowcs(wtmp, tmp, TE_CFG_STR_MAX - 1);
-                            wtmp[TE_CFG_STR_MAX - 1] = L'\0';
-
-                            if (ui_popup_input_wcs(fld->label, "Font name:", wtmp, TE_CFG_STR_MAX) == 0)
-                            {
-                                wcstombs(s, wtmp, TE_CFG_STR_MAX - 1);
-                                s[TE_CFG_STR_MAX - 1] = '\0';
-                            }
-                        }
-
-                        break;
                     }
+                    else
+                    {
+                        /* Memory mode: text input */
+                        wchar_t wtmp[TE_CFG_STR_MAX];
+
+                        mbstowcs(wtmp, tmp, TE_CFG_STR_MAX - 1);
+                        wtmp[TE_CFG_STR_MAX - 1] = L'\0';
+
+#ifdef PLATFORM_WIN32
+                        win32_drain_messages();
+#endif
+
+                        if (ui_popup_input_wcs(fld->label, "Font name:", wtmp, TE_CFG_STR_MAX) == 0)
+                        {
+                            wcstombs(s, wtmp, TE_CFG_STR_MAX - 1);
+                            s[TE_CFG_STR_MAX - 1] = '\0';
+
+#ifdef PLATFORM_WIN32
+                            *(int *)(base + F_OFF(ttf_enabled)) = 0;
+#endif
+                        }
+                    }
+
+                    break;
                 }
             }
         }
@@ -1518,6 +1526,13 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 
         if (key == KEY_F(10) || key == 'S' || key == 's')
         {
+#ifdef HAVE_TTF_TAB
+            int fi;
+            int fallbacks_changed = 0;
+            int ttf_details_changed = 0;
+            int font_mode_changed = 0;
+#endif
+
             if (!cfg_path)
             {
                 ui_popup_confirm("Setup", "No config path; cannot save.");
@@ -1531,12 +1546,11 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
             }
 
 #ifdef HAVE_TTF_TAB
-            /* If TTF_FONT, TTF_SIZE, or any fallback changed, reload fonts */
+            /* Detect changes that require a font backend reload or window restart */
+            font_mode_changed = (cfg->ttf_enabled != work.ttf_enabled) || (strcmp(cfg->font, work.font) != 0) || (cfg->ttf_size != work.ttf_size);
+
             if (work.ttf_enabled)
             {
-                int fi;
-                int fallbacks_changed = 0;
-
                 for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
                 {
                     if (strcmp(cfg->ttf_fallback[fi], work.ttf_fallback[fi]) != 0 || cfg->ttf_fallback_size[fi] != work.ttf_fallback_size[fi])
@@ -1546,30 +1560,91 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
                     }
                 }
 
-                if (strcmp(cfg->ttf_font, work.ttf_font) != 0 || cfg->ttf_size != work.ttf_size || fallbacks_changed)
-                {
-#ifdef PLATFORM_AMIGA
-                    extern int amiga_reload_ttf(const char *font_path, int new_size);
-                    extern int amiga_add_ttf_fallback(const char *path, int size);
-                    extern void amiga_clear_ttf_fallbacks(void);
-                    int sz;
+                if (strcmp(cfg->ttf_font, work.ttf_font) != 0 || cfg->ttf_size != work.ttf_size || cfg->ttf_antialias != work.ttf_antialias || cfg->ttf_use_utf8 != work.ttf_use_utf8 || fallbacks_changed)
+                    ttf_details_changed = 1;
+            }
 
-                    /* Push new fallback set into backend before reload to avoid stale list */
-                    amiga_clear_ttf_fallbacks();
+#ifdef PLATFORM_AMIGA
+            if (font_mode_changed || ttf_details_changed)
+            {
+                extern int amiga_set_ttf(const char *ttf_file, int size, int antialias);
+                extern int amiga_set_font_name(const char *font_name);
+                extern int amiga_set_ttf_encoding(int use_utf8);
+                extern int amiga_reinit_window(void);
+                extern int amiga_reload_ttf(const char *font_path, int new_size);
+                extern int amiga_add_ttf_fallback(const char *path, int size);
+                extern void amiga_clear_ttf_fallbacks(void);
+                int sz;
+
+                /* Push new fallback set into backend so it is current for reinit/reload */
+                amiga_clear_ttf_fallbacks();
+
+                for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
+                {
+                    if (work.ttf_fallback[fi][0])
+                    {
+                        sz = work.ttf_fallback_size[fi] > 0 ? work.ttf_fallback_size[fi] : work.ttf_size;
+                        amiga_add_ttf_fallback(work.ttf_fallback[fi], sz);
+                    }
+                }
+
+                if (font_mode_changed)
+                {
+                    /* Switching between TTF and system font requires a full window restart */
+                    amiga_set_font_name(work.font[0] ? work.font : NULL);
+
+                    if (work.ttf_enabled)
+                    {
+                        amiga_set_ttf(work.ttf_font, work.ttf_size, work.ttf_antialias);
+                        amiga_set_ttf_encoding(work.ttf_use_utf8);
+                    }
+                    else
+                    {
+                        amiga_set_ttf(NULL, 0, 0);
+                    }
+
+                    amiga_reinit_window();
+                }
+                else if (ttf_details_changed)
+                {
+                    /* Already in TTF mode: lightweight reload, no window restart */
+                    amiga_set_ttf(work.ttf_font, work.ttf_size, work.ttf_antialias);
+                    amiga_set_ttf_encoding(work.ttf_use_utf8);
+                    amiga_reload_ttf(work.ttf_font, work.ttf_size);
+                }
+            }
+#endif
+#ifdef PLATFORM_WIN32
+            if (font_mode_changed || ttf_details_changed)
+            {
+                extern int win32_set_font_name(const char *font_name);
+                extern int win32_set_font_size(int size);
+                extern int win32_add_font_file(const char *path);
+                extern void win32_clear_font_files(void);
+                extern int win32_reinit_window(void);
+
+                win32_clear_font_files();
+                win32_set_font_name(work.font[0] ? work.font : NULL);
+
+                if (work.ttf_enabled)
+                {
+                    win32_set_font_size(work.ttf_size);
+                    win32_add_font_file(work.ttf_font);
 
                     for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
                     {
                         if (work.ttf_fallback[fi][0])
-                        {
-                            sz = work.ttf_fallback_size[fi] > 0 ? work.ttf_fallback_size[fi] : work.ttf_size;
-                            amiga_add_ttf_fallback(work.ttf_fallback[fi], sz);
-                        }
+                            win32_add_font_file(work.ttf_fallback[fi]);
                     }
-
-                    amiga_reload_ttf(work.ttf_font, work.ttf_size);
-#endif
                 }
+                else
+                {
+                    win32_set_font_size(work.ttf_size > 0 ? work.ttf_size : 16);
+                }
+
+                win32_reinit_window();
             }
+#endif
 #endif
 
             /* Reload Hunspell dictionary when spell settings changed */

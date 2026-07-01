@@ -526,7 +526,7 @@ static void render_cell(int row, int col, chtype ch, int attrs)
 
     x = px(col);
     y = py(row);
-    pair = (attrs & A_COLOR) >> 8;
+    pair = (int)PAIR_NUMBER(attrs);
 
     apply_colors(pair, attrs);
 
@@ -639,7 +639,7 @@ static void render_all()
 
             /* Start run of contiguous dirty cells with same color/attrs */
             run_start = c;
-            run_pair = (cell->attrs & A_COLOR) >> 8;
+            run_pair = (int)PAIR_NUMBER(cell->attrs);
             run_attrs = cell->attrs;
             run_len = 0;
 
@@ -651,7 +651,7 @@ static void render_all()
                 if (!s_dirty_row[c])
                     break;
 
-                p = (cc->attrs & A_COLOR) >> 8;
+                p = (int)PAIR_NUMBER(cc->attrs);
 
                 /* Compare color pair and A_REVERSE specifically, ignore other attrs */
                 if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
@@ -1056,37 +1056,34 @@ static void ami_ttf_close()
     s_use_ttf = 0;
 }
 
-/* Initialization */
-WINDOW *initscr()
+/* Close any open fonts (bitmap and TTF) */
+static void ami_cleanup_fonts(void)
+{
+    int ansi_is_normal = (ami_font_ansi == ami_font_normal);
+
+    ami_ttf_close();
+
+    if (ami_font_normal)
+    {
+        CloseFont(ami_font_normal);
+        ami_font_normal = NULL;
+    }
+
+    if (ami_font_ansi)
+    {
+        if (!ansi_is_normal)
+            CloseFont(ami_font_ansi);
+
+        ami_font_ansi = NULL;
+    }
+
+    ami_font = NULL;
+}
+
+/* Initialize fonts (TTF or bitmap) based on current configuration */
+static void ami_init_fonts(void)
 {
     struct TextAttr ta;
-    ULONG idcmp, wfl;
-    int dw, dh, sw, sh;
-
-    /* Open timer.device for reliable click timestamps */
-    s_timer_port = CreateMsgPort();
-
-    if (s_timer_port)
-    {
-        s_timer_req = (struct timerequest *)CreateIORequest(s_timer_port, sizeof(struct timerequest));
-
-        if (s_timer_req)
-        {
-            if (OpenDevice(TIMERNAME, UNIT_VBLANK, (struct IORequest *)s_timer_req, 0) == 0)
-                TimerBase = (struct Device *)s_timer_req->tr_node.io_Device;
-            else
-            {
-                DeleteIORequest((struct IORequest *)s_timer_req);
-                s_timer_req = NULL;
-            }
-        }
-
-        if (!s_timer_req)
-        {
-            DeleteMsgPort(s_timer_port);
-            s_timer_port = NULL;
-        }
-    }
 
     /* Try TrueType font first; on failure fall back to bitmap */
     s_use_ttf = ami_ttf_try_open();
@@ -1147,17 +1144,25 @@ WINDOW *initscr()
         ami_font_ansi = NULL;
         ami_font = NULL;
     }
+}
 
-    ami_scr = LockPubScreen(NULL);
+/* Create the Amiga window based on current font metrics */
+static int ami_create_window(void)
+{
+    struct Screen *scr;
+    ULONG idcmp, wfl;
+    int dw, dh, sw, sh;
 
-    if (!ami_scr)
-        return NULL;
+    scr = LockPubScreen(NULL);
+
+    if (!scr)
+        return 0;
 
     /* Window size with borders */
-    sw = ami_scr->Width;
-    sh = ami_scr->Height;
-    dw = 80 * fw + ami_scr->WBorLeft + ami_scr->WBorRight;
-    dh = 25 * fh + ami_scr->WBorTop + ami_scr->WBorBottom + ami_scr->Font->ta_YSize + 1;
+    sw = scr->Width;
+    sh = scr->Height;
+    dw = 80 * fw + scr->WBorLeft + scr->WBorRight;
+    dh = 25 * fh + scr->WBorTop + scr->WBorBottom + scr->Font->ta_YSize + 1;
 
     if (dw > sw)
         dw = sw;
@@ -1180,16 +1185,14 @@ WINDOW *initscr()
         WA_MaxHeight, sh,
         WA_Flags, wfl,
         WA_IDCMP, idcmp,
-        WA_PubScreen, (ULONG)ami_scr,
+        WA_PubScreen, (ULONG)scr,
         WA_Title, (ULONG)WRAPPER_PID,
         TAG_DONE);
 
-    UnlockPubScreen(NULL, ami_scr);
-
-    ami_scr = NULL;
+    UnlockPubScreen(NULL, scr);
 
     if (!ami_win)
-        return NULL;
+        return 0;
 
     ami_rp = ami_win->RPort;
 
@@ -1218,23 +1221,17 @@ WINDOW *initscr()
     if (LINES < 5)
         LINES = 5;
 
+    return 1;
+}
+
+/* Create stdscr and initialize default colors */
+static int ami_create_stdscr(void)
+{
     /* Create stdscr */
     stdscr = (WINDOW *)malloc(sizeof(WINDOW));
 
     if (!stdscr)
-    {
-        CloseWindow(ami_win);
-
-        ami_win = NULL;
-
-        if (ami_font)
-        {
-            CloseFont(ami_font);
-            ami_font = NULL;
-        }
-
-        return NULL;
-    }
+        return 0;
 
     memset(stdscr, 0, sizeof(WINDOW));
 
@@ -1245,10 +1242,9 @@ WINDOW *initscr()
     if (!stdscr->cells)
     {
         free(stdscr);
+
         stdscr = NULL;
-        CloseWindow(ami_win);
-        ami_win = NULL;
-        return NULL;
+        return 0;
     }
 
     curscr = stdscr;
@@ -1266,11 +1262,60 @@ WINDOW *initscr()
     erase();
     refresh();
 
+    return 1;
+}
+
+/* Initialization */
+WINDOW *initscr()
+{
+    /* Open timer.device for reliable click timestamps */
+    s_timer_port = CreateMsgPort();
+
+    if (s_timer_port)
+    {
+        s_timer_req = (struct timerequest *)CreateIORequest(s_timer_port, sizeof(struct timerequest));
+
+        if (s_timer_req)
+        {
+            if (OpenDevice(TIMERNAME, UNIT_VBLANK, (struct IORequest *)s_timer_req, 0) == 0)
+            {
+                TimerBase = (struct Device *)s_timer_req->tr_node.io_Device;
+            }
+            else
+            {
+                DeleteIORequest((struct IORequest *)s_timer_req);
+                s_timer_req = NULL;
+            }
+        }
+
+        if (!s_timer_req)
+        {
+            DeleteMsgPort(s_timer_port);
+            s_timer_port = NULL;
+        }
+    }
+
+    ami_init_fonts();
+
+    if (!ami_create_window())
+    {
+        endwin();
+        return NULL;
+    }
+
+    if (!ami_create_stdscr())
+    {
+        endwin();
+        return NULL;
+    }
+
     return stdscr;
 }
 
 int endwin()
 {
+    int ansi_is_normal = (ami_font_ansi == ami_font_normal);
+
     if (stdscr)
     {
         free(stdscr->cells);
@@ -1312,9 +1357,11 @@ int endwin()
         ami_font_normal = NULL;
     }
 
-    if (ami_font_ansi && ami_font_ansi != ami_font_normal)
+    if (ami_font_ansi)
     {
-        CloseFont(ami_font_ansi);
+        if (!ansi_is_normal)
+            CloseFont(ami_font_ansi);
+
         ami_font_ansi = NULL;
     }
 
@@ -2610,6 +2657,67 @@ int amiga_reload_ttf(const char *font_path, int new_size)
         }
 
         ChangeWindowBox(ami_win, win_x, win_y, want_w, want_h);
+    }
+
+    return 1;
+}
+
+/* Reinitialize the window after changing font configuration */
+int amiga_reinit_window(void)
+{
+    if (!ami_win)
+        return 0; /* Window not open yet */
+
+    /* Free stdscr and shadow so they are recreated with new dimensions */
+    if (stdscr)
+    {
+        free(stdscr->cells);
+        free(stdscr);
+
+        stdscr = NULL;
+    }
+
+    curscr = NULL;
+
+    if (s_shadow)
+    {
+        free(s_shadow);
+
+        s_shadow = NULL;
+        s_shadow_w = 0;
+        s_shadow_h = 0;
+    }
+
+    s_shadow_dirty = 1;
+
+    /* Close window */
+    if (ami_win)
+    {
+        CloseWindow(ami_win);
+
+        ami_win = NULL;
+        ami_rp = NULL;
+    }
+
+    /* Close current fonts and reopen with latest configuration */
+    ami_cleanup_fonts();
+    ami_init_fonts();
+
+    if (!ami_create_window())
+    {
+        ami_cleanup_fonts();
+        return 0;
+    }
+
+    if (!ami_create_stdscr())
+    {
+        CloseWindow(ami_win);
+
+        ami_win = NULL;
+        ami_rp = NULL;
+
+        ami_cleanup_fonts();
+        return 0;
     }
 
     return 1;

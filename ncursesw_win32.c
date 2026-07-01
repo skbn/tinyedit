@@ -1,5 +1,7 @@
 /*
- * tinyedit - Text editor for AmigaOS
+ * crashedit - Message area editor for AmigaOS
+ *
+ * This file is part of the crashedit project.
  *
  * Copyright (C) 2026 Tanausú M. 39:190/101@amiganet 2:341/207@fidonet
  *
@@ -7,6 +9,17 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 2 of the License, or
  * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * This program uses JAMLIB, which is licensed under the GNU Lesser
+ * General Public License v2.1. See src/jamlib/LICENSE for details.
  */
 
 /* ncursesw_win32.c - ncursesw for Windows using GDI (own window like Amiga) */
@@ -72,6 +85,9 @@ static int s_ansi_mode = 0; /* ANSI art mode: when ON, do not expand tabs (prese
 /* Ungetch buffer */
 static int s_ungetch = ERR;
 
+/* Non-zero while win32_reinit_window() is destroying/recreating the window */
+static int s_reinit_in_progress = 0;
+
 /* Font configuration */
 #define WIN_FONT_NAME_MAX 256
 static char win_font_name[WIN_FONT_NAME_MAX] = "Consolas";
@@ -91,6 +107,11 @@ static int s_cursor_color = COLOR_WHITE;
 
 /* Active fg/bg color indices */
 static int s_cur_fg_idx = COLOR_WHITE, s_cur_bg_idx = COLOR_BLACK;
+
+/* Cached pattern brushes for shaded block glyphs in ANSI mode */
+static HBRUSH s_brush_25 = NULL;
+static HBRUSH s_brush_50 = NULL;
+static HBRUSH s_brush_75 = NULL;
 
 /* Key input buffer */
 static int s_key_buf[16];
@@ -259,203 +280,6 @@ static int cp_to_utf16(unsigned int cp, wchar_t *buf)
     return 2;
 }
 
-/* Draw glyph centered in a cell_w-pixel-wide slot; glyph overflows right if wider than slot */
-static void draw_glyph_in_cell(int cx, int cy, int cell_w, const wchar_t *buf, int len)
-{
-    TextOutW(hMemDC, cx, cy, buf, len);
-}
-
-/* Block glyph (U+2580..U+259F) - draw with GDI for pixel-perfect tiling */
-static int is_block_glyph(unsigned int cp)
-{
-    return (cp >= 0x2580 && cp <= 0x259F);
-}
-
-static void draw_block_glyph(int x, int y, int cw, int ch, unsigned int cp, COLORREF fg)
-{
-    HBRUSH hBrush;
-    RECT rc;
-    int xm = x + cw / 2;
-    int ym = y + ch / 2;
-    int x1 = x + cw - 1;
-    int y1 = y + ch - 1;
-
-    if (cw < 2 || ch < 2)
-        return;
-
-    hBrush = CreateSolidBrush(fg);
-
-    switch (cp)
-    {
-    /* Half blocks */
-    case 0x2580: /* ▀ UPPER HALF */
-        SetRect(&rc, x, y, x1 + 1, ym);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2584: /* ▄ LOWER HALF */
-        SetRect(&rc, x, ym, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2588: /* █ FULL BLOCK */
-        SetRect(&rc, x, y, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x258C: /* ▌ LEFT HALF */
-        SetRect(&rc, x, y, xm, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2590: /* ▐ RIGHT HALF */
-        SetRect(&rc, xm, y, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-
-    /* Lower-N-eighths blocks (▁ ▂ ▃ ▅ ▆ ▇) */
-    case 0x2581:
-        SetRect(&rc, x, y + ch * 7 / 8, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2582:
-        SetRect(&rc, x, y + ch * 6 / 8, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2583:
-        SetRect(&rc, x, y + ch * 5 / 8, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2585:
-        SetRect(&rc, x, y + ch * 3 / 8, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2586:
-        SetRect(&rc, x, y + ch * 2 / 8, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2587:
-        SetRect(&rc, x, y + ch * 1 / 8, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-
-    /* Left-N-eighths blocks (▉ ▊ ▋ ▍ ▎ ▏) */
-    case 0x2589:
-        SetRect(&rc, x, y, x + cw * 7 / 8, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x258A:
-        SetRect(&rc, x, y, x + cw * 6 / 8, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x258B:
-        SetRect(&rc, x, y, x + cw * 5 / 8, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x258D:
-        SetRect(&rc, x, y, x + cw * 3 / 8, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x258E:
-        SetRect(&rc, x, y, x + cw * 2 / 8, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x258F:
-        SetRect(&rc, x, y, x + cw / 8, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-
-    /* One-eighth top and right (▔ ▕) */
-    case 0x2594:
-        SetRect(&rc, x, y, x1 + 1, y + ch / 8);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2595:
-        SetRect(&rc, x + cw * 7 / 8, y, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-
-    /* Shaded blocks (░ ▒ ▓) — patterned fills */
-    case 0x2591:
-    case 0x2592:
-    case 0x2593:
-    {
-        static const BYTE pat_25[8] = {0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22};
-        static const BYTE pat_50[8] = {0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55};
-        static const BYTE pat_75[8] = {0x77, 0xDD, 0x77, 0xDD, 0x77, 0xDD, 0x77, 0xDD};
-        const BYTE *pat = (cp == 0x2591) ? pat_25 : (cp == 0x2592) ? pat_50
-                                                                   : pat_75;
-
-        HBITMAP hbm = CreateBitmap(8, 8, 1, 1, pat);
-        HBRUSH hPatBrush = CreatePatternBrush(hbm);
-        HBRUSH hOldBrush = (HBRUSH)SelectObject(hMemDC, hPatBrush);
-        COLORREF oldBk = SetBkColor(hMemDC, s_rgb_map[s_cur_bg_idx]);
-        COLORREF oldFg = SetTextColor(hMemDC, fg);
-        POINT oldOrg;
-
-        SetBrushOrgEx(hMemDC, x % 8, y % 8, &oldOrg);
-        PatBlt(hMemDC, x, y, cw, ch, PATCOPY);
-        SetBrushOrgEx(hMemDC, oldOrg.x, oldOrg.y, NULL);
-        SetTextColor(hMemDC, oldFg);
-        SetBkColor(hMemDC, oldBk);
-        SelectObject(hMemDC, hOldBrush);
-
-        DeleteObject(hPatBrush);
-        DeleteObject(hbm);
-        DeleteObject(hBrush);
-        return;
-    }
-
-    /* Quadrants (▖ ▗ ▘ ▙ ▚ ▛ ▜ ▝ ▞ ▟) */
-    case 0x2596: /* ▖ lower left */
-        SetRect(&rc, x, ym, xm, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2597: /* ▗ lower right */
-        SetRect(&rc, xm, ym, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2598: /* ▘ upper left */
-        SetRect(&rc, x, y, xm, ym);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x2599: /* ▙ upper left + lower */
-        SetRect(&rc, x, y, xm, ym);
-        FillRect(hMemDC, &rc, hBrush);
-        SetRect(&rc, xm, ym, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x259A: /* ▚ upper left + lower right */
-        SetRect(&rc, x, y, xm, ym);
-        FillRect(hMemDC, &rc, hBrush);
-        SetRect(&rc, xm, ym, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x259B: /* ▛ upper left + lower left */
-        SetRect(&rc, x, y, xm, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x259C: /* ▜ upper right + lower right */
-        SetRect(&rc, xm, y, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x259D: /* ▝ upper right */
-        SetRect(&rc, xm, y, x1 + 1, ym);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x259E: /* ▞ upper right + lower left */
-        SetRect(&rc, xm, y, x1 + 1, ym);
-        FillRect(hMemDC, &rc, hBrush);
-        SetRect(&rc, x, ym, xm, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    case 0x259F: /* ▟ upper right + lower left + lower right */
-        SetRect(&rc, xm, y, x1 + 1, ym);
-        FillRect(hMemDC, &rc, hBrush);
-        SetRect(&rc, x, ym, x1 + 1, y1 + 1);
-        FillRect(hMemDC, &rc, hBrush);
-        break;
-    }
-
-    DeleteObject(hBrush);
-}
-
 /* Draw a single codepoint using the FreeType renderer */
 static void draw_glyph_te(int cx, int cy, int cell_w, unsigned int cp)
 {
@@ -465,7 +289,31 @@ static void draw_glyph_te(int cx, int cy, int cell_w, unsigned int cp)
     int x;
 
     if (!s_te_dc)
+    {
+        wchar_t wbuf[2];
+        RECT clip;
+        INT dx[2];
+        int origin_x;
+        int wlen;
+        ABC abc;
+
+        wlen = cp_to_utf16(cp, wbuf);
+        origin_x = cx;
+
+        clip.left = cx;
+        clip.top = cy;
+        clip.right = cx + cell_w;
+        clip.bottom = cy + fh;
+
+        if (wlen == 1 && GetCharABCWidthsW(hMemDC, (UINT)wbuf[0], (UINT)wbuf[0], &abc) && abc.abcA < 0)
+            origin_x = cx - abc.abcA;
+
+        dx[0] = cell_w;
+        dx[1] = 0;
+
+        ExtTextOutW(hMemDC, origin_x, cy, ETO_CLIPPED, &clip, wbuf, wlen, dx);
         return;
+    }
 
     /* Encode codepoint to UTF-8 */
     if (cp < 0x80)
@@ -983,7 +831,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         return 0;
     }
     case WM_DESTROY:
-        PostQuitMessage(0);
+        /* During win32_reinit_window() we destroy the window ourselves */
+        if (!s_reinit_in_progress)
+            PostQuitMessage(0);
+
         return 0;
     }
 
@@ -1077,21 +928,24 @@ static void render_cell(int row, int col, Cell *cell)
     ch = cell->ch;
     attrs = cell->attrs;
 
-    /* trailing cell belongs to the lead glyph, nothing to draw */
     if (ch == WIN32_CELL_WIDE_TRAILING)
-        return;
+    {
+        if (!s_ansi_mode)
+            return;
+
+        /* ANSI mode: treat as a literal space, fall through to normal paint */
+        ch = ' ';
+        cell->ch = ' ';
+        cell->full_cp = 0;
+    }
 
     /* Use full 32-bit codepoint if available; otherwise fall back to ch */
     draw_cp = cell->full_cp ? (unsigned int)cell->full_cp : (unsigned int)ch;
 
-    /* wide glyph: allocate 2 cells */
-    if (stdscr && stdscr->cells)
-    {
-        if (is_wide_cp(draw_cp))
-            cell_w = 2 * fw;
-    }
+    if (!s_ansi_mode && stdscr && stdscr->cells && is_wide_cp(draw_cp))
+        cell_w = 2 * fw;
 
-    pair = (int)((attrs & A_COLOR) >> 8);
+    pair = (int)PAIR_NUMBER(attrs);
     apply_colors(pair, attrs);
 
     /* clear background over 1 or 2 cells */
@@ -1101,26 +955,13 @@ static void render_cell(int row, int col, Cell *cell)
     rect.bottom = rect.top + fh;
 
     hBrush = CreateSolidBrush(s_rgb_map[s_cur_bg_idx]);
+
     FillRect(hMemDC, &rect, hBrush);
     DeleteObject(hBrush);
 
     /* render glyph, surrogate-pair aware */
     if (draw_cp >= 0x20)
-    {
-        if (is_block_glyph(draw_cp))
-        {
-            draw_block_glyph(rect.left, rect.top, cell_w, fh, draw_cp, s_rgb_map[s_cur_fg_idx]);
-        }
-        else if (s_use_te && s_te_dc)
-        {
-            draw_glyph_te(rect.left, rect.top, cell_w, draw_cp);
-        }
-        else
-        {
-            int wlen = cp_to_utf16(draw_cp, buf);
-            draw_glyph_in_cell(rect.left, rect.top, cell_w, buf, wlen);
-        }
-    }
+        draw_glyph_te(rect.left, rect.top, cell_w, draw_cp);
 }
 
 /* Force complete redraw (call after font change) */
@@ -1440,6 +1281,14 @@ void win32_clear_font_files(void)
 {
     int i;
 
+    if (s_te_dc)
+    {
+        TE_ContextRelease(s_te_dc);
+        s_te_dc = NULL;
+    }
+
+    s_use_te = 0;
+
     for (i = 0; i < s_added_font_count; i++)
     {
         wchar_t *wpath = utf8_to_wcs(s_added_fonts[i], NULL);
@@ -1522,11 +1371,9 @@ static void pump_messages(void)
 
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
     {
+        /* Signal to exit */
         if (msg.message == WM_QUIT)
-        {
-            /* Signal to exit */
             s_ungetch = 27; /* ESC */
-        }
 
         TranslateMessage(&msg);
         DispatchMessage(&msg);
@@ -1559,7 +1406,12 @@ WINDOW *initscr(void)
     wc.lpszClassName = TEXT("CrashEditClass");
 
     if (!RegisterClass(&wc))
-        return NULL;
+    {
+        WNDCLASS existing;
+
+        if (!GetClassInfo(GetModuleHandle(NULL), TEXT("CrashEditClass"), &existing) || existing.lpfnWndProc != WndProc)
+            return NULL;
+    }
 
     /* initial size */
     COLS = 80;
@@ -1572,12 +1424,7 @@ WINDOW *initscr(void)
 
     tmpDC = GetDC(NULL);
     tmpMemDC = tmpDC ? CreateCompatibleDC(tmpDC) : NULL;
-    tmpFont = tmpMemDC ? CreateFont(s_win_font_size, 0, 0, 0, FW_NORMAL,
-                                    FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                    DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN,
-                                    TEXT(win_font_name))
-                       : NULL;
+    tmpFont = tmpMemDC ? CreateFont(s_win_font_size, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, TEXT(win_font_name)) : NULL;
 
     if (tmpFont && tmpMemDC)
     {
@@ -1618,9 +1465,7 @@ WINDOW *initscr(void)
             TE_SetTabWidth(s_te_dc, (ULONG)s_tab_size);
 
             for (i = 0; i < s_added_font_count; i++)
-            {
                 TE_FontAdd(s_te_dc, s_added_fonts[i], (LONG)s_win_font_size, 0);
-            }
 
             TE_GetMetrics(s_te_dc, &metrics);
 
@@ -1732,10 +1577,8 @@ WINDOW *initscr(void)
 
     SelectObject(hMemDC, hFont);
 
-    /* Read back actual font metrics */
     if (GetTextMetrics(hMemDC, &tm) && !s_use_te)
     {
-        fw = tm.tmAveCharWidth;
         fh = tm.tmHeight;
         fb = tm.tmAscent;
     }
@@ -1743,6 +1586,8 @@ WINDOW *initscr(void)
     SetBkMode(hMemDC, OPAQUE);
     SetTextColor(hMemDC, RGB(255, 255, 255));
     SetBkColor(hMemDC, RGB(0, 0, 0));
+    SetTextAlign(hMemDC, TA_LEFT | TA_TOP);
+    SetTextCharacterExtra(hMemDC, 0);
 
     /* show window */
     ShowWindow(hWnd, SW_SHOW);
@@ -1840,6 +1685,85 @@ int endwin(void)
 
     curscr = NULL;
     return OK;
+}
+
+/* Reinitialize the window after changing font configuration */
+int win32_reload_ttf(const char *font_path, int new_size)
+{
+    int i;
+    struct TEGlyphMetrics metrics;
+
+    if (!font_path || !font_path[0])
+        return 0;
+
+    if (new_size < 6 || new_size > 96)
+        return 0;
+
+    s_win_font_size = new_size;
+
+    if (!s_use_te || !s_te_dc)
+        return 1;
+
+    TE_FontFlush(s_te_dc);
+
+    if (!TE_FontAdd(s_te_dc, font_path, (LONG)new_size, 0))
+    {
+        TE_ContextRelease(s_te_dc);
+        s_te_dc = NULL;
+        s_use_te = 0;
+        return 0;
+    }
+
+    for (i = 1; i < s_added_font_count; i++)
+        TE_FontAdd(s_te_dc, s_added_fonts[i], (LONG)new_size, 0);
+
+    TE_GetMetrics(s_te_dc, &metrics);
+
+    if (metrics.height > 0)
+    {
+        fh = metrics.height;
+        fb = metrics.baseY;
+    }
+
+    render_all();
+    return 1;
+}
+
+int win32_reinit_window(void)
+{
+    char saved_fonts[WIN32_ADDED_FONTS_MAX][MAX_PATH];
+    int saved_count = 0;
+    int i;
+    WINDOW *newscr;
+    int result = 0;
+
+    if (!hWnd)
+        return 0; /* Window not open yet */
+
+    /* Save added font-file paths so initscr() can recreate the TTE context */
+    for (i = 0; i < s_added_font_count; i++)
+    {
+        strncpy(saved_fonts[i], s_added_fonts[i], MAX_PATH - 1);
+        saved_fonts[i][MAX_PATH - 1] = '\0';
+    }
+
+    saved_count = s_added_font_count;
+
+    s_reinit_in_progress = 1;
+
+    endwin();
+
+    /* Restore font paths before initscr() recreates the TTE context */
+    for (i = 0; i < saved_count; i++)
+        win32_add_font_file(saved_fonts[i]);
+
+    newscr = initscr();
+
+    if (newscr)
+        result = 1;
+
+    s_reinit_in_progress = 0;
+    return result;
 }
 
 bool isendwin(void)
@@ -2720,7 +2644,7 @@ int wattron(WINDOW *win, int attrs)
     /* extract and set color pair if A_COLOR is present */
     if (attrs & A_COLOR)
     {
-        int new_pair = (int)((attrs & A_COLOR) >> 8);
+        int new_pair = (int)PAIR_NUMBER(attrs);
 
         if (new_pair != 0)
             win->color_pair = new_pair;
@@ -2748,7 +2672,7 @@ int wattrset(WINDOW *win, int attrs)
 
     /* extract color pair */
     if (attrs & A_COLOR)
-        win->color_pair = (int)((attrs & A_COLOR) >> 8);
+        win->color_pair = (int)PAIR_NUMBER(attrs);
     else
         win->color_pair = 0;
 
@@ -3618,6 +3542,19 @@ void win32_set_ansi_mode(int use_ansi)
 {
     s_ansi_mode = use_ansi ? 1 : 0;
     win32_force_redraw();
+}
+
+/* Drain the Windows message queue before showing a popup. After a key like
+ * Enter is pressed, Windows may still have WM_KEYUP/WM_CHAR events pending;
+ * the next popup would read them and close immediately. This removes them */
+void win32_drain_messages(void)
+{
+    MSG msg;
+
+    while (PeekMessage(&msg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_REMOVE))
+        ;
+    while (PeekMessage(&msg, NULL, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE))
+        ;
 }
 
 /* Copy a rectangle of cells from src to dst */

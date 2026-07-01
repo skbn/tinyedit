@@ -37,13 +37,17 @@ typedef struct
 
 typedef struct
 {
-    wchar_t *wcs; /* malloc'd, always NUL-terminated */
-    int len;      /* character count (not bytes) */
-    int cap;      /* allocated wchar_t slots */
+    wchar_t *wcs; /* Malloc'd or AllocPooled'd, always NUL-terminated */
+    int len;      /* Character count (not bytes) */
+    int cap;      /* Allocated wchar_t slots */
     int word_count;
     int has_wrap_hyphen;  /* 1 if last char is an artificial wrap-hyphen */
     int wrap_count_cache; /* -1 = invalid, otherwise cached visual rows */
-    int wrap_cache_width; /* width for which wrap_count_cache is valid */
+    int wrap_cache_width; /* Width for which wrap_count_cache is valid */
+
+#if defined(PLATFORM_AMIGA)
+    void *mem_pool; /* Owning Ed's memory pool, NULL => plain malloc */
+#endif
 } EdLine;
 
 typedef enum
@@ -60,34 +64,39 @@ typedef enum
 typedef struct
 {
     UndoOpType type;
-    int row, col;            /* position where op occurred */
-    wchar_t *text;           /* owned; used by OP_INSERT and OP_DELETE */
-    int len;                 /* chars in text */
-    int join_col;            /* for OP_JOIN: length of previous line before join */
-    char *utf8_snapshot;     /* owned; used by OP_SNAPSHOT: full document UTF-8 */
-    char *utf8_snapshot_new; /* owned; used by OP_SNAPSHOT_RANGE for redo */
-    int hard_wrap_mode;      /* used by OP_SNAPSHOT: 0=soft-wrap, 1=hard-wrap */
+    int row, col;            /* Position where op occurred */
+    wchar_t *text;           /* Owned; used by OP_INSERT and OP_DELETE */
+    int len;                 /* Chars in text */
+    int cap;                 /* Text capacity in wchar_t */
+    int join_col;            /* For OP_JOIN: length of previous line before join */
+    char *utf8_snapshot;     /* Owned; used by OP_SNAPSHOT: full document UTF-8 */
+    char *utf8_snapshot_new; /* Owned; used by OP_SNAPSHOT_RANGE for redo */
+    int hard_wrap_mode;      /* Used by OP_SNAPSHOT: 0=soft-wrap, 1=hard-wrap */
     int end_row, end_col;    /* For OP_PASTE: block coordinates end position after paste */
 } UndoOp;
 
 /* Group of ops treated as one undo/redo step */
 typedef struct
 {
-    UndoOp *ops; /* owned array */
+    UndoOp *ops; /* Owned array */
     int count, cap;
-    int cur_row, cur_col; /* cursor before the group */
-    int end_row, end_col; /* cursor after the group */
+    int cur_row, cur_col; /* Cursor before the group */
+    int end_row, end_col; /* Cursor after the group */
 } UndoGroup;
 
 struct Ed
 {
+#if defined(PLATFORM_AMIGA)
+    void *mem_pool; /* Per-document memory pool (APTR from CreatePool) */
+#endif
+
     EdLine **lines;
     int count, alloc;
     int row, col; /* col = character index */
     int top, page;
     int insert_mode, modified;
     EdBlock block;
-    wchar_t *killbuf; /* malloc'd wchar_t copy */
+    wchar_t *killbuf; /* Malloc'd wchar_t copy */
     int killlen;
 
     /* Undo stack of groups */
@@ -108,21 +117,21 @@ struct Ed
     int word_move_mode;     /* 0=standard, 1=vim-like (non-space blocks) */
 
     /* Prefix sum array for soft-wrap: prefix[i] = total visual rows up to line i */
-    int *prefix;           /* prefix sum array */
-    int prefix_alloc;      /* allocated capacity */
+    int *prefix;           /* Prefix sum array */
+    int prefix_alloc;      /* Allocated capacity */
     int prefix_valid;      /* 0 = invalid, 1 = valid */
-    int prefix_width;      /* width for which prefix was calculated */
+    int prefix_width;      /* Width for which prefix was calculated */
     int prefix_dirty_from; /* -1 = clean, >=0 = dirty from this line onwards */
 
-    int *syntax_state_cache;     /* cached syntax state at start of each line, -1 = unknown */
-    int syntax_state_alloc;      /* allocated capacity */
+    int *syntax_state_cache;     /* Cached syntax state at start of each line, -1 = unknown */
+    int syntax_state_alloc;      /* Allocated capacity */
     int syntax_state_dirty_from; /* -1 = clean, >=0 = dirty from this line onwards */
-    int syntax_state_lang;       /* language for which cache is valid, -1 = invalid */
-    int prefix_start;            /* start line of current prefix range (for range rebuild) */
-    int prefix_end;              /* end line of current prefix range (for range rebuild) */
-    int prefix_base;             /* visual rows before prefix_start (for absolute positioning) */
+    int syntax_state_lang;       /* Language for which cache is valid, -1 = invalid */
+    int prefix_start;            /* Start line of current prefix range (for range rebuild) */
+    int prefix_end;              /* End line of current prefix range (for range rebuild) */
+    int prefix_base;             /* Visual rows before prefix_start (for absolute positioning) */
 
-    int word_count_total;       /* cached total word count */
+    int word_count_total;       /* Cached total word count */
     int word_count_initialized; /* 1 = word counts are valid, 0 = lazy init pending */
 
     /* Pre-edit snapshot for auto-rewrap undo */
@@ -137,7 +146,7 @@ struct Ed
 
 Ed *ed_new(void);
 void ed_free(Ed *ed);
-int ed_load_stream(Ed *ed, FILE *fp);                       /* streaming UTF-8 in */
+int ed_load_stream(Ed *ed, FILE *fp);                       /* Streaming UTF-8 in */
 void ed_load(Ed *ed, const char *utf8_text);                /* UTF-8 in */
 char *ed_to_string(const Ed *ed);                           /* UTF-8 out (caller frees) */
 char *ed_range_to_string(const Ed *ed, int start, int end); /* serialise only [start, end) */
@@ -185,7 +194,7 @@ int ed_block_delete(Ed *ed);
 int ed_block_paste(Ed *ed);
 char *ed_block_get_utf8(const Ed *ed); /* UTF-8 out (caller frees) */
 
-/* Undo/redo (default 50 levels) */
+/* Undo/redo */
 void ed_save_undo(Ed *ed);
 int ed_undo(Ed *ed);
 void ed_set_undo_levels(Ed *ed, int levels);
@@ -223,9 +232,7 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
 /* Re-wrap the current FTN reply quote block (Ctrl+W) */
 int ed_rewrap_ftn_reply(Ed *ed, int width);
 
-/* Re-flow the hard-wrap paragraph around the cursor.
-   hyph_cb(user_data, word, word_wlen, col_limit) -> break char offset or -1.
-   Returns 0 on success, -1 if not applicable (empty line) or on error */
+/* Re-flow hard-wrap paragraph around cursor; hyph_cb returns break offset or -1 */
 int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar_t *, int, int), void *hyph_data);
 
 /* Insert a text file at the cursor position (with undo) */
@@ -236,7 +243,7 @@ int ed_export_block_to_file(Ed *ed, const char *path, const char *charset_out);
 /* Sort selected lines alphabetically (case-insensitive) */
 int ed_sort_block_lines(Ed *ed);
 
-/* Convert case of the selected block. mode: 0=UPPER, 1=lower, 2=Title */
+/* Convert case of selected block; mode: 0=UPPER, 1=lower, 2=Title */
 int ed_convert_block_case(Ed *ed, int mode);
 
 /* Set modified flag */

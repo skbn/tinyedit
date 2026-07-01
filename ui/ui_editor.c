@@ -28,6 +28,7 @@
 #include "ui_files.h"
 #include "ui_editor_helper.h"
 #include "ui_setup.h"
+
 #include "ui_syntax.h"
 #include "ui_spell.h"
 #include "ui_dict.h"
@@ -146,6 +147,16 @@ static const char *HELP_LINES[] =
 #endif
 };
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
+
+#ifdef PLATFORM_AMIGA
+#define INSIDE_BLOCK_COMMENT_LOOKUP_LIMIT 256
+#define SYNTAX_STATE_LOOKUP_LIMIT 256
+#define BRACKET_MATCH_LOOKUP_LIMIT 256
+#else
+#define INSIDE_BLOCK_COMMENT_LOOKUP_LIMIT 1024
+#define SYNTAX_STATE_LOOKUP_LIMIT 1024
+#define BRACKET_MATCH_LOOKUP_LIMIT 1024
+#endif
 
 /* Soft-wrap viewport: anchored by top line/sub-row */
 static int s_soft_top_line = 0;
@@ -1435,6 +1446,7 @@ static SyntaxState state_after_line(const wchar_t *line, int len, SyntaxState st
 static SyntaxState compute_syntax_state_at(Ed *ed, int row, SyntaxLang lang)
 {
     int r;
+    int r_min;
     int count;
     SyntaxState state;
     int *cache = NULL;
@@ -1490,8 +1502,12 @@ static SyntaxState compute_syntax_state_at(Ed *ed, int row, SyntaxLang lang)
 
     state = SYNTAX_STATE_NORMAL;
     r = 0;
+    r_min = row - SYNTAX_STATE_LOOKUP_LIMIT;
 
-    for (r = row - 1; r >= 0; r--)
+    if (r_min < 0)
+        r_min = 0;
+
+    for (r = row - 1; r >= r_min; r--)
     {
         if (cache[r] >= 0)
         {
@@ -1626,7 +1642,12 @@ static void draw_body(TeApp *app)
 
                 if (dir > 0)
                 {
-                    for (row = info.row; row < info.line_count && match_row < 0; row++)
+                    int row_max = info.row + BRACKET_MATCH_LOOKUP_LIMIT;
+
+                    if (row_max >= info.line_count)
+                        row_max = info.line_count - 1;
+
+                    for (row = info.row; row <= row_max && match_row < 0; row++)
                     {
                         const wchar_t *rl = ed_line_wcs(te_app_get_editor(app), row);
                         int rl_len = ed_line_len(te_app_get_editor(app), row);
@@ -1656,7 +1677,12 @@ static void draw_body(TeApp *app)
                 }
                 else
                 {
-                    for (row = info.row; row >= 0 && match_row < 0; row--)
+                    int row_min = info.row - BRACKET_MATCH_LOOKUP_LIMIT;
+
+                    if (row_min < 0)
+                        row_min = 0;
+
+                    for (row = info.row; row >= row_min && match_row < 0; row--)
                     {
                         const wchar_t *rl = ed_line_wcs(te_app_get_editor(app), row);
                         int rl_len = ed_line_len(te_app_get_editor(app), row);
@@ -3166,7 +3192,12 @@ static int inside_block_comment(Ed *ed, int row, int col)
     int r;
     int needed = 1;
 
-    for (r = row; r >= 0; r--)
+    int r_min = row - INSIDE_BLOCK_COMMENT_LOOKUP_LIMIT;
+
+    if (r_min < 0)
+        r_min = 0;
+
+    for (r = row; r >= r_min; r--)
     {
         const wchar_t *rl = ed_line_wcs(ed, r);
         int rl_len = ed_line_len(ed, r);
@@ -4143,6 +4174,7 @@ static void redraw_editor(TeApp *app)
     wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode);
 
     te_draw_titlebar(app);
+
     ui_tabs_draw_panel(app);
 
     draw_body(app);
@@ -4158,6 +4190,7 @@ static void redraw_editor(TeApp *app)
     te_draw_statusbar(app);
 
     position_cursor(app);
+
     refresh();
 }
 

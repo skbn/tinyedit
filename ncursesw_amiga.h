@@ -242,28 +242,21 @@ extern int COLORS;
 
 /* Attributes */
 #define A_NORMAL 0
-#define A_ATTRIBUTES 0xffff0000UL
 #define A_CHARTEXT 0x0000ffffUL
-#define A_COLOR 0x0000ff00UL
 #define A_STANDOUT 0x00010000UL
 #define A_UNDERLINE 0x00020000UL
 #define A_REVERSE 0x00040000UL
 #define A_BLINK 0x00080000UL
 #define A_DIM 0x00100000UL
 #define A_BOLD 0x00200000UL
+#define A_COLOR 0xff000000UL
+#define A_ATTRIBUTES 0xffff0000UL
 #define A_ALTCHARSET 0x00400000UL
 #define A_INVIS 0x00800000UL
-#define A_PROTECT 0x01000000UL
-#define A_HORIZONTAL 0x02000000UL
-#define A_LEFT 0x04000000UL
-#define A_LOW 0x08000000UL
-#define A_RIGHT 0x10000000UL
-#define A_TOP 0x20000000UL
-#define A_VERTICAL 0x40000000UL
 
 /* Attribute macros */
-#define COLOR_PAIR(n) (((unsigned long)(n)) << 8)
-#define PAIR_NUMBER(a) (((unsigned long)(a) & A_COLOR) >> 8)
+#define COLOR_PAIR(n) (((unsigned long)(n)) << 24)
+#define PAIR_NUMBER(a) (((unsigned long)(a) & A_COLOR) >> 24)
 
 /* Colors */
 #define COLOR_BLACK 0
@@ -470,6 +463,7 @@ int amiga_set_ttf_encoding(int use_utf8);
 int amiga_reload_ttf_size(int new_size);
 int amiga_reload_ttf(const char *font_path, int new_size);
 int amiga_change_font(int use_ansi);
+int amiga_reinit_window(void);
 void amiga_force_redraw();
 
 /* Control characters */
