@@ -757,7 +757,7 @@ int ui_editor_detect_wrap_hyphens(TeApp *app)
         ln = ed->lines[i];
         next = ed->lines[i + 1];
 
-        if (ln->len <= 0 || ln->wcs[ln->len - 1] != L'-')
+        if (ln->len <= 0 || (wchar_t)ed_line_char(ln, ln->len - 1) != L'-')
             continue;
 
         if (!next || next->len <= 0)
@@ -767,13 +767,13 @@ int ui_editor_detect_wrap_hyphens(TeApp *app)
         first_end = ln->len - 1;
         first_start = first_end - 1;
 
-        while (first_start >= 0 && !iswspace(ln->wcs[first_start]))
+        while (first_start >= 0 && !iswspace((wint_t)ed_line_char(ln, first_start)))
             first_start--;
 
         first_start++;
 
         /* Strip leading punctuation from the first word */
-        while (first_start < first_end && iswpunct(ln->wcs[first_start]))
+        while (first_start < first_end && iswpunct((wint_t)ed_line_char(ln, first_start)))
             first_start++;
 
         if (first_start >= first_end)
@@ -782,7 +782,7 @@ int ui_editor_detect_wrap_hyphens(TeApp *app)
         /* First word on the next line */
         next_start = 0;
 
-        while (next_start < next->len && iswspace(next->wcs[next_start]))
+        while (next_start < next->len && iswspace((wint_t)ed_line_char(next, next_start)))
             next_start++;
 
         if (next_start >= next->len)
@@ -790,14 +790,14 @@ int ui_editor_detect_wrap_hyphens(TeApp *app)
 
         next_end = next_start + 1;
 
-        while (next_end < next->len && !iswspace(next->wcs[next_end]))
+        while (next_end < next->len && !iswspace((wint_t)ed_line_char(next, next_end)))
             next_end++;
 
         /* Strip leading and trailing punctuation from the next word */
-        while (next_start < next_end && iswpunct(next->wcs[next_start]))
+        while (next_start < next_end && iswpunct((wint_t)ed_line_char(next, next_start)))
             next_start++;
 
-        while (next_end > next_start && iswpunct(next->wcs[next_end - 1]))
+        while (next_end > next_start && iswpunct((wint_t)ed_line_char(next, next_end - 1)))
             next_end--;
 
         if (next_start >= next_end)
@@ -807,10 +807,10 @@ int ui_editor_detect_wrap_hyphens(TeApp *app)
         combined_len = 0;
 
         for (j = first_start; j < first_end && combined_len < 511; j++)
-            combined[combined_len++] = ln->wcs[j];
+            combined[combined_len++] = (wchar_t)ed_line_char(ln, j);
 
         for (k = next_start; k < next_end && combined_len < 511; k++)
-            combined[combined_len++] = next->wcs[k];
+            combined[combined_len++] = (wchar_t)ed_line_char(next, k);
 
         combined[combined_len] = L'\0';
 
@@ -1206,6 +1206,7 @@ int charset_select(TeApp *app)
     char new_view[32], new_save[32];
     EdInfo info;
     int view_changed = 0;
+    TeTab *tab = NULL;
 
     strncpy(new_view, app->charset_in, sizeof(new_view) - 1);
     new_view[sizeof(new_view) - 1] = '\0';
@@ -1238,61 +1239,36 @@ int charset_select(TeApp *app)
         strncpy(app->charset_out, new_save, sizeof(app->charset_out) - 1);
         app->charset_out[sizeof(app->charset_out) - 1] = '\0';
 
+        /* Update active tab charset values for status bar display */
+        tab = te_app_get_active_tab(app);
+
+        if (tab)
+        {
+            strncpy(tab->charset_in, new_view, sizeof(tab->charset_in) - 1);
+            tab->charset_in[sizeof(tab->charset_in) - 1] = '\0';
+
+            strncpy(tab->charset_out, new_save, sizeof(tab->charset_out) - 1);
+            tab->charset_out[sizeof(tab->charset_out) - 1] = '\0';
+        }
+
         /* If view charset changed and we have a file, reload from disk */
         if (view_changed && te_app_get_filename(app)[0])
         {
             FILE *fp = NULL;
-            long size;
-            char *buf = NULL;
-            size_t r;
 
             fp = fopen(te_app_get_filename(app), "rb");
+
             if (fp)
             {
-                fseek(fp, 0, SEEK_END);
-                size = ftell(fp);
-                fseek(fp, 0, SEEK_SET);
+                const char *cs = new_view;
 
-                if (size >= 0)
-                {
-                    buf = (char *)malloc((size_t)size + 1);
+                /* An empty or UTF-8 view means the file is read as UTF-8 */
+                if (!cs[0] || strcasecmp(cs, "UTF-8") == 0 || strcasecmp(cs, "UTF8") == 0)
+                    cs = NULL;
 
-                    if (buf)
-                    {
-                        r = fread(buf, 1, (size_t)size, fp);
-                        buf[r] = '\0';
-
-                        /* Convert to UTF-8 using new charset_in */
-                        if (new_view[0] && strcasecmp(new_view, "UTF-8") != 0 && strcasecmp(new_view, "UTF8") != 0)
-                        {
-                            size_t outsz = r * 4 + 16;
-                            char *utf8 = (char *)malloc(outsz);
-
-                            if (utf8)
-                            {
-                                int wrote = charset_body_to_utf8(new_view, buf, (int)r, utf8, (int)outsz);
-
-                                if (wrote >= 0)
-                                {
-                                    utf8[wrote] = '\0';
-
-                                    ed_clear_undo_redo(te_app_get_editor(app));
-                                    ed_load(te_app_get_editor(app), utf8);
-                                }
-
-                                free(utf8);
-                            }
-                        }
-                        else
-                        {
-                            ed_clear_undo_redo(te_app_get_editor(app));
-                            ed_load(te_app_get_editor(app), buf);
-                        }
-
-                        free(buf);
-                    }
-                }
-
+                ed_clear_undo_redo(te_app_get_editor(app));
+                ed_load_stream_charset(te_app_get_editor(app), fp, cs);
+                port_mem_release();
                 fclose(fp);
             }
         }

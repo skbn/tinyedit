@@ -283,8 +283,11 @@ void te_cfg_defaults(TeConfig *cfg)
 
     memset(cfg, 0, sizeof(*cfg));
 
-    strncpy(cfg->charset, CHARSET_WRITE_DEFAULT, sizeof(cfg->charset) - 1);
-    cfg->charset[sizeof(cfg->charset) - 1] = '\0';
+    strncpy(cfg->charset_in, CHARSET_READ_DEFAULT, sizeof(cfg->charset_in) - 1);
+    cfg->charset_in[sizeof(cfg->charset_in) - 1] = '\0';
+
+    strncpy(cfg->charset_out, CHARSET_WRITE_DEFAULT, sizeof(cfg->charset_out) - 1);
+    cfg->charset_out[sizeof(cfg->charset_out) - 1] = '\0';
 
     cfg->undo_levels = 50;
     cfg->autowrap_col = 75;
@@ -542,7 +545,7 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         get_token(p, word, sizeof(word));
         rest = skip_token(p);
 
-        if (strcasecmp(word, "CHARSET") == 0)
+        if (strcasecmp(word, "CHARSET_IN") == 0)
         {
             char cs[CHARSET_NAME_MAX];
             get_token(rest, cs, sizeof(cs));
@@ -553,13 +556,34 @@ int te_cfg_load(TeConfig *cfg, const char *path)
 
                 if (canon)
                 {
-                    strncpy(cfg->charset, canon, sizeof(cfg->charset) - 1);
-                    cfg->charset[sizeof(cfg->charset) - 1] = '\0';
+                    strncpy(cfg->charset_in, canon, sizeof(cfg->charset_in) - 1);
+                    cfg->charset_in[sizeof(cfg->charset_in) - 1] = '\0';
                 }
                 else
                 {
-                    strncpy(cfg->charset, cs, sizeof(cfg->charset) - 1);
-                    cfg->charset[sizeof(cfg->charset) - 1] = '\0';
+                    strncpy(cfg->charset_in, cs, sizeof(cfg->charset_in) - 1);
+                    cfg->charset_in[sizeof(cfg->charset_in) - 1] = '\0';
+                }
+            }
+        }
+        else if (strcasecmp(word, "CHARSET_OUT") == 0)
+        {
+            char cs[CHARSET_NAME_MAX];
+            get_token(rest, cs, sizeof(cs));
+
+            if (strcasecmp(cs, "AUTO") != 0)
+            {
+                const char *canon = charset_resolve(cs);
+
+                if (canon)
+                {
+                    strncpy(cfg->charset_out, canon, sizeof(cfg->charset_out) - 1);
+                    cfg->charset_out[sizeof(cfg->charset_out) - 1] = '\0';
+                }
+                else
+                {
+                    strncpy(cfg->charset_out, cs, sizeof(cfg->charset_out) - 1);
+                    cfg->charset_out[sizeof(cfg->charset_out) - 1] = '\0';
                 }
             }
         }
@@ -1203,7 +1227,8 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
             /* Skip all managed keywords - they will be rewritten at end */
             if (strncasecmp(word, "TTF_FALLBACK", 12) == 0 ||
                 strcasecmp(word, "FONT") == 0 ||
-                strcasecmp(word, "CHARSET") == 0 ||
+                strcasecmp(word, "CHARSET_IN") == 0 ||
+                strcasecmp(word, "CHARSET_OUT") == 0 ||
                 strcasecmp(word, "UNDOLEVELS") == 0 ||
                 strcasecmp(word, "AUTOWRAP") == 0 ||
                 strcasecmp(word, "TABWIDTH") == 0 ||
@@ -1266,7 +1291,8 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
     /* Write/update other config fields */
     fprintf(out, "FONT %s\n", cfg->font);
-    fprintf(out, "CHARSET %s\n", cfg->charset);
+    fprintf(out, "CHARSET_IN %s\n", cfg->charset_in);
+    fprintf(out, "CHARSET_OUT %s\n", cfg->charset_out);
     fprintf(out, "UNDOLEVELS %d\n", cfg->undo_levels);
     fprintf(out, "AUTOWRAP %d\n", cfg->autowrap_col);
     fprintf(out, "TABWIDTH %d\n", cfg->tab_width);

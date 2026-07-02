@@ -217,7 +217,8 @@ static const SetupField st_fields[] =
         {0, "Auto-save interval (s)", FT_INT, F_OFF(autosave_interval), 0},
         /* System */
         {0, "Terminal Mouse", FT_BOOL, F_OFF(mouse_enabled), 0},
-        {0, "Charset", FT_CHARSET, F_OFF(charset), 0},
+        {0, "Charset in", FT_CHARSET, F_OFF(charset_in), 0},
+        {0, "Charset out", FT_CHARSET, F_OFF(charset_out), 0},
         {0, "Undo levels", FT_INT, F_OFF(undo_levels), 0},
 
 /* Colour/Font */

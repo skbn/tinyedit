@@ -17,6 +17,12 @@
 #include <stdio.h>
 #include <wchar.h>
 
+/* Number of decoded lines ed_line_wcs() can hand out at once */
+enum
+{
+    ED_WCS_VIEW_SLOTS = 64
+};
+
 typedef struct Ed Ed;
 
 typedef struct
@@ -37,9 +43,10 @@ typedef struct
 
 typedef struct
 {
-    wchar_t *wcs; /* Malloc'd or AllocPooled'd, always NUL-terminated */
-    int len;      /* Character count (not bytes) */
-    int cap;      /* Allocated wchar_t slots */
+    void *text; /* Packed codepoints, cw bytes each, always NUL terminated */
+    int len;    /* Character count, not bytes */
+    int cap;    /* Allocated character slots */
+    int cw;     /* Bytes per stored codepoint: 1, 2 or 4 */
     int word_count;
     int has_wrap_hyphen;  /* 1 if last char is an artificial wrap-hyphen */
     int wrap_count_cache; /* -1 = invalid, otherwise cached visual rows */
@@ -49,6 +56,9 @@ typedef struct
     void *mem_pool; /* Owning Ed's memory pool, NULL => plain malloc */
 #endif
 } EdLine;
+
+/* Read the codepoint stored at character index i */
+unsigned int ed_line_char(const EdLine *ln, int i);
 
 typedef enum
 {
@@ -140,13 +150,24 @@ struct Ed
     int auto_rewrap_pre_end;
     int auto_rewrap_pre_cursor_row;
     int auto_rewrap_pre_cursor_col;
+
+    /* Compact lines are decoded here on demand. Entries stay valid until the next edit clears the ring */
+    wchar_t *wcs_view[ED_WCS_VIEW_SLOTS];
+    int wcs_view_line[ED_WCS_VIEW_SLOTS];
+    int wcs_view_cap[ED_WCS_VIEW_SLOTS];
+    int wcs_view_next;
+
+    /* Reusable decode buffer for wrap counting */
+    wchar_t *wrap_scratch;
+    int wrap_scratch_cap;
 };
 
 #define INIT_ALLOC 1024
 
 Ed *ed_new(void);
 void ed_free(Ed *ed);
-int ed_load_stream(Ed *ed, FILE *fp);                       /* Streaming UTF-8 in */
+int ed_load_stream(Ed *ed, FILE *fp); /* Streaming UTF-8 in */
+int ed_load_stream_charset(Ed *ed, FILE *fp, const char *charset);
 void ed_load(Ed *ed, const char *utf8_text);                /* UTF-8 in */
 char *ed_to_string(const Ed *ed);                           /* UTF-8 out (caller frees) */
 char *ed_range_to_string(const Ed *ed, int start, int end); /* serialise only [start, end) */

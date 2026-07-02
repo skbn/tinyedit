@@ -878,7 +878,10 @@ int ui_popup_search_results(const char *title, const int *line_nums, const char 
             mvaddnstr(y + 2 + row, x + 3, line_buf, w - 6);
 
             if (idx == sel)
+            {
                 attroff(COLOR_PAIR(COL_POPUP_SEL));
+                attron(COLOR_PAIR(COL_POPUP));
+            }
         }
 
         if (count > h - 4)

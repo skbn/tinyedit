@@ -56,6 +56,7 @@
 #include "../spellchecker/hyph.h"
 #else
 #include "../hyph_wrap/hyph_wrap.h"
+#include "core/portable.h"
 #endif
 #endif
 
@@ -301,6 +302,9 @@ int te_app_close_tab(TeApp *app, int index)
     {
         te_tab_free(app->tabs[index]);
         app->tabs[index] = NULL;
+
+        /* Hand freed document memory back to the OS */
+        port_mem_release();
     }
 
     for (i = index; i < app->tab_count - 1; i++)
@@ -403,6 +407,13 @@ void te_app_set_filename(TeApp *app, const char *val)
 
     strncpy(tab->filename, val, TAB_FILENAME_MAX - 1);
     tab->filename[TAB_FILENAME_MAX - 1] = '\0';
+
+    /* Sync charset values from app to tab for status bar display */
+    strncpy(tab->charset_in, app->charset_in, sizeof(tab->charset_in) - 1);
+    tab->charset_in[sizeof(tab->charset_in) - 1] = '\0';
+
+    strncpy(tab->charset_out, app->charset_out, sizeof(tab->charset_out) - 1);
+    tab->charset_out[sizeof(tab->charset_out) - 1] = '\0';
 }
 
 void te_app_clear_filename(TeApp *app)

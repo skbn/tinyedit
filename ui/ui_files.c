@@ -1418,12 +1418,7 @@ int ui_files_open_path(TeApp *app, const char *path)
 {
     FILE *fp = NULL;
     long size;
-    char *buf = NULL;
-    size_t r;
-    char *content = NULL;
     int is_utf8;
-    size_t outsz;
-    char *utf8 = NULL;
     int detected;
     int recovered;
 
@@ -1481,6 +1476,8 @@ int ui_files_open_path(TeApp *app, const char *path)
 
         fclose(fp);
 
+        port_mem_release();
+
         if (rc != 0)
         {
             te_status(app, "Memory error during load");
@@ -1501,54 +1498,20 @@ int ui_files_open_path(TeApp *app, const char *path)
         return 0;
     }
 
-    /* Non-UTF8 charset: read whole file, convert, then ed_load */
-    buf = (char *)malloc((size_t)size + 1);
+    /* Non-UTF8 charset: stream and convert per line (handles huge files). */
+    ed_clear_undo_redo(te_app_get_editor(app));
 
-    if (!buf)
+    if (ed_load_stream_charset(te_app_get_editor(app), fp, app->charset_in) != 0)
     {
         fclose(fp);
-        te_status(app, "Memory error");
+        te_status(app, "Load error");
         return -1;
     }
 
-    r = fread(buf, 1, (size_t)size, fp);
-
     fclose(fp);
 
-    buf[r] = '\0';
-
-    /* Convert to UTF-8 */
-    outsz = (size_t)r * 4 + 16;
-    utf8 = (char *)malloc(outsz);
-
-    if (utf8)
-    {
-        int wrote = charset_body_to_utf8(app->charset_in, buf, (int)r, utf8, (int)outsz);
-
-        if (wrote >= 0)
-        {
-            utf8[wrote] = '\0';
-            content = utf8;
-
-            free(buf);
-        }
-        else
-        {
-            free(utf8);
-
-            content = buf;
-        }
-    }
-    else
-    {
-        content = buf;
-    }
-
-    /* Load into editor (clear history and previous content) */
-    ed_clear_undo_redo(te_app_get_editor(app));
-    ed_load(te_app_get_editor(app), content);
-
-    free(content);
+    /* Hand back heap freed by the reload before continuing. */
+    port_mem_release();
 
     /* Update filename */
     te_app_set_filename(app, path);

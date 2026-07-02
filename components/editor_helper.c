@@ -51,6 +51,7 @@ typedef struct
 wchar_t *line_to_wcs(EdLine *ln)
 {
     wchar_t *result = NULL;
+    int i;
 
     if (!ln)
         return NULL;
@@ -60,8 +61,8 @@ wchar_t *line_to_wcs(EdLine *ln)
     if (!result)
         return NULL;
 
-    if (ln->len > 0)
-        memcpy(result, ln->wcs, ln->len * sizeof(wchar_t));
+    for (i = 0; i < ln->len; i++)
+        result[i] = (wchar_t)ed_line_char(ln, i);
 
     result[ln->len] = L'\0';
 
@@ -72,6 +73,7 @@ wchar_t *line_to_wcs(EdLine *ln)
 wchar_t *line_to_wcs_range(EdLine *ln, int start, int end)
 {
     int len;
+    int i;
     wchar_t *result = NULL;
 
     if (!ln || start < 0 || end > ln->len || start >= end)
@@ -83,8 +85,8 @@ wchar_t *line_to_wcs_range(EdLine *ln, int start, int end)
     if (!result)
         return NULL;
 
-    if (len > 0)
-        memcpy(result, &ln->wcs[start], len * sizeof(wchar_t));
+    for (i = 0; i < len; i++)
+        result[i] = (wchar_t)ed_line_char(ln, start + i);
 
     result[len] = L'\0';
     return result;
@@ -120,6 +122,7 @@ char *ed_block_to_string(Ed *ed, int r1, int c1, int r2, int c2)
                 if (utf8_seg)
                 {
                     total_len += strlen(utf8_seg);
+
                     free(utf8_seg);
                 }
 
@@ -208,7 +211,7 @@ int ed_search_forward(Ed *ed, const wchar_t *needle)
     for (i = 0; i < ed->count + 1; i++)
     {
         row = (start_row + i) % ed->count;
-        line = ed->lines[row]->wcs;
+        line = ed_line_wcs(ed, row);
         col = (i == 0) ? start_col : 0;
 
         if (col > ed->lines[row]->len)
@@ -223,11 +226,8 @@ int ed_search_forward(Ed *ed, const wchar_t *needle)
                 wchar_t a = line[col + k];
                 wchar_t b = needle[k];
 
-                if (a >= L'A' && a <= L'Z')
-                    a = a - L'A' + L'a';
-
-                if (b >= L'A' && b <= L'Z')
-                    b = b - L'A' + L'a';
+                a = towlower(a);
+                b = towlower(b);
 
                 if (a != b)
                 {
@@ -273,7 +273,7 @@ int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols)
     /* First pass: count matches */
     for (i = 0; i < ed->count; i++)
     {
-        line = ed->lines[i]->wcs;
+        line = ed_line_wcs(ed, i);
         line_len = ed->lines[i]->len;
 
         /* Search for needle in this line */
@@ -288,11 +288,8 @@ int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols)
                 wchar_t b = needle[k];
 
                 /* Case-insensitive comparison */
-                if (a >= L'A' && a <= L'Z')
-                    a = a - L'A' + L'a';
-
-                if (b >= L'A' && b <= L'Z')
-                    b = b - L'A' + L'a';
+                a = towlower(a);
+                b = towlower(b);
 
                 if (a != b)
                 {
@@ -337,7 +334,7 @@ int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols)
     count = 0;
     for (i = 0; i < ed->count; i++)
     {
-        line = ed->lines[i]->wcs;
+        line = ed_line_wcs(ed, i);
         line_len = ed->lines[i]->len;
 
         /* Search for needle in this line */
@@ -352,11 +349,8 @@ int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols)
                 wchar_t b = needle[k];
 
                 /* Case-insensitive comparison */
-                if (a >= L'A' && a <= L'Z')
-                    a = a - L'A' + L'a';
-
-                if (b >= L'A' && b <= L'Z')
-                    b = b - L'A' + L'a';
+                a = towlower(a);
+                b = towlower(b);
 
                 if (a != b)
                 {
@@ -407,7 +401,7 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
 
     for (i = 0; i < ed->count; i++)
     {
-        const wchar_t *line = ed->lines[i]->wcs;
+        const wchar_t *line = ed_line_wcs(ed, i);
         int line_len = ed->lines[i]->len;
 
         for (j = 0; j <= line_len - needle_len; j++)
@@ -527,7 +521,7 @@ static void ftn_reply_bounds(Ed *ed, int row, const wchar_t *prefix, int prefix_
 
     while (first > 0)
     {
-        const wchar_t *l = ed->lines[first - 1]->wcs;
+        const wchar_t *l = ed_line_wcs(ed, first - 1);
 
         if (!l || !l[0] || wcsncmp(l, prefix, (size_t)prefix_len) != 0)
             break;
@@ -537,7 +531,7 @@ static void ftn_reply_bounds(Ed *ed, int row, const wchar_t *prefix, int prefix_
 
     while (last < ed->count - 1)
     {
-        const wchar_t *l = ed->lines[last + 1]->wcs;
+        const wchar_t *l = ed_line_wcs(ed, last + 1);
 
         if (!l || !l[0] || wcsncmp(l, prefix, (size_t)prefix_len) != 0)
             break;
@@ -582,21 +576,35 @@ static wchar_t *ftn_join_reply_block(Ed *ed, int first, int last, int prefix_len
 
     for (i = first; i <= last; i++)
     {
-        const wchar_t *l = ed->lines[i]->wcs;
+        wchar_t *l = line_to_wcs(ed->lines[i]);
         int ll = ed->lines[i]->len;
         int skip = prefix_len;
         int j;
         int has_content = 0;
 
+        if (!l)
+        {
+            free(joined);
+            return NULL;
+        }
+
         if (skip > ll)
             skip = ll;
 
-        if (used > 0 && i > first && ftn_is_wrap_hyphen(ed->lines[i - 1]->wcs, ed->lines[i - 1]->len, prefix_len))
+        if (used > 0 && i > first)
         {
-            if (joined[used - 1] == L'-')
-                used--;
+            wchar_t *prev = line_to_wcs(ed->lines[i - 1]);
+            int is_hyph = prev ? ftn_is_wrap_hyphen(prev, ed->lines[i - 1]->len, prefix_len) : 0;
 
-            need_space = 0;
+            free(prev);
+
+            if (is_hyph)
+            {
+                if (joined[used - 1] == L'-')
+                    used--;
+
+                need_space = 0;
+            }
         }
 
         for (j = skip; j < ll; j++)
@@ -619,6 +627,7 @@ static wchar_t *ftn_join_reply_block(Ed *ed, int first, int last, int prefix_len
 
                         if (!tmp)
                         {
+                            free(l);
                             free(joined);
                             return NULL;
                         }
@@ -637,6 +646,7 @@ static wchar_t *ftn_join_reply_block(Ed *ed, int first, int last, int prefix_len
 
                     if (!tmp)
                     {
+                        free(l);
                         free(joined);
                         return NULL;
                     }
@@ -648,6 +658,8 @@ static wchar_t *ftn_join_reply_block(Ed *ed, int first, int last, int prefix_len
                 has_content = 1;
             }
         }
+
+        free(l);
 
         if (has_content)
             need_space = 1;
@@ -796,14 +808,27 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
 
     for (i = first; i <= last; i++)
     {
-        const wchar_t *l = ed->lines[i]->wcs;
+        wchar_t *l = line_to_wcs(ed->lines[i]);
         int ll = ed->lines[i]->len;
         int j;
 
+        if (!l)
+        {
+            free(joined);
+            return NULL;
+        }
+
         if (i > first)
         {
-            const wchar_t *prev = ed->lines[i - 1]->wcs;
+            wchar_t *prev = line_to_wcs(ed->lines[i - 1]);
             int prev_len = ed->lines[i - 1]->len;
+
+            if (!prev)
+            {
+                free(l);
+                free(joined);
+                return NULL;
+            }
 
             if (hwrap_line_ends_with_hyphen(prev, prev_len, ed->lines[i - 1]->has_wrap_hyphen))
             {
@@ -823,6 +848,8 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
 
                         if (!tmp)
                         {
+                            free(prev);
+                            free(l);
                             free(joined);
                             return NULL;
                         }
@@ -833,6 +860,8 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
                     joined[used++] = L' ';
                 }
             }
+
+            free(prev);
         }
 
         for (j = 0; j < ll; j++)
@@ -844,6 +873,7 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
 
                 if (!tmp)
                 {
+                    free(l);
                     free(joined);
                     return NULL;
                 }
@@ -856,6 +886,8 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
             if (i == cursor_row && j + 1 == cursor_col)
                 cursor_offset = (int)used;
         }
+
+        free(l);
     }
 
     joined[used] = L'\0';
@@ -1170,22 +1202,45 @@ static void hwrap_find_cursor(Ed *ed, int first, int inserted, int cursor_offset
 
     for (i = first; i < first + inserted && i < ed->count; i++)
     {
-        const wchar_t *l = ed->lines[i]->wcs;
+        wchar_t *l = line_to_wcs(ed->lines[i]);
         int ll = ed->lines[i]->len;
         int j;
 
+        if (!l)
+        {
+            *out_row = i;
+            *out_col = 0;
+            return;
+        }
+
         if (i > first)
         {
-            const wchar_t *prev = ed->lines[i - 1]->wcs;
+            wchar_t *prev = line_to_wcs(ed->lines[i - 1]);
             int prev_len = ed->lines[i - 1]->len;
+            int joins;
+
+            if (!prev)
+            {
+                free(l);
+
+                *out_row = i;
+                *out_col = 0;
+                return;
+            }
 
             /* Add joining space unless word continues or boundary has whitespace */
-            if (pos > 0 && !hwrap_line_ends_with_hyphen(prev, prev_len, ed->lines[i - 1]->has_wrap_hyphen) && !hwrap_ends_with_space(prev, prev_len) && !hwrap_starts_with_space(l, ll))
+            joins = (pos > 0 && !hwrap_line_ends_with_hyphen(prev, prev_len, ed->lines[i - 1]->has_wrap_hyphen) && !hwrap_ends_with_space(prev, prev_len) && !hwrap_starts_with_space(l, ll));
+
+            free(prev);
+
+            if (joins)
             {
                 pos++;
 
                 if (pos >= cursor_offset)
                 {
+                    free(l);
+
                     *out_row = i;
                     *out_col = 0;
                     return;
@@ -1197,6 +1252,8 @@ static void hwrap_find_cursor(Ed *ed, int first, int inserted, int cursor_offset
 
         if (hwrap_line_ends_with_hyphen(l, ll, ed->lines[i]->has_wrap_hyphen))
             copy_len = ll - 1;
+
+        free(l);
 
         for (j = 0; j < copy_len; j++)
         {
@@ -1454,7 +1511,7 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     if (!ed || width < 10 || ed->count <= 0)
         return -1;
 
-    line = ed->lines[ed->row]->wcs;
+    line = ed_line_wcs(ed, ed->row);
 
     if (!line)
         return -1;
@@ -1806,7 +1863,7 @@ int ed_export_block_to_file(Ed *ed, const char *path, const char *charset_out)
 
     for (i = r1; i <= r2; i++)
     {
-        const wchar_t *l = ed->lines[i]->wcs;
+        const wchar_t *l = ed_line_wcs(ed, i);
         int ll = ed->lines[i]->len;
         int s = (i == r1) ? c1 : 0;
         int e = (i == r2) ? c2 : ll;

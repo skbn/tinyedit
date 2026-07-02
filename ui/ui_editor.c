@@ -2971,10 +2971,15 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         else
         {
             /* Normal setup functionality */
-            char old_charset[TE_CFG_STR_MAX];
+            char old_charset_in[TE_CFG_STR_MAX];
+            char old_charset_out[TE_CFG_STR_MAX];
+            TeTab *tab = NULL;
 
-            strncpy(old_charset, app->cfg.charset, sizeof(old_charset) - 1);
-            old_charset[sizeof(old_charset) - 1] = '\0';
+            strncpy(old_charset_in, app->cfg.charset_in, sizeof(old_charset_in) - 1);
+            old_charset_in[sizeof(old_charset_in) - 1] = '\0';
+
+            strncpy(old_charset_out, app->cfg.charset_out, sizeof(old_charset_out) - 1);
+            old_charset_out[sizeof(old_charset_out) - 1] = '\0';
 
             if (ui_setup_run(app, &app->cfg, app->cfg_path) == 1)
             {
@@ -2988,12 +2993,30 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
                 app->wrap_col = app->cfg.autowrap_col;
                 te_app_set_show_line_numbers(app, app->cfg.show_line_numbers);
 
-                /* If charset changed in setup, update charset_out */
-                if (strcasecmp(old_charset, app->cfg.charset) != 0)
+                /* If charset_in changed in setup, update charset_in */
+                if (strcasecmp(old_charset_in, app->cfg.charset_in) != 0)
                 {
-                    strncpy(app->charset_out, app->cfg.charset, sizeof(app->charset_out) - 1);
-                    app->charset_out
-                        [sizeof(app->charset_out) - 1] = '\0';
+                    strncpy(app->charset_in, app->cfg.charset_in, sizeof(app->charset_in) - 1);
+                    app->charset_in[sizeof(app->charset_in) - 1] = '\0';
+                }
+
+                /* If charset_out changed in setup, update charset_out */
+                if (strcasecmp(old_charset_out, app->cfg.charset_out) != 0)
+                {
+                    strncpy(app->charset_out, app->cfg.charset_out, sizeof(app->charset_out) - 1);
+                    app->charset_out[sizeof(app->charset_out) - 1] = '\0';
+                }
+
+                /* Update active tab charset values for status bar display */
+                tab = te_app_get_active_tab(app);
+
+                if (tab)
+                {
+                    strncpy(tab->charset_in, app->charset_in, sizeof(tab->charset_in) - 1);
+                    tab->charset_in[sizeof(tab->charset_in) - 1] = '\0';
+
+                    strncpy(tab->charset_out, app->charset_out, sizeof(tab->charset_out) - 1);
+                    tab->charset_out[sizeof(tab->charset_out) - 1] = '\0';
                 }
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)

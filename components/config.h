@@ -40,8 +40,11 @@
 
 typedef struct
 {
-    /* Default charset for reading/writing files */
-    char charset[CHARSET_NAME_MAX];
+    /* Default charset for reading files */
+    char charset_in[CHARSET_NAME_MAX];
+
+    /* Default charset for writing files */
+    char charset_out[CHARSET_NAME_MAX];
 
     /* Undo stack depth (default 50) */
     int undo_levels;

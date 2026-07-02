@@ -30,6 +30,9 @@ int port_file_create_empty(const char *path);
 /* Portable configuration directory path */
 void port_get_config_dir(char *buf, size_t bufsz);
 
+/* Return freed heap pages to the OS where supported (glibc) */
+void port_mem_release(void);
+
 /* Portable path existence test */
 int pf_path_exists(const char *path);
 

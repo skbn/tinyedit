@@ -16,9 +16,9 @@
 #include <limits.h>
 #include <ctype.h>
 #include <wchar.h>
+#include <wctype.h>
 #include "editor.h"
 #include "../core/utf8.h"
-#include <wctype.h>
 #include "../core/charset.h"
 #include "../core/portable.h"
 
@@ -76,9 +76,11 @@ char *ed_block_to_string(Ed *ed, int r1, int c1, int r2, int c2);
 static int prefix_init(Ed *ed);
 static void prefix_free(Ed *ed);
 void ed_prefix_invalidate(Ed *ed);
+static void ed_wcs_view_reset(Ed *ed);
+static void ed_wcs_view_free(Ed *ed);
 static int prefix_rebuild(Ed *ed, int width, int max_line);
 static int prefix_rebuild_from(Ed *ed, int from_line, int width);
-static int ed_line_wrap_count(EdLine *ln, int width);
+static int ed_line_wrap_count(Ed *ed, EdLine *ln, int width);
 
 /* Per-document memory pool helpers. AmigaOS uses AllocPooled/DeletePool, other platforms use plain malloc/realloc/free */
 #if defined(PLATFORM_AMIGA)
@@ -150,53 +152,269 @@ static void *ed_pool_realloc(Ed *ed, void *p, size_t old_n, size_t new_n)
 }
 #endif
 
-static int line_count_words(const EdLine *ln)
+static int cw_for_cp(unsigned int cp)
 {
-    if (!ln || !ln->wcs || ln->len <= 0)
-        return 0;
+    /* Narrowest element size that can hold this codepoint */
+    if (cp < 0x100u)
+        return 1;
 
-    return pf_count_words_wcs(ln->wcs, ln->len);
+    if (cp < 0x10000u)
+        return 2;
+
+    return 4;
 }
 
-/* Ed routes allocations to the per-document pool on AmigaOS */
-static EdLine *line_new(Ed *ed, const wchar_t *src, int len)
+unsigned int ed_line_char(const EdLine *ln, int i)
 {
-    EdLine *ln = (EdLine *)ed_pool_alloc(ed, sizeof(EdLine));
+    /* Decode the codepoint stored at character index i */
+    if (!ln || i < 0 || i >= ln->len)
+        return 0;
+
+    if (ln->cw == 1)
+        return ((const unsigned char *)ln->text)[i];
+
+    if (ln->cw == 2)
+        return ((const unsigned short *)ln->text)[i];
+
+    return ((const unsigned int *)ln->text)[i];
+}
+
+static void line_put_raw(EdLine *ln, int i, unsigned int cp)
+{
+    /* Store a codepoint that already fits the line's element size */
+    if (ln->cw == 1)
+        ((unsigned char *)ln->text)[i] = (unsigned char)cp;
+    else if (ln->cw == 2)
+        ((unsigned short *)ln->text)[i] = (unsigned short)cp;
+    else
+        ((unsigned int *)ln->text)[i] = cp;
+}
+
+static void line_move(EdLine *ln, int dst, int src, int n)
+{
+    /* Move n characters within a line, honouring the element size */
+    char *base = (char *)ln->text;
+
+    memmove(base + (size_t)dst * (size_t)ln->cw, base + (size_t)src * (size_t)ln->cw, (size_t)n * (size_t)ln->cw);
+}
+
+static void *line_mem_alloc(EdLine *ln, size_t n)
+{
+    /* Allocate a text buffer from the owning pool or the heap */
+#if defined(PLATFORM_AMIGA)
+    if (ln->mem_pool)
+        return AllocPooled((APTR)ln->mem_pool, (ULONG)n);
+#endif
+
+    return malloc(n);
+}
+
+static void line_mem_free(EdLine *ln, void *p, size_t n)
+{
+    /* Release a text buffer to the owning pool or the heap */
+#if defined(PLATFORM_AMIGA)
+    if (ln->mem_pool)
+    {
+        FreePooled((APTR)ln->mem_pool, p, (ULONG)n);
+        return;
+    }
+#endif
+
+    free(p);
+}
+
+static int line_count_words(const EdLine *ln)
+{
+    wchar_t stackbuf[256];
+    wchar_t *buf = NULL;
+    int i;
+    int n;
+
+    if (!ln || ln->len <= 0)
+        return 0;
+
+    /* pf_count_words_wcs() needs a wchar_t view, so decode into one */
+    if (ln->len < (int)(sizeof(stackbuf) / sizeof(stackbuf[0])))
+    {
+        buf = stackbuf;
+    }
+    else
+    {
+        buf = (wchar_t *)malloc((size_t)(ln->len + 1) * sizeof(wchar_t));
+
+        if (!buf)
+            return 0;
+    }
+
+    for (i = 0; i < ln->len; i++)
+        buf[i] = (wchar_t)ed_line_char(ln, i);
+
+    n = pf_count_words_wcs(buf, ln->len);
+
+    if (buf != stackbuf)
+        free(buf);
+
+    return n;
+}
+
+static int line_reserve(EdLine *ln, int need)
+{
+    int nc;
+    void *t = NULL;
+
+    /* Grow the character capacity, keeping the current element size */
+    if (ln->cap > need + 1)
+        return 0;
+
+    nc = need + ED_LINE_GROW_PAD;
+
+    if ((size_t)nc > (size_t)-1 / (size_t)ln->cw)
+        return -1;
+
+    t = line_mem_alloc(ln, (size_t)nc * (size_t)ln->cw);
+
+    if (!t)
+        return -1;
+
+    memcpy(t, ln->text, (size_t)(ln->len + 1) * (size_t)ln->cw);
+    line_mem_free(ln, ln->text, (size_t)ln->cap * (size_t)ln->cw);
+
+    ln->text = t;
+    ln->cap = nc;
+
+    return 0;
+}
+
+static int line_widen(EdLine *ln, int w)
+{
+    void *t = NULL;
+    unsigned short *d2 = NULL;
+    unsigned int *d4 = NULL;
+    int i;
+
+    /* Promote the line to a wider element size, re-encoding every char */
+    if (ln->cw >= w)
+        return 0;
+
+    if ((size_t)ln->cap > (size_t)-1 / (size_t)w)
+        return -1;
+
+    t = line_mem_alloc(ln, (size_t)ln->cap * (size_t)w);
+
+    if (!t)
+        return -1;
+
+    if (w == 2)
+    {
+        d2 = (unsigned short *)t;
+
+        for (i = 0; i <= ln->len; i++)
+            d2[i] = (unsigned short)ed_line_char(ln, i);
+    }
+    else
+    {
+        d4 = (unsigned int *)t;
+
+        for (i = 0; i <= ln->len; i++)
+            d4[i] = ed_line_char(ln, i);
+    }
+
+    line_mem_free(ln, ln->text, (size_t)ln->cap * (size_t)ln->cw);
+
+    ln->text = t;
+    ln->cw = w;
+
+    return 0;
+}
+
+static int line_need(EdLine *ln, int need, int w)
+{
+    /* Ensure the line can hold need chars at least w bytes wide */
+    if (w > ln->cw && line_widen(ln, w) != 0)
+        return -1;
+
+    if (line_reserve(ln, need) != 0)
+        return -1;
+
+    return 0;
+}
+
+static EdLine *line_build(Ed *ed, const wchar_t *src, int len, int cap)
+{
+    EdLine *ln = NULL;
+    unsigned int cp;
+    int i;
+    int w;
+
+    /* Shared constructor for line_new() and line_new_take() */
+    if (cap < len + 1)
+        cap = len + 1;
+
+    ln = (EdLine *)ed_pool_alloc(ed, sizeof(EdLine));
 
     if (!ln)
         return NULL;
 
-    if (len > ED_LINE_CAP_THRESHOLD)
-        ln->cap = len + 1; /* +1 for the NUL terminator */
-    else
-        ln->cap = len + ED_LINE_CAP_SMALL;
+    /* Choose the narrowest element size that fits the whole source */
+    w = 1;
 
-    ln->wcs = (wchar_t *)ed_pool_alloc(ed, (size_t)ln->cap * sizeof(wchar_t));
+    for (i = 0; i < len; i++)
+    {
+        cp = (unsigned int)src[i];
 
-    if (!ln->wcs)
+        if (cp >= 0x10000u)
+        {
+            w = 4;
+            break;
+        }
+
+        if (cp >= 0x100u && w < 2)
+            w = 2;
+    }
+
+    ln->cw = w;
+    ln->cap = cap;
+    ln->len = len;
+
+    ln->text = ed_pool_alloc(ed, (size_t)cap * (size_t)w);
+
+    if (!ln->text)
     {
         ed_pool_free(ed, ln, sizeof(EdLine));
         return NULL;
     }
 
-    if (len > 0)
-        memcpy(ln->wcs, src, (size_t)len * sizeof(wchar_t));
+#if defined(PLATFORM_AMIGA)
+    ln->mem_pool = ed ? ed->mem_pool : NULL;
+#endif
 
-    ln->wcs[len] = L'\0';
-    ln->len = len;
+    for (i = 0; i < len; i++)
+        line_put_raw(ln, i, (unsigned int)src[i]);
+
+    line_put_raw(ln, len, 0);
+
     ln->word_count = 0;
     ln->has_wrap_hyphen = 0;
     ln->wrap_count_cache = -1;
     ln->wrap_cache_width = 0;
 
-#if defined(PLATFORM_AMIGA)
-    ln->mem_pool = ed ? ed->mem_pool : NULL;
-#endif
-
     return ln;
 }
 
-/* Adopt an existing wchar_t buffer; on AmigaOS copy it into the pool */
+/* Ed routes allocations to the per-document pool on AmigaOS */
+static EdLine *line_new(Ed *ed, const wchar_t *src, int len)
+{
+    int cap;
+
+    /* Interactive lines get head-room to avoid an immediate regrow */
+    if (len > ED_LINE_CAP_THRESHOLD)
+        cap = len + 1;
+    else
+        cap = len + ED_LINE_CAP_SMALL;
+
+    return line_build(ed, src, len, cap);
+}
+
 static EdLine *line_new_take(Ed *ed, wchar_t *wcs, int len)
 {
     EdLine *ln = NULL;
@@ -204,73 +422,10 @@ static EdLine *line_new_take(Ed *ed, wchar_t *wcs, int len)
     if (!wcs)
         return NULL;
 
-#if defined(PLATFORM_AMIGA)
-    if (ed && ed->mem_pool)
-    {
-        /* Pool path: copy into an EXACT-fit pool buffer (len+1), then free the source */
-        ln = (EdLine *)ed_pool_alloc(ed, sizeof(EdLine));
+    /* Loaded lines have a known size, so allocate an exact fit */
+    ln = line_build(ed, wcs, len, len + 1);
 
-        if (!ln)
-        {
-            free(wcs);
-            return NULL;
-        }
-
-        ln->cap = len + 1; /* exact fit, +1 for the NUL terminator */
-        ln->wcs = (wchar_t *)ed_pool_alloc(ed, (size_t)ln->cap * sizeof(wchar_t));
-
-        if (!ln->wcs)
-        {
-            ed_pool_free(ed, ln, sizeof(EdLine));
-            free(wcs);
-            return NULL;
-        }
-
-        if (len > 0)
-            memcpy(ln->wcs, wcs, (size_t)len * sizeof(wchar_t));
-
-        ln->wcs[len] = L'\0';
-        ln->len = len;
-        ln->word_count = 0;
-        ln->has_wrap_hyphen = 0;
-        ln->wrap_count_cache = -1;
-        ln->wrap_cache_width = 0;
-        ln->mem_pool = ed->mem_pool;
-
-        free(wcs);
-        return ln;
-    }
-#endif
-
-    /* No pool (non-Amiga or pool creation failed) adopt the buffer*/
-    ln = (EdLine *)malloc(sizeof(EdLine));
-
-    if (!ln)
-    {
-        free(wcs);
-        return NULL;
-    }
-
-    if (len + 1 > 0)
-    {
-        wchar_t *shrunk = (wchar_t *)realloc(wcs, (size_t)(len + 1) * sizeof(wchar_t));
-
-        if (shrunk)
-            wcs = shrunk; /* realloc-smaller: keep original on the rare failure */
-    }
-
-    ln->wcs = wcs;
-    ln->cap = len + 1;
-    ln->wcs[len] = L'\0';
-    ln->len = len;
-    ln->word_count = 0;
-    ln->has_wrap_hyphen = 0;
-    ln->wrap_count_cache = -1;
-    ln->wrap_cache_width = 0;
-
-#if defined(PLATFORM_AMIGA)
-    ln->mem_pool = NULL;
-#endif
+    free(wcs);
 
     return ln;
 }
@@ -288,61 +443,19 @@ static void line_free(EdLine *ln)
 #if defined(PLATFORM_AMIGA)
     if (ln->mem_pool)
     {
-        FreePooled((APTR)ln->mem_pool, ln->wcs, (ULONG)((size_t)ln->cap * sizeof(wchar_t)));
+        FreePooled((APTR)ln->mem_pool, ln->text, (ULONG)((size_t)ln->cap * (size_t)ln->cw));
         FreePooled((APTR)ln->mem_pool, ln, (ULONG)sizeof(EdLine));
         return;
     }
 #endif
 
-    free(ln->wcs);
+    free(ln->text);
     free(ln);
-}
-
-static int line_grow(EdLine *ln, int need)
-{
-    int nc;
-    wchar_t *t = NULL;
-
-    if (ln->cap > need + 1)
-        return 0;
-
-    nc = need + ED_LINE_GROW_PAD;
-
-    if ((size_t)nc > SIZE_MAX / sizeof(wchar_t))
-        return -1;
-
-#if defined(PLATFORM_AMIGA)
-    if (ln->mem_pool)
-    {
-        /* Pool has no native realloc. Emulate it */
-        t = (wchar_t *)AllocPooled((APTR)ln->mem_pool, (ULONG)((size_t)nc * sizeof(wchar_t)));
-
-        if (!t)
-            return -1;
-
-        memcpy(t, ln->wcs, (size_t)ln->cap * sizeof(wchar_t));
-
-        FreePooled((APTR)ln->mem_pool, ln->wcs, (ULONG)((size_t)ln->cap * sizeof(wchar_t)));
-
-        ln->wcs = t;
-        ln->cap = nc;
-        return 0;
-    }
-#endif
-
-    t = (wchar_t *)realloc(ln->wcs, (size_t)nc * sizeof(wchar_t));
-
-    if (!t)
-        return -1;
-
-    ln->wcs = t;
-    ln->cap = nc;
-
-    return 0;
 }
 
 static int line_insert(Ed *ed, EdLine *ln, int pos, wchar_t ch)
 {
+    unsigned int cp;
     int old_count;
 
     if (pos < 0)
@@ -351,14 +464,19 @@ static int line_insert(Ed *ed, EdLine *ln, int pos, wchar_t ch)
     if (pos > ln->len)
         pos = ln->len;
 
-    if (line_grow(ln, ln->len + 1) != 0)
+    cp = (unsigned int)ch;
+
+    if (line_need(ln, ln->len + 1, cw_for_cp(cp)) != 0)
         return -1;
 
-    wmemmove(&ln->wcs[pos + 1], &ln->wcs[pos], (size_t)(ln->len - pos + 1));
+    /* Shift the tail and the NUL one slot right, then drop the char in */
+    line_move(ln, pos + 1, pos, ln->len - pos + 1);
+    line_put_raw(ln, pos, cp);
 
-    ln->wcs[pos] = ch;
     ln->len++;
     ln->wrap_count_cache = -1;
+
+    ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
     {
@@ -377,10 +495,10 @@ static int line_delete(Ed *ed, EdLine *ln, int pos)
     if (pos < 0 || pos >= ln->len)
         return -1;
 
-    wmemmove(&ln->wcs[pos], &ln->wcs[pos + 1], (size_t)(ln->len - pos));
-
+    line_move(ln, pos, pos + 1, ln->len - pos);
     ln->len--;
     ln->wrap_count_cache = -1;
+    ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
     {
@@ -402,10 +520,12 @@ static int line_delete_range(Ed *ed, EdLine *ln, int pos, int n)
     if (pos + n > ln->len)
         n = ln->len - pos;
 
-    wmemmove(&ln->wcs[pos], &ln->wcs[pos + n], (size_t)(ln->len - pos - n + 1));
+    line_move(ln, pos, pos + n, ln->len - pos - n + 1);
 
     ln->len -= n;
     ln->wrap_count_cache = -1;
+
+    ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
     {
@@ -428,8 +548,11 @@ static void line_truncate(Ed *ed, EdLine *ln, int pos)
         return;
 
     ln->len = pos;
-    ln->wcs[pos] = L'\0';
+    line_put_raw(ln, pos, 0);
+
     ln->wrap_count_cache = -1;
+
+    ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
     {
@@ -439,30 +562,117 @@ static void line_truncate(Ed *ed, EdLine *ln, int pos)
     }
 }
 
-static int line_append(Ed *ed, EdLine *ln, const wchar_t *s, int slen)
+static EdLine *line_from_slice(Ed *ed, EdLine *ln, int start, int count)
 {
-    int old_count;
+    wchar_t *tmp = NULL;
+    EdLine *out = NULL;
+    int i;
 
-    if (slen <= 0)
+    /* Build a new line from a character range of an existing one */
+    if (count <= 0)
+        return line_empty(ed);
+
+    tmp = (wchar_t *)malloc((size_t)(count + 1) * sizeof(wchar_t));
+
+    if (!tmp)
+        return NULL;
+
+    for (i = 0; i < count; i++)
+        tmp[i] = (wchar_t)ed_line_char(ln, start + i);
+
+    tmp[count] = L'\0';
+    out = line_new(ed, tmp, count);
+
+    free(tmp);
+
+    return out;
+}
+
+static int line_append_line(Ed *ed, EdLine *dst, const EdLine *src, int start, int count)
+{
+    unsigned int cp;
+    int old_count;
+    int i;
+    int w;
+
+    /* Append a range of src onto dst without a wchar_t round-trip */
+    if (count <= 0)
         return 0;
 
-    if (line_grow(ln, ln->len + slen) != 0)
+    w = dst->cw;
+
+    for (i = 0; i < count; i++)
+    {
+        cp = ed_line_char(src, start + i);
+
+        if (cw_for_cp(cp) > w)
+            w = cw_for_cp(cp);
+    }
+
+    if (line_need(dst, dst->len + count, w) != 0)
         return -1;
 
-    wmemcpy(&ln->wcs[ln->len], s, (size_t)slen);
+    for (i = 0; i < count; i++)
+        line_put_raw(dst, dst->len + i, ed_line_char(src, start + i));
 
-    ln->len += slen;
-    ln->wcs[ln->len] = L'\0';
-    ln->wrap_count_cache = -1;
+    dst->len += count;
+    line_put_raw(dst, dst->len, 0);
+
+    dst->wrap_count_cache = -1;
+
+    ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
     {
-        old_count = ln->word_count;
-        ln->word_count = line_count_words(ln);
-        ed->word_count_total += ln->word_count - old_count;
+        old_count = dst->word_count;
+        dst->word_count = line_count_words(dst);
+        ed->word_count_total += dst->word_count - old_count;
     }
 
     return 0;
+}
+
+static void line_copy_out(const EdLine *ln, int start, int count, wchar_t *dst)
+{
+    int i;
+
+    /* Decode a character range into a caller-supplied wchar_t buffer */
+    for (i = 0; i < count; i++)
+        dst[i] = (wchar_t)ed_line_char(ln, start + i);
+}
+
+static int line_set_char(EdLine *ln, int i, unsigned int cp)
+{
+    /* Overwrite one character, widening the line first if needed */
+    if (cw_for_cp(cp) > ln->cw && line_widen(ln, cw_for_cp(cp)) != 0)
+        return -1;
+
+    line_put_raw(ln, i, cp);
+    return 0;
+}
+
+static char *line_to_utf8(const EdLine *ln, int start, int count)
+{
+    wchar_t *tmp = NULL;
+    char *out = NULL;
+
+    /* Encode a character range straight to a fresh UTF-8 string */
+    if (count < 0)
+        count = 0;
+
+    tmp = (wchar_t *)malloc((size_t)(count + 1) * sizeof(wchar_t));
+
+    if (!tmp)
+        return NULL;
+
+    line_copy_out(ln, start, count, tmp);
+    tmp[count] = L'\0';
+
+    out = wcs_to_utf8(tmp, count);
+
+    free(tmp);
+
+    return out;
 }
 
 static int doc_grow(Ed *ed)
@@ -549,6 +759,9 @@ static void doc_clear(Ed *ed)
     ed->word_count_initialized = 0;
     ed->syntax_state_dirty_from = 0;
     ed->syntax_state_lang = -1;
+
+    /* Drop decoded views; their line indices now point at freed lines */
+    ed_wcs_view_reset(ed);
 }
 
 /* Prefix sum implementation */
@@ -587,12 +800,50 @@ void ed_prefix_invalidate(Ed *ed)
 
     ed->prefix_valid = 0;
     ed->prefix_dirty_from = -1;
+
+    /* Structural change: decoded views may now map to the wrong line */
+    ed_wcs_view_reset(ed);
+}
+
+static void ed_wcs_view_reset(Ed *ed)
+{
+    int i;
+
+    /* Mark every decoded view stale without freeing the buffers */
+    if (!ed)
+        return;
+
+    for (i = 0; i < ED_WCS_VIEW_SLOTS; i++)
+        ed->wcs_view_line[i] = -1;
+
+    ed->wcs_view_next = 0;
+}
+
+static void ed_wcs_view_free(Ed *ed)
+{
+    int i;
+
+    /* Release the decode buffers; they live on the heap, not the pool */
+    if (!ed)
+        return;
+
+    for (i = 0; i < ED_WCS_VIEW_SLOTS; i++)
+    {
+        free(ed->wcs_view[i]);
+
+        ed->wcs_view[i] = NULL;
+        ed->wcs_view_cap[i] = 0;
+        ed->wcs_view_line[i] = -1;
+    }
 }
 
 void ed_prefix_invalidate_from(Ed *ed, int from_line)
 {
     if (!ed)
         return;
+
+    /* Any content edit reaches here, so drop stale decoded views */
+    ed_wcs_view_reset(ed);
 
     /* Don't invalidate during snapshot mode (paste/undo/redo) */
     if (ed->undo_snapshot_mode)
@@ -680,7 +931,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
         {
             EdLine *ln = ed->lines[i];
 
-            ed->prefix_base += ed_line_wrap_count(ln, width);
+            ed->prefix_base += ed_line_wrap_count(ed, ln, width);
         }
     }
     else
@@ -697,11 +948,12 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
             {
                 EdLine *ln = ed->lines[i];
 
-                ed->prefix_base += ed_line_wrap_count(ln, width);
+                ed->prefix_base += ed_line_wrap_count(ed, ln, width);
             }
         }
-        else /* start_line < old_start */
+        else
         {
+            /* start_line < old_start */
             /* Window moved backward: subtract if close, recompute from 0 if far */
             if (start_line >= 0 && old_start - start_line <= range_size * 2)
             {
@@ -710,7 +962,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
                 {
                     EdLine *ln = ed->lines[i];
 
-                    ed->prefix_base -= ed_line_wrap_count(ln, width);
+                    ed->prefix_base -= ed_line_wrap_count(ed, ln, width);
                 }
 
                 if (ed->prefix_base < 0)
@@ -725,7 +977,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
                 {
                     EdLine *ln = ed->lines[i];
 
-                    ed->prefix_base += ed_line_wrap_count(ln, width);
+                    ed->prefix_base += ed_line_wrap_count(ed, ln, width);
                 }
             }
         }
@@ -738,7 +990,7 @@ int ed_prefix_rebuild_range(Ed *ed, int width, int start_line, int end_line)
     {
         EdLine *ln = ed->lines[i];
 
-        total += ed_line_wrap_count(ln, width);
+        total += ed_line_wrap_count(ed, ln, width);
         ed->prefix[i - start_line] = total;
     }
 
@@ -780,9 +1032,11 @@ int ed_prefix_get(const Ed *ed, int line)
 
         return last + (line - ed->prefix_end);
     }
-    else /* line < ed->prefix_start - 1 */
+    else
     {
+        /* line < ed->prefix_start - 1 */
         int est = ed->prefix_base - (ed->prefix_start - 1 - line);
+
         return est < 0 ? 0 : est;
     }
 }
@@ -853,7 +1107,7 @@ static int prefix_rebuild(Ed *ed, int width, int max_line)
         total = 0;
 
         for (i = 0; i < from_line; i++)
-            total += ed_line_wrap_count(ed->lines[i], width);
+            total += ed_line_wrap_count(ed, ed->lines[i], width);
     }
 
     /* Calculate prefix sum from from_line to to_line */
@@ -861,7 +1115,7 @@ static int prefix_rebuild(Ed *ed, int width, int max_line)
     {
         EdLine *ln = ed->lines[i];
 
-        total += ed_line_wrap_count(ln, width);
+        total += ed_line_wrap_count(ed, ln, width);
         ed->prefix[i] = total;
     }
 
@@ -924,7 +1178,7 @@ static int prefix_rebuild_from(Ed *ed, int from_line, int width)
         total = 0;
 
         for (i = 0; i < from_line; i++)
-            total += ed_line_wrap_count(ed->lines[i], width);
+            total += ed_line_wrap_count(ed, ed->lines[i], width);
     }
 
     /* Recalculate from from_line to end */
@@ -932,7 +1186,7 @@ static int prefix_rebuild_from(Ed *ed, int from_line, int width)
     {
         EdLine *ln = ed->lines[i];
 
-        total += ed_line_wrap_count(ln, width);
+        total += ed_line_wrap_count(ed, ln, width);
         ed->prefix[i] = total;
     }
 
@@ -1050,14 +1304,32 @@ int ed_wrap_count(const wchar_t *line, int len, int width)
 }
 
 /* Per-line cached wrap count: recomputes only when content or width changed */
-static int ed_line_wrap_count(EdLine *ln, int width)
+static int ed_line_wrap_count(Ed *ed, EdLine *ln, int width)
 {
+    wchar_t *grown = NULL;
+    int i;
+
     if (!ln || ln->len <= 0)
         return 1;
 
     if (ln->wrap_count_cache < 0 || ln->wrap_cache_width != width)
     {
-        ln->wrap_count_cache = ed_wrap_count(ln->wcs, ln->len, width);
+        if (ln->len + 1 > ed->wrap_scratch_cap)
+        {
+            grown = (wchar_t *)realloc(ed->wrap_scratch, (size_t)(ln->len + 1) * sizeof(wchar_t));
+
+            if (!grown)
+                return 1;
+
+            ed->wrap_scratch = grown;
+            ed->wrap_scratch_cap = ln->len + 1;
+        }
+
+        for (i = 0; i < ln->len; i++)
+            ed->wrap_scratch[i] = (wchar_t)ed_line_char(ln, i);
+
+        ed->wrap_scratch[ln->len] = L'\0';
+        ln->wrap_count_cache = ed_wrap_count(ed->wrap_scratch, ln->len, width);
         ln->wrap_cache_width = width;
     }
 
@@ -1216,6 +1488,8 @@ void ed_free(Ed *ed)
         free(ed->redo_stack);
     }
 
+    ed_wcs_view_free(ed);
+    free(ed->wrap_scratch);
     free(ed);
     return;
 #else
@@ -1232,15 +1506,19 @@ void ed_free(Ed *ed)
     if (ed->undo_stack)
     {
         undo_stack_clear(ed->undo_stack, ed->undo_top);
+
         free(ed->undo_stack);
     }
 
     if (ed->redo_stack)
     {
         undo_stack_clear(ed->redo_stack, ed->redo_top);
+
         free(ed->redo_stack);
     }
 
+    ed_wcs_view_free(ed);
+    free(ed->wrap_scratch);
     free(ed);
 #endif
 }
@@ -1474,6 +1752,208 @@ int ed_load_stream(Ed *ed, FILE *fp)
     }
 
     free(acc);
+
+    if (ed->count == 0)
+    {
+        EdLine *ln = line_empty(ed);
+
+        if (ln)
+            doc_insert_line(ed, 0, ln);
+    }
+
+    return 0;
+}
+
+/* Load a stream converting each line from a single-byte charset to UTF-8 */
+int ed_load_stream_charset(Ed *ed, FILE *fp, const char *charset)
+{
+    char chunk[ED_READ_CHUNK_SIZE];
+    char *acc = NULL;
+    char *cbuf = NULL;
+    size_t acc_len = 0;
+    size_t acc_cap = 0;
+    size_t cbuf_cap = 0;
+    size_t got;
+
+    if (!ed || !fp)
+        return -1;
+
+    if (!charset || !charset[0] || strcasecmp(charset, "UTF-8") == 0 || strcasecmp(charset, "UTF8") == 0)
+        return ed_load_stream(ed, fp);
+
+    doc_clear(ed);
+
+    ed->row = ed->col = ed->top = 0;
+    ed->modified = 0;
+    ed->block.active = 0;
+    ed->undo_open = 0;
+    ed->syntax_state_dirty_from = 0;
+    ed->syntax_state_lang = -1;
+
+    acc_cap = ED_BUF_INITIAL_SIZE;
+    acc = (char *)malloc(acc_cap);
+
+    if (!acc)
+        return -1;
+
+    while ((got = fread(chunk, 1, sizeof(chunk), fp)) > 0)
+    {
+        size_t i = 0;
+
+        while (i < got)
+        {
+            size_t segment_start = i;
+            size_t seg;
+            size_t need;
+
+            while (i < got && chunk[i] != '\r' && chunk[i] != '\n')
+                i++;
+
+            seg = i - segment_start;
+            need = acc_len + seg + 1;
+
+            if (need > ED_MAX_LINE_SIZE)
+            {
+                seg = (ED_MAX_LINE_SIZE > acc_len + 1) ? (ED_MAX_LINE_SIZE - acc_len - 1) : 0;
+                need = acc_len + seg + 1;
+            }
+
+            if (need > acc_cap)
+            {
+                size_t nc = acc_cap;
+                char *na = NULL;
+
+                while (nc < need)
+                    nc *= 2;
+
+                if (nc > ED_MAX_LINE_SIZE + 1)
+                    nc = ED_MAX_LINE_SIZE + 1;
+
+                na = (char *)realloc(acc, nc);
+
+                if (!na)
+                {
+                    free(acc);
+                    free(cbuf);
+                    return -1;
+                }
+
+                acc = na;
+                acc_cap = nc;
+            }
+
+            if (seg > 0)
+            {
+                memcpy(acc + acc_len, chunk + segment_start, seg);
+                acc_len += seg;
+            }
+
+            if (i < got && (chunk[i] == '\r' || chunk[i] == '\n'))
+            {
+                wchar_t *wcs = NULL;
+                int wlen;
+                int wrote;
+                EdLine *ln = NULL;
+                size_t cneed = acc_len * 3 + 16;
+
+                if (cneed > cbuf_cap)
+                {
+                    char *ncb = (char *)realloc(cbuf, cneed);
+
+                    if (!ncb)
+                    {
+                        free(acc);
+                        free(cbuf);
+                        return -1;
+                    }
+
+                    cbuf = ncb;
+                    cbuf_cap = cneed;
+                }
+
+                acc[acc_len] = '\0';
+                wrote = charset_body_to_utf8(charset, acc, (int)acc_len, cbuf, (int)cbuf_cap);
+
+                if (wrote >= 0)
+                {
+                    cbuf[wrote] = '\0';
+                    wcs = utf8_to_wcs(cbuf, &wlen);
+                }
+
+                if (wcs)
+                {
+                    ln = line_new_take(ed, wcs, wlen);
+
+                    if (ln)
+                        doc_insert_line(ed, ed->count, ln);
+                }
+
+                acc_len = 0;
+
+                if (chunk[i] == '\r')
+                {
+                    i++;
+
+                    if (i < got && chunk[i] == '\n')
+                        i++;
+                    else if (i == got)
+                    {
+                        int c = fgetc(fp);
+
+                        if (c != '\n' && c != EOF)
+                            ungetc(c, fp);
+                    }
+                }
+                else
+                {
+                    i++;
+                }
+            }
+        }
+    }
+
+    if (acc_len > 0)
+    {
+        wchar_t *wcs = NULL;
+        int wlen;
+        int wrote;
+        EdLine *ln = NULL;
+        size_t cneed = acc_len * 3 + 16;
+
+        if (cneed > cbuf_cap)
+        {
+            char *ncb = (char *)realloc(cbuf, cneed);
+
+            if (ncb)
+            {
+                cbuf = ncb;
+                cbuf_cap = cneed;
+            }
+        }
+
+        if (cbuf_cap >= cneed)
+        {
+            acc[acc_len] = '\0';
+            wrote = charset_body_to_utf8(charset, acc, (int)acc_len, cbuf, (int)cbuf_cap);
+
+            if (wrote >= 0)
+            {
+                cbuf[wrote] = '\0';
+                wcs = utf8_to_wcs(cbuf, &wlen);
+
+                if (wcs)
+                {
+                    ln = line_new_take(ed, wcs, wlen);
+
+                    if (ln)
+                        doc_insert_line(ed, ed->count, ln);
+                }
+            }
+        }
+    }
+
+    free(acc);
+    free(cbuf);
 
     if (ed->count == 0)
     {
@@ -1738,6 +2218,7 @@ char *ed_range_to_string(const Ed *ed, int start, int end)
     int total = 0;
     char *out = NULL;
     char *p = NULL;
+    int ok = 1;
 
     if (!ed || start < 0 || end <= start || start >= ed->count)
         return NULL;
@@ -1747,7 +2228,8 @@ char *ed_range_to_string(const Ed *ed, int start, int end)
 
     n = end - start;
 
-    parts = (char **)malloc((size_t)n * sizeof(char *));
+    /* calloc so every slot starts NULL and cleanup can free uniformly */
+    parts = (char **)calloc((size_t)n, sizeof(char *));
 
     if (!parts)
         return NULL;
@@ -1756,57 +2238,50 @@ char *ed_range_to_string(const Ed *ed, int start, int end)
     {
         EdLine *ln = ed->lines[start + i];
 
-        parts[i] = wcs_to_utf8(ln->wcs, ln->len);
+        parts[i] = line_to_utf8(ln, 0, ln->len);
 
         if (!parts[i])
         {
+            /* Fall back to an empty line so OOM does not drop content */
             parts[i] = (char *)malloc(1);
 
             if (!parts[i])
             {
-                int j;
-
-                for (j = 0; j < i; j++)
-                    free(parts[j]);
-
-                free(parts);
-
-                return NULL;
+                ok = 0;
+                break;
             }
 
-            parts[i][0] = 0;
+            parts[i][0] = '\0';
         }
 
-        total += (int)strlen(parts[i]) + 1; /* +1 for \n */
+        total += (int)strlen(parts[i]) + 1; /* +1 for the newline */
     }
 
-    out = (char *)malloc((size_t)(total + 1));
-
-    if (!out)
+    if (ok)
     {
-        for (i = 0; i < n; i++)
-            free(parts[i]);
+        out = (char *)malloc((size_t)(total + 1));
 
-        free(parts);
+        if (out)
+        {
+            p = out;
 
-        return NULL;
+            for (i = 0; i < n; i++)
+            {
+                int slen = (int)strlen(parts[i]);
+
+                memcpy(p, parts[i], (size_t)slen);
+
+                p += slen;
+                *p++ = '\n';
+            }
+
+            *p = '\0';
+        }
     }
 
-    p = out;
-
+    /* Uniform cleanup: unused slots are NULL, so free() is safe on all */
     for (i = 0; i < n; i++)
-    {
-        int slen = (int)strlen(parts[i]);
-
-        memcpy(p, parts[i], (size_t)slen);
-
-        p += slen;
-        *p++ = '\n';
-
         free(parts[i]);
-    }
-
-    *p = '\0';
 
     free(parts);
 
@@ -2090,12 +2565,12 @@ static int is_wordch(Ed *ed, wchar_t ch)
 
 void ed_word_left(Ed *ed)
 {
-    wchar_t *w = NULL;
+    EdLine *ln = NULL;
 
     if (!ed)
         return;
 
-    w = ed->lines[ed->row]->wcs;
+    ln = ed->lines[ed->row];
 
     if (ed->col == 0 && ed->row > 0)
     {
@@ -2106,10 +2581,10 @@ void ed_word_left(Ed *ed)
         return;
     }
 
-    while (ed->col > 0 && !is_wordch(ed, w[ed->col - 1]))
+    while (ed->col > 0 && !is_wordch(ed, (wchar_t)ed_line_char(ln, ed->col - 1)))
         ed->col--;
 
-    while (ed->col > 0 && is_wordch(ed, w[ed->col - 1]))
+    while (ed->col > 0 && is_wordch(ed, (wchar_t)ed_line_char(ln, ed->col - 1)))
         ed->col--;
 }
 
@@ -2130,10 +2605,10 @@ void ed_word_right(Ed *ed)
         return;
     }
 
-    while (ed->col < ln->len && is_wordch(ed, ln->wcs[ed->col]))
+    while (ed->col < ln->len && is_wordch(ed, (wchar_t)ed_line_char(ln, ed->col)))
         ed->col++;
 
-    while (ed->col < ln->len && !is_wordch(ed, ln->wcs[ed->col]))
+    while (ed->col < ln->len && !is_wordch(ed, (wchar_t)ed_line_char(ln, ed->col)))
         ed->col++;
 }
 
@@ -2175,14 +2650,15 @@ int ed_insert_char(Ed *ed, wchar_t ch)
     {
         if (ed->col < ln->len)
         {
-            /* Overwrite: record delete of old char then insert new */
-            record_delete_fwd(ed, ed->row, ed->col, ln->wcs[ed->col]);
+            /* Overwrite, record delete of old char then insert new */
+            record_delete_fwd(ed, ed->row, ed->col, (wchar_t)ed_line_char(ln, ed->col));
 
             ed_save_undo(ed);
             record_insert(ed, ed->row, ed->col, ch);
 
-            ln->wcs[ed->col] = ch;
+            line_set_char(ln, ed->col, (unsigned int)ch);
             ln->wrap_count_cache = -1;
+            ed_wcs_view_reset(ed);
 
             if (ed->word_count_initialized)
             {
@@ -2223,7 +2699,7 @@ int ed_enter(Ed *ed)
 
     record_split(ed, ed->row, ed->col);
 
-    nl = line_new(ed, &ln->wcs[ed->col], ln->len - ed->col);
+    nl = line_from_slice(ed, ln, ed->col, ln->len - ed->col);
 
     if (!nl)
         return -1;
@@ -2271,7 +2747,7 @@ int ed_backspace(Ed *ed)
 
     if (ed->col > 0)
     {
-        deleted_ch = ln->wcs[ed->col - 1];
+        deleted_ch = (wchar_t)ed_line_char(ln, ed->col - 1);
 
         record_delete_back(ed, ed->row, ed->col - 1, deleted_ch);
         line_delete(ed, ln, ed->col - 1);
@@ -2291,7 +2767,7 @@ int ed_backspace(Ed *ed)
 
         ed->col = prev->len;
 
-        line_append(ed, prev, ln->wcs, ln->len);
+        line_append_line(ed, prev, ln, 0, ln->len);
         line_free(doc_remove_line(ed, ed->row));
 
         ed->row--;
@@ -2329,7 +2805,7 @@ int ed_delete(Ed *ed)
 
     if (ed->col < ln->len)
     {
-        deleted_ch = ln->wcs[ed->col];
+        deleted_ch = (wchar_t)ed_line_char(ln, ed->col);
 
         record_delete_fwd(ed, ed->row, ed->col, deleted_ch);
         line_delete(ed, ln, ed->col);
@@ -2346,7 +2822,7 @@ int ed_delete(Ed *ed)
         /* Del at EOL joins lines: record as join from next line's perspective */
         record_join(ed, ed->row, ln->len);
 
-        line_append(ed, ln, nxt->wcs, nxt->len);
+        line_append_line(ed, ln, nxt, 0, nxt->len);
         line_free(doc_remove_line(ed, ed->row + 1));
 
         ln->has_wrap_hyphen = 0;
@@ -2488,7 +2964,6 @@ int ed_delete_word_left(Ed *ed)
     EdLine *ln = NULL;
     int target;
     int del_len;
-    wchar_t *w = NULL;
     wchar_t *deleted_text = NULL;
 
     if (!ed)
@@ -2504,13 +2979,12 @@ int ed_delete_word_left(Ed *ed)
     }
 
     ln = ed->lines[ed->row];
-    w = ln->wcs;
     target = ed->col;
 
-    while (target > 0 && !is_wordch(ed, w[target - 1]))
+    while (target > 0 && !is_wordch(ed, (wchar_t)ed_line_char(ln, target - 1)))
         target--;
 
-    while (target > 0 && is_wordch(ed, w[target - 1]))
+    while (target > 0 && is_wordch(ed, (wchar_t)ed_line_char(ln, target - 1)))
         target--;
 
     /* Save text before deletion */
@@ -2579,10 +3053,10 @@ int ed_delete_word_right(Ed *ed)
 
     target = ed->col;
 
-    while (target < ln->len && is_wordch(ed, ln->wcs[target]))
+    while (target < ln->len && is_wordch(ed, (wchar_t)ed_line_char(ln, target)))
         target++;
 
-    while (target < ln->len && !is_wordch(ed, ln->wcs[target]))
+    while (target < ln->len && !is_wordch(ed, (wchar_t)ed_line_char(ln, target)))
         target++;
 
     /* Save text before deletion */
@@ -2635,7 +3109,7 @@ int ed_duplicate_line(Ed *ed)
 
     ln = ed->lines[ed->row];
 
-    dup = line_new(ed, ln->wcs, ln->len);
+    dup = line_from_slice(ed, ln, 0, ln->len);
 
     if (!dup)
         return -1;
@@ -2760,13 +3234,15 @@ int ed_move_line_up(Ed *ed)
 /* Move the current line (or active block) one position down */
 int ed_move_line_down(Ed *ed)
 {
-    int top, bot;
+    int top;
+    int bot;
     EdLine *moved = NULL;
     int had_block = 0;
     int start;
     int old_count;
     int new_count;
-    int cur_row, cur_col;
+    int cur_row;
+    int cur_col;
     char *snapshot_before = NULL;
     char *snapshot_after = NULL;
 
@@ -2775,7 +3251,10 @@ int ed_move_line_down(Ed *ed)
 
     if (ed->block.active)
     {
-        int r1, c1, r2, c2;
+        int r1;
+        int c1;
+        int r2;
+        int c2;
 
         block_range(ed, &r1, &c1, &r2, &c2);
 
@@ -2993,7 +3472,7 @@ static wchar_t *block_extract_wcs(const Ed *ed, int *out_len)
             ln = 0;
 
         if (ln > 0)
-            wmemcpy(&buf[pos], &ed->lines[i]->wcs[s], (size_t)ln);
+            line_copy_out(ed->lines[i], s, ln, &buf[pos]);
 
         pos += ln;
 
@@ -3159,7 +3638,7 @@ int ed_block_cut(Ed *ed)
         line_truncate(ed, first, c1);
 
         if (c2 < last->len)
-            line_append(ed, first, &last->wcs[c2], last->len - c2);
+            line_append_line(ed, first, last, c2, last->len - c2);
 
         /* Bulk-delete lines r1+1 .. r2 (was K calls to doc_remove_line) */
         from = r1 + 1;
@@ -3259,7 +3738,7 @@ int ed_block_delete(Ed *ed)
         line_truncate(ed, first, c1);
 
         if (c2 < last->len)
-            line_append(ed, first, &last->wcs[c2], last->len - c2);
+            line_append_line(ed, first, last, c2, last->len - c2);
 
         /* Bulk-delete lines r1+1 .. r2 (was K calls to doc_remove_line) */
         from = r1 + 1;
@@ -3931,6 +4410,9 @@ int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const cha
     if (start > ed->count)
         start = ed->count;
 
+    /* Lines are about to move/free, so drop any decoded views */
+    ed_wcs_view_reset(ed);
+
     /* Bulk remove old lines (free + single memmove) */
     if (count_to_remove > 0 && start < ed->count)
     {
@@ -4029,7 +4511,7 @@ int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const cha
         {
             ln = line_new_take(ed, wcs, wlen);
 
-            if (ln)
+            if (ln && new_lines)
                 new_lines[new_lines_count++] = ln;
         }
 
@@ -4156,7 +4638,7 @@ static int apply_group_reverse(Ed *ed, UndoGroup *g)
                 cur = ed->lines[op->row];
                 prev = ed->lines[op->row + 1];
 
-                line_append(ed, cur, prev->wcs, prev->len);
+                line_append_line(ed, cur, prev, 0, prev->len);
                 line_free(doc_remove_line(ed, op->row + 1));
 
                 if (op->row < min_row)
@@ -4170,7 +4652,7 @@ static int apply_group_reverse(Ed *ed, UndoGroup *g)
             if (op->row < ed->count)
             {
                 cur = ed->lines[op->row];
-                nl = line_new(ed, &cur->wcs[op->join_col], cur->len - op->join_col);
+                nl = line_from_slice(ed, cur, op->join_col, cur->len - op->join_col);
 
                 if (nl)
                 {
@@ -4255,7 +4737,7 @@ static int apply_group_reverse(Ed *ed, UndoGroup *g)
                         last_line = ed->lines[op->row + 1];
 
                         line_delete_range(ed, first_line, op->col, first_line->len - op->col);
-                        line_append(ed, first_line, last_line->wcs, last_line->len);
+                        line_append_line(ed, first_line, last_line, 0, last_line->len);
                         line_free(doc_remove_line(ed, op->row + 1));
                     }
                     else
@@ -4346,7 +4828,7 @@ static int apply_group_forward(Ed *ed, UndoGroup *g)
             if (op->row < ed->count)
             {
                 cur = ed->lines[op->row];
-                nl = line_new(ed, &cur->wcs[op->col], cur->len - op->col);
+                nl = line_from_slice(ed, cur, op->col, cur->len - op->col);
 
                 if (nl)
                 {
@@ -4365,7 +4847,7 @@ static int apply_group_forward(Ed *ed, UndoGroup *g)
             {
                 cur = ed->lines[op->row];
 
-                line_append(ed, cur, ed->lines[op->row + 1]->wcs, ed->lines[op->row + 1]->len);
+                line_append_line(ed, cur, ed->lines[op->row + 1], 0, ed->lines[op->row + 1]->len);
                 line_free(doc_remove_line(ed, op->row + 1));
 
                 if (op->row < min_row)
@@ -4641,10 +5123,48 @@ void ed_get_info(const Ed *ed, EdInfo *info)
 
 const wchar_t *ed_line_wcs(const Ed *ed, int line)
 {
+    /* Decode compact line into ring; view is valid until the next edit */
+    Ed *m = NULL;
+    EdLine *ln = NULL;
+    wchar_t *buf = NULL;
+    int slot;
+    int i;
+    int need;
+
     if (!ed || line < 0 || line >= ed->count)
         return NULL;
 
-    return ed->lines[line]->wcs;
+    m = (Ed *)ed;
+    ln = m->lines[line];
+
+    for (slot = 0; slot < ED_WCS_VIEW_SLOTS; slot++)
+        if (m->wcs_view[slot] && m->wcs_view_line[slot] == line)
+            return m->wcs_view[slot];
+
+    slot = m->wcs_view_next;
+    m->wcs_view_next = (slot + 1) % ED_WCS_VIEW_SLOTS;
+    need = ln->len + 1;
+
+    if (m->wcs_view_cap[slot] < need)
+    {
+        buf = (wchar_t *)realloc(m->wcs_view[slot], (size_t)need * sizeof(wchar_t));
+
+        if (!buf)
+            return NULL;
+
+        m->wcs_view[slot] = buf;
+        m->wcs_view_cap[slot] = need;
+    }
+
+    buf = m->wcs_view[slot];
+
+    for (i = 0; i < ln->len; i++)
+        buf[i] = (wchar_t)ed_line_char(ln, i);
+
+    buf[ln->len] = L'\0';
+    m->wcs_view_line[slot] = line;
+
+    return buf;
 }
 
 int ed_line_len(const Ed *ed, int line)
@@ -4680,7 +5200,6 @@ int ed_word_count(Ed *ed)
 
 int ed_line_utf8(const Ed *ed, int line, char *buf, int bufsz)
 {
-    const wchar_t *wcs = NULL;
     int wlen;
     int i;
     int n;
@@ -4694,7 +5213,6 @@ int ed_line_utf8(const Ed *ed, int line, char *buf, int bufsz)
         return -1;
     }
 
-    wcs = ed->lines[line]->wcs;
     wlen = ed->lines[line]->len;
 
     /* Convert line to UTF-8 in buf; return bytes written or -1 on truncate */
@@ -4703,7 +5221,7 @@ int ed_line_utf8(const Ed *ed, int line, char *buf, int bufsz)
     for (i = 0; i < wlen; i++)
     {
         int need;
-        cp = (unsigned long)wcs[i];
+        cp = (unsigned long)ed_line_char(ed->lines[line], i);
 
         need = (cp < 0x80) ? 1 : (cp < 0x800) ? 2
                              : (cp < 0x10000) ? 3
@@ -4775,8 +5293,8 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
     cur = ed->lines[ed->row];
 
     /* Convert the current line split at the cursor into UTF-8 */
-    prefix = wcs_to_utf8(cur->wcs, ed->col);
-    suffix = wcs_to_utf8(&cur->wcs[ed->col], cur->len - ed->col);
+    prefix = line_to_utf8(cur, 0, ed->col);
+    suffix = line_to_utf8(cur, ed->col, cur->len - ed->col);
 
     if (!prefix || !suffix)
     {
@@ -4869,8 +5387,10 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
 
 int ed_paste_text_with_undo(Ed *ed, const char *utf8_text)
 {
-    int cursor_row_before, cursor_col_before;
-    int cursor_row_after, cursor_col_after;
+    int cursor_row_before;
+    int cursor_col_before;
+    int cursor_row_after;
+    int cursor_col_after;
     EdInfo info;
     UndoGroup *g = NULL;
 
@@ -4974,14 +5494,11 @@ static int ed_sort_cmp(const void *a, const void *b)
 
     for (i = 0; i < n; i++)
     {
-        wchar_t ca = la->wcs[i];
-        wchar_t cb = lb->wcs[i];
+        wchar_t ca = (wchar_t)ed_line_char(la, i);
+        wchar_t cb = (wchar_t)ed_line_char(lb, i);
 
-        if (ca >= L'A' && ca <= L'Z')
-            ca = (wchar_t)(ca + 32);
-
-        if (cb >= L'A' && cb <= L'Z')
-            cb = (wchar_t)(cb + 32);
+        ca = (wchar_t)towlower((wint_t)ca);
+        cb = (wchar_t)towlower((wint_t)cb);
 
         if (ca != cb)
             return ca < cb ? -1 : 1;
@@ -4992,7 +5509,10 @@ static int ed_sort_cmp(const void *a, const void *b)
 
 int ed_sort_block_lines(Ed *ed)
 {
-    int r1, c1, r2, c2;
+    int r1;
+    int c1;
+    int r2;
+    int c2;
     int n;
     int i;
     EdLine **arr = NULL;
@@ -5080,7 +5600,10 @@ int ed_sort_block_lines(Ed *ed)
 
 int ed_convert_block_case(Ed *ed, int mode)
 {
-    int r1, c1, r2, c2;
+    int r1;
+    int c1;
+    int r2;
+    int c2;
     int li;
     char *snapshot_before = NULL;
     char *snapshot_after = NULL;
@@ -5151,17 +5674,17 @@ int ed_convert_block_case(Ed *ed, int mode)
 
         for (i = start; i < end; i++)
         {
-            wchar_t c = ln->wcs[i];
+            wchar_t c = (wchar_t)ed_line_char(ln, i);
 
             if (mode == 0)
             {
                 if (c >= L'a' && c <= L'z')
-                    ln->wcs[i] = (wchar_t)(c - 32);
+                    line_put_raw(ln, i, (unsigned int)(c - 32));
             }
             else if (mode == 1)
             {
                 if (c >= L'A' && c <= L'Z')
-                    ln->wcs[i] = (wchar_t)(c + 32);
+                    line_put_raw(ln, i, (unsigned int)(c + 32));
             }
             else
             {
@@ -5172,14 +5695,14 @@ int ed_convert_block_case(Ed *ed, int mode)
                     if (!in_word_state)
                     {
                         if (c >= L'a' && c <= L'z')
-                            ln->wcs[i] = (wchar_t)(c - 32);
+                            line_put_raw(ln, i, (unsigned int)(c - 32));
 
                         in_word_state = 1;
                     }
                     else
                     {
                         if (c >= L'A' && c <= L'Z')
-                            ln->wcs[i] = (wchar_t)(c + 32);
+                            line_put_raw(ln, i, (unsigned int)(c + 32));
                     }
                 }
                 else

@@ -63,85 +63,6 @@ extern int amiga_add_ttf_fallback(const char *path, int size);
 #include "ui/ui_translate.h"
 #endif
 
-/* Read a whole file into a malloc'd UTF-8 buffer with charset conversion */
-static char *load_file(const char *path, TeApp *app)
-{
-    FILE *fp = NULL;
-    long size;
-    char *buf = NULL;
-    size_t r;
-
-    fp = fopen(path, "rb");
-
-    if (!fp)
-        return NULL;
-
-    fseek(fp, 0, SEEK_END);
-    size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
-    if (size < 0)
-    {
-        fclose(fp);
-        return NULL;
-    }
-
-    if ((size_t)size > SIZE_MAX - 1)
-    {
-        fclose(fp);
-        return NULL;
-    }
-
-    buf = (char *)malloc((size_t)size + 1);
-
-    if (!buf)
-    {
-        fclose(fp);
-        return NULL;
-    }
-
-    r = fread(buf, 1, (size_t)size, fp);
-
-    fclose(fp);
-
-    buf[r] = '\0';
-
-    /* Convert to UTF-8 if needed */
-    if (app->charset_in[0] && strcasecmp(app->charset_in, "UTF-8") != 0 && strcasecmp(app->charset_in, "UTF8") != 0)
-    {
-        size_t outsz = (size_t)r * 4 + 16;
-        char *utf8 = NULL;
-
-        if (r > (SIZE_MAX - 16) / 4)
-        {
-            free(buf);
-            return NULL;
-        }
-
-        utf8 = (char *)malloc(outsz);
-
-        if (utf8)
-        {
-            int wrote = charset_body_to_utf8(app->charset_in, buf, (int)r, utf8, (int)outsz);
-
-            if (wrote >= 0)
-            {
-                utf8[wrote] = '\0';
-
-                free(buf);
-
-                return utf8;
-            }
-            else
-            {
-                free(utf8);
-            }
-        }
-    }
-
-    return buf;
-}
-
 static void ui_init_locale(void)
 {
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
@@ -185,7 +106,6 @@ int main(int argc, char **argv)
 {
     TeApp *app = NULL;
     TeConfig cfg;
-    char *content = NULL;
     static char cfg_path_buf[512];
     const char *cfg_path = NULL;
     FILE *tty = NULL;
@@ -491,6 +411,14 @@ int main(int argc, char **argv)
     app->cfg_path[sizeof(app->cfg_path) - 1] = '\0';
     app->cfg = cfg;
 
+    /* Initialize charset_in from config charset_in (default for loading files) */
+    strncpy(app->charset_in, cfg.charset_in, sizeof(app->charset_in) - 1);
+    app->charset_in[sizeof(app->charset_in) - 1] = '\0';
+
+    /* Initialize charset_out from config charset_out (default for saving files) */
+    strncpy(app->charset_out, cfg.charset_out, sizeof(app->charset_out) - 1);
+    app->charset_out[sizeof(app->charset_out) - 1] = '\0';
+
 #ifdef HAVE_HUNSPELL
     /* Initialize spell_enabled from config */
     app->spell_enabled = cfg.spell_enabled;
@@ -519,15 +447,6 @@ int main(int argc, char **argv)
     /* Load translator from config */
     ui_translate_load_from_config(app);
 #endif
-
-    /* Initialize charsets from config */
-    /* View charset is always UTF-8 by default */
-    strncpy(app->charset_in, "UTF-8", sizeof(app->charset_in) - 1);
-    app->charset_in[sizeof(app->charset_in) - 1] = '\0';
-
-    /* Save charset comes from config */
-    strncpy(app->charset_out, cfg.charset[0] ? cfg.charset : "UTF-8", sizeof(app->charset_out) - 1);
-    app->charset_out[sizeof(app->charset_out) - 1] = '\0';
 
     ui_editor_recent_load();
 
@@ -583,18 +502,27 @@ int main(int argc, char **argv)
                 }
                 else
                 {
-                    content = load_file(argv[1], app);
+                    FILE *fp = fopen(argv[1], "rb");
 
-                    if (content)
+                    if (fp)
                     {
-                        ed_load(tab->editor, content);
-                        free(content);
+                        int rc;
+
+                        ed_clear_undo_redo(tab->editor);
+                        rc = ed_load_stream_charset(tab->editor, fp, app->charset_in);
+
+                        fclose(fp);
+
+                        if (rc != 0)
+                            te_status(app, "Memory error during load");
                     }
                     else
                     {
                         te_status(app, "Cannot read: %s", argv[1]);
                     }
                 }
+
+                port_mem_release();
 
                 detected = ui_editor_detect_wrap_hyphens(app);
 
