@@ -3,43 +3,61 @@
 .Os
 .Sh NAME
 .Nm te
-.Nd lightweight text editor with spellchecker, thesaurus and charset conversion
+.Nd lightweight text editor with spellchecker, thesaurus, translator and charset conversion
 .Sh SYNOPSIS
 .Nm te
 .Op Ar file
 .Sh DESCRIPTION
 .Nm te
 is a lightweight text editor for Unix-like systems with full UTF-8 support,
-multiple charset conversion, configurable colors, undo/redo, search, clipboard,
+multiple charset conversion, syntax highlighting, configurable colors,
+undo/redo, search and replace, mouse support, bracketed paste, clipboard,
 tab system for editing multiple files, spellchecker, hyphenation, thesaurus,
-and editing assistance features.
+translator and editing assistance features.
 .Sh INITIAL CONFIGURATION
 On first run,
 .Nm te
-creates a configuration file at
-.Pa ~/.tinyedit.conf
+creates a configuration directory at
+.Pa ~/.tinyedit
+and a configuration file at
+.Pa ~/.tinyedit/config
 in the user's home directory. This file stores editor preferences including
-colors, charset settings, wrap mode, line numbers, spellchecker, and editing
-assistance features.
+colors, charset settings, wrap mode, line numbers, tab width, undo levels,
+spellchecker, hyphenation, thesaurus, translator and editing assistance features.
 .Sh SETUP
 The Setup menu (F4 or Alt+T) allows configuration of:
 .Bl -bullet -compact
 .It
-Default charset for saving files
+Default charset for reading and writing files
 .It
-Color schemes
+Color schemes and cursor color
 .It
-Hard/soft wrap mode
+Tab width and undo levels
+.It
+Hard/soft wrap mode and auto-wrap column
 .It
 Line numbers display
 .It
-Spellchecker settings (dictionary path, custom dictionary)
+Whitespace markers, bracket matching, current line highlight, indent guides,
+column ruler and wrap indicator
 .It
-Hyphenation settings
+Syntax highlighting
 .It
-Thesaurus settings
+Word count and auto-save interval
+.It
+Bracket auto-close and smart indent
+.It
+Spellchecker settings (dictionary path, dictionary name, custom dictionary)
+.It
+Hyphenation settings (dictionary path, hyphen wrap, detect on load)
+.It
+Thesaurus settings (dictionary path, dictionary name)
+.It
+Translator settings (backend, endpoint, API key, language pair, StarDict path)
 .It
 Editing assistance toggles (smart quotes, auto-cap, repeated words)
+.It
+Mouse and word movement style
 .It
 Other editor preferences
 .El
@@ -65,33 +83,96 @@ Press F9 or Alt+L to toggle the tabs panel visibility.
 .Sh LINE NUMBERS
 Line numbers can be enabled or disabled in Setup (Alt+D toggles).
 When enabled, line numbers are displayed in the left margin.
+.Sh MOUSE SUPPORT
+.Nm te
+supports mouse input in compatible terminals. Single click places the cursor,
+double click selects a word, triple click selects a paragraph, and drag extends
+the selection. The mouse wheel scrolls the document vertically. Mouse support
+can be enabled or disabled in Setup.
+.Sh BRACKETED PASTE
+On Unix terminals that support bracketed paste,
+.Nm te
+detects pasted text and prevents it from triggering keyboard shortcuts. A
+fallback rapid-paste detector is used for terminals without bracketed paste
+support.
+.Sh CLIPBOARD
+.Nm te
+supports block selection, copy, cut and paste. On Unix-like systems it uses
+.Xr xclip 1 ,
+.Xr xsel 1 ,
+.Xr wl-paste 1
+or
+.Xr pbpaste 1
+when available; in SSH sessions without an external clipboard backend it falls
+back to OSC 52 or an internal clipboard. Selected blocks can also be exported to
+a file.
+.Sh STATUS BAR
+The status bar at the bottom shows the current line and column, total line count,
+wrap mode (HARD/SOFT), spell checker indicator, insert/overwrite mode, word count
+when enabled, and program status messages. The title bar at the top shows the
+current filename, modified indicator and, on Unix, the process identifier.
 .Sh EDITOR
 .Nm te
-is a full-featured text editor with spellchecker, hyphenation, thesaurus,
-and editing assistance features.
+is a full-featured text editor with syntax highlighting, bracket matching,
+undo/redo, multiple selection modes and editing assistance features.
+.Ss Syntax Highlighting
+.Nm te
+provides syntax highlighting for C, C++, x86/m68k assembler and Amiga C. It is
+enabled by default and can be turned off in Setup. The editor highlights
+keywords, strings, comments, numbers, preprocessor directives and operators.
+.Ss Brackets and Current Line
+Bracket matching highlights matching pairs of (, [ and { on the same line. The
+current line can also be highlighted in the background when enabled in Setup.
+.Ss Whitespace, Guides, Ruler and Wrap Indicator
+.Nm te
+can display whitespace markers (tabs as arrows and trailing spaces as dots),
+indent guides at each tab stop, a column ruler and a soft-wrap indicator at the
+end of continued visual lines. Each of these can be toggled individually in
+Setup.
+.Ss Autoclose and Smart Indent
+When enabled, typing an opening bracket or quote inserts the matching closing
+character and leaves the cursor between them. Smart indent copies the leading
+whitespace of the previous line when pressing Enter.
+.Ss Word Count and Autosave
+.Nm te
+can show a word count in the status bar. Auto-save writes an atomic .swp copy
+next to the original file at a configurable interval when enabled.
+.Ss Insert/Overwrite and Word Movement
+The editor supports insert and overwrite modes. Word movement can be set to
+standard (alphanumeric plus underscore) or vim-like (non-space blocks).
+.Ss Go to Line
+Jump to a specific line number using the go-to-line dialog.
+.Ss Rewrap Paragraph
+The current paragraph can be rewrapped to the configured auto-wrap column.
+Rewrap uses hyphenation when enabled and a dictionary is loaded.
 .Ss Spellchecker
 .Nm te
 includes Hunspell-based spellchecking with support for multiple languages.
+Spellchecker settings are configured in Setup: enable/disable spellchecking, set
+the dictionary path, select the dictionary name (e.g., en_US, es_ES, de_DE,
+fr_FR), and specify a custom dictionary file.
 .Pp
-Spellchecker settings are configured in Setup.
-You can enable/disable spellchecking, set the dictionary path, select the dictionary
-name (e.g., en_US, es_ES, de_DE, fr_FR), and specify a custom dictionary file.
+Misspelled words are highlighted in red. The spell checker panel shows whether
+the current word is correct and provides suggestions for misspelled words.
+Accepted words can be added to the custom dictionary.
 .Pp
-Misspelled words are highlighted in red.
 Press Alt+P to check the word under cursor and see suggestions.
 Press Enter to accept a suggestion, ESC to cancel.
 Press Alt+H to toggle the spell checker panel.
 .Ss Hyphenation
 .Nm te
-supports hyphenation at the hard-wrap column when enabled.
-Hyphenation dictionaries follow the LibreOffice format (hyph_*.dic).
-Enable in Setup under "Hyphenation" section.
+supports hyphenation at the hard-wrap column when enabled. Hyphenation
+dictionaries follow the LibreOffice format (hyph_*.dic). Enable in Setup under
+the "Hyphenation" section. A hyphenation detect-on-load option can identify
+existing wrap-hyphens when opening files.
+.Pp
 Press Alt+E to toggle hyphen wrap mode.
 .Ss Thesaurus
 .Nm te
-includes thesaurus support (MyThes) for synonym lookup.
-Thesaurus dictionaries consist of .idx and .dat files (th_*).
-Access with Alt+A to see synonyms for the word under cursor.
+includes thesaurus support (MyThes) for synonym lookup. Thesaurus dictionaries
+consist of .idx and .dat files (th_*). Access with Alt+A to see synonyms for
+the word under cursor. The thesaurus can fall back to spell checker stemming
+when available.
 .Ss Editing Assistance
 .Nm te
 provides real-time editing assistance features:
@@ -129,6 +210,13 @@ Case-insensitive comparison
 .El
 .Pp
 These features can be toggled individually in Setup under "Editor Assistance".
+.Sh TRANSLATOR
+.Nm te
+includes a translator panel that can be compiled with online translation
+backends (MyMemory, LibreTranslate, Lingva or DeepL) or offline StarDict
+dictionaries. Configure the backend, endpoint, API key, source/target language
+pair and StarDict path in Setup. The panel is shared with the spell checker
+interface and can be cycled to show the translator or dictionary view.
 .Sh CHARSET CONVERSION
 .Nm te
 always works internally with UTF-8. There are two ways to configure charsets:
@@ -163,37 +251,25 @@ If you only change the save charset (Save), the file is not reloaded
 Available charsets: UTF-8, LATIN-1, LATIN-2, CP437, CP850, CP865, CP866, CP1252
 .Sh SEARCH
 .Nm te
-provides search functionality:
-.Bl -enum -compact
-.It
-Search (F5 or Alt+F):
-.Bl -bullet -compact
-.It
-Shows all matches in the document
-.It
-Navigate between matches with F3/Alt+P (previous) and F4/Alt+N (next)
-.El
-.It
-Find & replace (Ctrl+R):
-.Bl -bullet -compact
-.It
-Search and replace text with a popup dialog
-.El
-.It
-Replace all (F6 or Alt+B in search mode):
-.Bl -bullet -compact
-.It
-Replace all matches at once
-.El
-.El
-.Pp
-Press ESC to exit search mode.
+provides search and replace functionality with optional case-sensitive and
+whole-word matching. Search results are highlighted in the document and can be
+navigated forward and backward. Replace supports replacing a single occurrence
+or all occurrences at once. Press ESC to exit search mode.
 .Sh UNICODE GLYPHS
 Press F8 or Alt+U to open the Unicode glyph picker, which allows insertion
 of any Unicode character by browsing and selecting from the full Unicode
 character set.
 .Sh FILE OPERATIONS
-Press F7 or Alt+O to insert a file at the cursor position.
+.Nm te
+supports opening files, saving, save-as and inserting another file at the
+cursor position. The integrated file picker allows browsing directories and
+selecting files. When saving a file for the first time, the editor prompts for
+a filename.
+.Sh HELP
+.Nm te
+includes an integrated help panel that lists the available keyboard shortcuts
+and commands. Press F1 or Alt+Y to open it and see the full shortcut reference
+for the current build.
 .Sh KEYBOARD SHORTCUTS
 Basic navigation and editing shortcuts:
 .Bl -tag -width "Ctrl+Left/Right"
@@ -231,9 +307,13 @@ Toggle spell checker panel
 Thesaurus lookup
 .El
 .Sh FILES
-.Bl -tag -width "~/.tinyedit.conf"
-.It Pa ~/.tinyedit.conf
-User configuration file
+.Bl -tag -width "~/.tinyedit/config"
+.It Pa ~/.tinyedit/
+Configuration directory.
+.It Pa ~/.tinyedit/config
+User configuration file.
+.It Pa *.swp
+Auto-save swap files written next to the original file when auto-save is enabled.
 .El
 .Sh DICTIONARY FORMATS
 .Nm te
@@ -257,6 +337,16 @@ Thesaurus dictionaries:
 th_*.idx: Index file
 .It
 th_*.dat: Data file with synonym entries
+.El
+.Pp
+StarDict offline dictionaries:
+.Bl -bullet -compact
+.It
+.ifo file: Dictionary metadata
+.It
+.idx file: Index file
+.It
+.dict file: Dictionary data
 .El
 .Sh AUTHORS
 .An Tanausú M. Aq ervras@aim.com

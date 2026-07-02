@@ -291,18 +291,18 @@ void te_cfg_defaults(TeConfig *cfg)
 
     cfg->undo_levels = 50;
     cfg->autowrap_col = 75;
-    cfg->tab_width = 4;          /* tab stop width: 4 visual columns by default */
-    cfg->hard_wrap = 0;          /* soft-wrap by default */
-    cfg->show_line_numbers = 0;  /* line numbers disabled by default */
-    cfg->show_whitespace = 0;    /* whitespace markers off by default */
-    cfg->show_brackets = 0;      /* bracket highlight off by default */
-    cfg->syntax_enabled = 1;     /* syntax highlighting on by default */
-    cfg->highlight_line = 0;     /* current line highlight off */
-    cfg->word_count = 0;         /* word count off */
-    cfg->autoclose = 0;          /* bracket auto-close off */
-    cfg->smart_indent = 0;       /* smart indent off */
-    cfg->autosave = 0;           /* auto-save off */
-    cfg->autosave_interval = 30; /* 30 seconds default if enabled */
+    cfg->tab_width = 4;           /* tab stop width: 4 visual columns by default */
+    cfg->hard_wrap = 0;           /* soft-wrap by default */
+    cfg->show_line_numbers = 0;   /* line numbers disabled by default */
+    cfg->show_whitespace = 0;     /* whitespace markers off by default */
+    cfg->show_brackets = 0;       /* bracket highlight off by default */
+    cfg->syntax_enabled = 1;      /* syntax highlighting on by default */
+    cfg->highlight_line = 0;      /* current line highlight off */
+    cfg->word_count = 0;          /* word count off */
+    cfg->autoclose = 0;           /* bracket auto-close off */
+    cfg->smart_indent = 0;        /* smart indent off */
+    cfg->autosave = 0;            /* auto-save off */
+    cfg->autosave_interval = 300; /* 300 seconds default if enabled */
 
     cfg->ruler_col = 0;      /* column ruler off */
     cfg->indent_guides = 0;  /* indent guides off */

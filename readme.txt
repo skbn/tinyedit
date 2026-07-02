@@ -4,16 +4,21 @@ Main features:
 - Full UTF-8 support with charset conversion (internal UTF-8, configurable output)
 - Multiple charsets: UTF-8, LATIN-1/2, CP437, CP850, CP865, CP866, CP1252
 - TTF rendering with full Unicode support (including emojis) on AmigaOS
-- Configurable colors and fonts
+- Tabbed interface for editing multiple files
+- Syntax highlighting (C/C++, x86/m68k asm, Amiga C) with bracket matching and current line highlight
+- Configurable colors (and TTF fonts on AmigaOS)
 - Auto-wrap and hard-wrap modes
 - Undo/redo support
-- Search functionality
+- Search and replace functionality
+- Mouse support (terminal, SSH and remote sessions)
 - Clipboard support
 - Bracketed paste support (Unix/Linux)
 - Configurable via file or menu
 
 Building
-AmigaOS requires ttengine.library from https://aminet.net/package/util/libs/ttengine-68k
+AmigaOS requires FreeType, libpng and zlib. Extract freetype-2.14.3.tar.xz, libpng-1.6.58.tar.xz and zlib.tar.gz in the tinyedit directory and rename them to freetype, libpng and zlib. Use bebbo gcc
+
+For Linux/BSD/macOS use Makefile.unix; for Windows use Makefile.win32. Optional features are enabled with USE_HUNSPELL=1, USE_HYPHEN=1, USE_MYTHES=1, USE_TRANSLATE=1, USE_STARDICT=1
 
 Getting Started
 
@@ -24,10 +29,10 @@ Or open a file directly:
 tinyedit my_file.txt
 
 Save
-Press F2 or Ctrl+S. The first time it will ask for a filename.
+Press F2 or Ctrl+S. The first time it will ask for a filename
 
 Exit
-Press ESC or F10. If you have unsaved changes, it will ask for confirmation.
+Press ESC or F10. If you have unsaved changes, it will ask for confirmation
 
 Copy and paste
 1. Go to the start of the text you want to copy
@@ -37,7 +42,7 @@ Copy and paste
 5. Go to where you want to paste
 6. Press Ctrl+V to paste
 
-You can also cut with Ctrl+X, or export the block to a file with Ctrl+O.
+You can also cut with Ctrl+X, or export the block to a file with Ctrl+O
 
 Search text
 1. Press F5 or Alt+F
@@ -60,22 +65,22 @@ Search and replace
 8. F6 or Alt+B replaces all occurrences
 
 Undo mistakes
-Press Ctrl+Z to undo. Alt+Z to redo.
+Press Ctrl+Z to undo. Alt+Z to redo
 
 Go to a line
-Press Ctrl+Q, type the line number, and press Enter.
+Press Alt+G, type the line number, and press Enter
 
 Go to start/end of document
-Ctrl+G goes to the start. Ctrl+K goes to the end.
+Ctrl+G goes to the start. Ctrl+K goes to the end
 
 Insert another file
-Press F7 or Alt+O, select the file, and it will be inserted at the cursor position.
+Press F7 or Alt+O, select the file, and it will be inserted at the cursor position
 
 Open new file
-Ctrl+N creates a new file (clears current content). Ctrl+L opens a file (also clears current content).
+Ctrl+N creates a new file (clears current content). Ctrl+L opens a file (also clears current content)
 
 Configure
-Press F4 or Alt+T to change colors, adjust line width, and other options.
+Press F4 or Alt+T to change colors, adjust line width, and other options
 - Use arrow keys to move between fields
 - Press Enter or Space to edit
 - F10 or S saves the configuration
@@ -101,7 +106,7 @@ tinyedit always works internally with UTF-8. There are two ways to configure cha
 
 Practical example:
   - You want all your files to be saved in CP437 by default:
-  - Press F4 or Alt+S, go to "Charset", select CP437, save with F10 or S
+  - Press F4 or Alt+T, go to "Charset", select CP437, save with F10 or S
   - You open a DOS file (CP437) and see strange characters:
   - Press F3 or Alt+C, select CP437 as View charset
   - The file is reloaded from disk converted to UTF-8
@@ -119,18 +124,15 @@ Available charsets:
 - LATIN-2 (ISO-8859-2, Central European)
 
 Other useful shortcuts
-- Ctrl+W: rewrap paragraph (adjusts line width)
+- Ctrl+W: rewrap FTN reply quote block
 - Ctrl+Y: delete current line
-- Ctrl+T: delete word to the right
-- Ctrl+_: delete word to the left
 - Ctrl+B / Home: start of line
 - Ctrl+E / End: end of line
 - Ctrl+U / PgUp: page up
 - Ctrl+D / PgDn: page down
 - Ctrl+Left/Right: move word left/right
-- Tab: insert tab (4 spaces)
+- Tab: insert tab (default width 4)
 - Ins / Alt+I: toggle insert/overwrite
 
 Help
-Press F1 or ? at any time to see keyboard shortcuts.
-
+Press F1 or Alt+Y at any time to see keyboard shortcuts

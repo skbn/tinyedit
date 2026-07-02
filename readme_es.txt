@@ -24,10 +24,10 @@ O abre un archivo directamente:
 tinyedit mi_archivo.txt
 
 Guardar
-Presiona F2 o Ctrl+S. La primera vez te pedirá un nombre de archivo.
+Presiona F2 o Ctrl+S. La primera vez te pedirá un nombre de archivo
 
 Salir
-Presiona ESC o F10. Si tienes cambios sin guardar, te preguntará.
+Presiona ESC o F10. Si tienes cambios sin guardar, te preguntará
 
 Copiar y pegar
 1. Ve al inicio del texto que quieres copiar
@@ -60,22 +60,22 @@ Buscar y reemplazar
 8. F6 o Alt+B reemplaza todas las ocurrencias
 
 Deshacer errores
-Presiona Ctrl+Z para deshacer. Alt+Z para rehacer.
+Presiona Ctrl+Z para deshacer. Alt+Z para rehacer
 
 Ir a una línea
-Presiona Ctrl+Q, escribe el número de línea, y Enter.
+Presiona Ctrl+Q, escribe el número de línea, y Enter
 
 Ir al inicio/final del documento
 Ctrl+G va al inicio. Ctrl+K va al final.
 
 Insertar otro archivo
-Presiona F7 o Alt+O, selecciona el archivo, y se inserta donde está el cursor.
+Presiona F7 o Alt+O, selecciona el archivo, y se inserta donde está el cursor
 
 Abrir archivo nuevo
-Ctrl+N crea un archivo nuevo (borra el contenido actual). Ctrl+L abre un archivo (también borra el contenido actual).
+Ctrl+N crea un archivo nuevo (borra el contenido actual). Ctrl+L abre un archivo (también borra el contenido actual)
 
 Configurar
-Presiona F4 o Alt+T para cambiar colores, ajustar el ancho de línea, y otras opciones.
+Presiona F4 o Alt+T para cambiar colores, ajustar el ancho de línea, y otras opciones
 - Usa las flechas para moverte entre campos
 - Presiona Enter o Espacio para editar
 - F10 o S guarda la configuración
