@@ -198,6 +198,18 @@ static void line_move(EdLine *ln, int dst, int src, int n)
     memmove(base + (size_t)dst * (size_t)ln->cw, base + (size_t)src * (size_t)ln->cw, (size_t)n * (size_t)ln->cw);
 }
 
+static size_t line_hdr_bytes(void)
+{
+    /* Struct size rounded up so the inline text area stays aligned */
+    return (sizeof(EdLine) + 3u) & ~(size_t)3u;
+}
+
+static int line_text_inline(const EdLine *ln)
+{
+    /* Inline text lives right after the struct in the same allocation */
+    return (const char *)ln->text == (const char *)ln + line_hdr_bytes();
+}
+
 static void *line_mem_alloc(EdLine *ln, size_t n)
 {
     /* Allocate a text buffer from the owning pool or the heap */
@@ -277,7 +289,10 @@ static int line_reserve(EdLine *ln, int need)
         return -1;
 
     memcpy(t, ln->text, (size_t)(ln->len + 1) * (size_t)ln->cw);
-    line_mem_free(ln, ln->text, (size_t)ln->cap * (size_t)ln->cw);
+
+    /* The inline area is part of the struct block, so only free external text */
+    if (!line_text_inline(ln))
+        line_mem_free(ln, ln->text, (size_t)ln->cap * (size_t)ln->cw);
 
     ln->text = t;
     ln->cap = nc;
@@ -319,7 +334,9 @@ static int line_widen(EdLine *ln, int w)
             d4[i] = ed_line_char(ln, i);
     }
 
-    line_mem_free(ln, ln->text, (size_t)ln->cap * (size_t)ln->cw);
+    /* The inline area is part of the struct block, so only free external text */
+    if (!line_text_inline(ln))
+        line_mem_free(ln, ln->text, (size_t)ln->cap * (size_t)ln->cw);
 
     ln->text = t;
     ln->cw = w;
@@ -345,15 +362,12 @@ static EdLine *line_build(Ed *ed, const wchar_t *src, int len, int cap)
     unsigned int cp;
     int i;
     int w;
+    size_t hdr;
+    size_t txt;
 
     /* Shared constructor for line_new() and line_new_take() */
     if (cap < len + 1)
         cap = len + 1;
-
-    ln = (EdLine *)ed_pool_alloc(ed, sizeof(EdLine));
-
-    if (!ln)
-        return NULL;
 
     /* Choose the narrowest element size that fits the whole source */
     w = 1;
@@ -372,17 +386,27 @@ static EdLine *line_build(Ed *ed, const wchar_t *src, int len, int cap)
             w = 2;
     }
 
+    hdr = line_hdr_bytes();
+
+    if ((size_t)cap > ((size_t)-1 - hdr) / (size_t)w)
+        return NULL;
+
+    txt = (size_t)cap * (size_t)w;
+
+    if (txt > (size_t)INT_MAX)
+        return NULL;
+
+    /* One allocation holds both the struct and its inline text area */
+    ln = (EdLine *)ed_pool_alloc(ed, hdr + txt);
+
+    if (!ln)
+        return NULL;
+
     ln->cw = w;
     ln->cap = cap;
     ln->len = len;
-
-    ln->text = ed_pool_alloc(ed, (size_t)cap * (size_t)w);
-
-    if (!ln->text)
-    {
-        ed_pool_free(ed, ln, sizeof(EdLine));
-        return NULL;
-    }
+    ln->text = (char *)ln + hdr;
+    ln->emb = (int)txt;
 
 #if defined(PLATFORM_AMIGA)
     ln->mem_pool = ed ? ed->mem_pool : NULL;
@@ -443,13 +467,20 @@ static void line_free(EdLine *ln)
 #if defined(PLATFORM_AMIGA)
     if (ln->mem_pool)
     {
-        FreePooled((APTR)ln->mem_pool, ln->text, (ULONG)((size_t)ln->cap * (size_t)ln->cw));
-        FreePooled((APTR)ln->mem_pool, ln, (ULONG)sizeof(EdLine));
+        /* FreePooled needs the exact original size: header plus inline area */
+        size_t total = line_hdr_bytes() + (size_t)ln->emb;
+
+        if (!line_text_inline(ln))
+            FreePooled((APTR)ln->mem_pool, ln->text, (ULONG)((size_t)ln->cap * (size_t)ln->cw));
+
+        FreePooled((APTR)ln->mem_pool, ln, (ULONG)total);
         return;
     }
 #endif
 
-    free(ln->text);
+    if (!line_text_inline(ln))
+        free(ln->text);
+
     free(ln);
 }
 

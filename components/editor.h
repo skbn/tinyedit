@@ -51,6 +51,7 @@ typedef struct
     int has_wrap_hyphen;  /* 1 if last char is an artificial wrap-hyphen */
     int wrap_count_cache; /* -1 = invalid, otherwise cached visual rows */
     int wrap_cache_width; /* Width for which wrap_count_cache is valid */
+    int emb;              /* Byte size of the text area allocated inline with the struct */
 
 #if defined(PLATFORM_AMIGA)
     void *mem_pool; /* Owning Ed's memory pool, NULL => plain malloc */
