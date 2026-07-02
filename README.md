@@ -8,12 +8,13 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 - Multiple charsets: UTF-8, LATIN-1/2, CP437, CP850, CP865, CP866, CP1252
 - TTF rendering with full Unicode support (including emojis) on AmigaOS
 - Tab system for editing multiple files simultaneously
-- Spell checker with native implementation (AmigaOS/Windows) or Hunspell integration (*nix)
-- Hyphenation with native implementation (AmigaOS/Windows) or libhyphen (*nix)
-- Thesaurus with native implementation (AmigaOS/Windows) or libmythes (*nix)
+- Syntax highlighting (C, C++, x86/m68k asm, Amiga C) with bracket matching and current-line highlight
+- Spell checker with native implementation (AmigaOS/Windows) or Hunspell integration (*nix) (optional, USE_HUNSPELL=1)
+- Hyphenation with native implementation (AmigaOS/Windows) or libhyphen (*nix) (optional, USE_HYPHEN=1)
+- Thesaurus with native implementation (AmigaOS/Windows) or libmythes (*nix) (optional, USE_MYTHES=1)
 - Translator panel with online support and StarDict-compatible offline dictionary
 - Mouse support (works in terminal, SSH and remote sessions)
-- Configurable colors and fonts
+- Configurable colors (and TTF fonts on AmigaOS)
 - Auto-wrap and hard-wrap modes
 - Undo/redo support
 - Text search
@@ -25,9 +26,17 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 
 ### Linux/BSD/macOS
 
-To compile with external libraries (Hunspell, libhyphen, libmythes, libcurl):
+To compile the base version (without optional external libraries):
 ```bash
 make -f Makefile.unix
+```
+
+To compile with external libraries (Hunspell, libhyphen, libmythes, libcurl), enable the desired flags:
+```bash
+make -f Makefile.unix USE_HUNSPELL=1
+make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1
+make -f Makefile.unix USE_TRANSLATE=1 USE_STARDICT=1
+make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1 USE_TRANSLATE=1 USE_STARDICT=1
 ```
 
 To compile with native implementations (without installing external libraries):
@@ -65,25 +74,6 @@ Dictionaries, hyphenation patterns and thesaurus data:
 - FreeBSD: `doas pkg install es-hunspell en-hunspell es-hyphen en-mythes es-mythes`
 - macOS: Dictionary files are included with hunspell
 
-```bash
-make -f Makefile.unix USE_HUNSPELL=1
-```
-
-Or combine with hyphenation and thesaurus:
-```bash
-make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1
-```
-
-Or with translator support (HTTP backends + StarDict-compatible offline dictionary):
-```bash
-make -f Makefile.unix USE_TRANSLATE=1 USE_STARDICT=1
-```
-
-Or with all features:
-```bash
-make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1 USE_TRANSLATE=1 USE_STARDICT=1
-```
-
 To compile with native spell checker (spellchecker/ like AmigaOS):
 ```bash
 make -f Makefile.unix.static
@@ -99,49 +89,45 @@ To compile with native spell checker (spellchecker/ like AmigaOS):
 make -f Makefile.win32 USE_HUNSPELL=1
 ```
 
-The Windows version includes the same native implementation as AmigaOS for:
+When compiled with `USE_HUNSPELL=1`, the Windows version includes the same native implementation as AmigaOS for:
 - Spell checker (compatible with hunspell .aff/.dic files)
-- Hyphenation (compatible with hyph_*.dic files, implements Liang algorithm)
-- Thesaurus (compatible with mythes th_*.idx/dat files)
+- Hyphenation (compatible with hyph_*.dic files, implements Liang algorithm) (requires `USE_HYPHEN=1`)
+- Thesaurus (compatible with mythes th_*.idx/dat files) (requires `USE_MYTHES=1`)
 
 ### AmigaOS
+
+For AmigaOS the program uses FreeType with libpng and zlib for TTF rendering.
+
+Using bebbo gcc:
+
+- libpng: https://www.libpng.org/
+- zlib: https://www.zlib.net/
+- FreeType: https://freetype.org/
+
+To compile, in the tinyedit directory extract freetype-2.14.3.tar.xz,
+libpng-1.6.58.tar.xz, and zlib.tar.gz and rename them to `freetype`, `zlib`, and `libpng`.
+
+To prepare headers and build:
 ```bash
-For AmigaOS the program uses ttengine or freetype with libpng and zlib
+make -f Makefile.amiga unprep
+make -f Makefile.amiga prep
+make -f Makefile.amiga clean all
+```
 
-Using bebbo gcc
+To build with native spell checker, hyphenation and thesaurus (optional):
+```bash
+make -f Makefile.amiga USE_HUNSPELL=1 clean all
+make -f Makefile.amiga USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1 clean all
+```
 
-https://aminet.net/package/util/libs/ttengine-68k
+The AmigaOS version includes native implementations for (enable at build time):
+- Spell checker (compatible with hunspell .aff/.dic files) (`USE_HUNSPELL=1`)
+- Hyphenation (compatible with hyph_*.dic files, implements Liang algorithm) (`USE_HUNSPELL=1 USE_HYPHEN=1`)
+- Thesaurus (compatible with mythes th_*.idx/dat files) (`USE_HUNSPELL=1 USE_MYTHES=1`)
 
-libpng: https://www.libpng.org/
-zlib: https://zlib.net/
-FreeType: https://freetype.org/
+These are pure implementations designed for AmigaOS with LRU cache, no C++ dependencies.
 
-To compile:
-
-In the tinyedit directory:
-
-For ttengine.library: make -f Makefile.amiga
-
-For static freetype with libpng and zlib:
-Extract freetype-2.14.3.tar.xz, libpng-1.6.58.tar.xz, and zlib.tar.gz
-in TinyEdit and rename them to freetype, zlib, and libpng.
-
-To prepare headers:
-make -f Makefile.amiga.te unprep
-make -f Makefile.amiga.te prep
-make -f Makefile.amiga.te clean all
-
-Native spell checker, hyphenation and thesaurus (default):
-make -f Makefile.amiga all
-
-The AmigaOS version includes native implementations for:
-- Spell checker (compatible with hunspell .aff/.dic files)
-- Hyphenation (compatible with hyph_*.dic files, implements Liang algorithm)
-- Thesaurus (compatible with mythes th_*.idx/dat files)
-
-These are pure implementations designed for AmigaOS with LRU cache, no C++ dependencies
-
-**Note**: Online translator support on AmigaOS requires AmiSSL for HTTPS connections
+**Note**: Online translator support on AmigaOS requires AmiSSL for HTTPS connections.
 
 Tested Freetype fonts:
 
@@ -151,11 +137,6 @@ NotoColorEmoji-emojicompat.ttf
 Symbola_hint.ttf
 NotoSansCJK-Regular.ttf
 NotoColorEmoji.ttf
-DejaVuSansMono.ttf
-LiberationMono-Regular.ttf
-
-With ttengine:
-
 DejaVuSansMono.ttf
 LiberationMono-Regular.ttf
 
@@ -170,7 +151,7 @@ For Spanish and English, download from LibreOffice Dictionaries Collection:
 - English (US): en_US.aff and en_US.dic from en_US/ directory
 
 Dictionary location:
-- **AmigaOS**: Place .aff and .dic files in `ENVARC:tinyedit/dictionaries` directory
+- **AmigaOS**: Place .aff and .dic files in `ENVARC:dictionaries` directory (or configure SPELL_DICT_PATH)
 - **Windows**: Place files in the directory configured in Setup (default: program directory)
 - **Unix/*nix**: Place files in the directory configured in Setup (default: `/usr/share/hunspell` or similar)
 
@@ -180,20 +161,7 @@ StarDict-compatible dictionaries for offline lookup:
 - Or from https://freedict.org/downloads/ (CC-licensed bilinguals)
 - Place .ifo, .idx, and .dict files in the dictionary directory configured in Setup
 
-The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA
-```
-
-### Windows
-```bash
-From msys2 with mingw x32 or x64
-
-make -f Makefile.win32
-```
-
-To compile with native spell checker (spellchecker/ like AmigaOS):
-```bash
-make -f Makefile.win32 USE_HUNSPELL=1
-```
+The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA.
 
 ## Hyphenation and Thesaurus Support
 
@@ -260,7 +228,6 @@ From Setup (F4) you can configure:
 - **Auto-wrap column**: Column to wrap text to (0 = disabled, default 75)
 - **Hard wrap**: Enable/disable hard-wrap mode
 - **Line numbers**: Show/hide line numbers
-- **Font**: Interface font (AmigaOS)
 - **TTF settings**: TTF font configuration (AmigaOS)
 - **Colors**: Interface colors
 - **Spell checker**: Spell checker configuration (if compiled with support)
@@ -271,7 +238,7 @@ From Setup (F4) you can configure:
 
 tinyedit works internally with UTF-8 and provides flexible charset conversion:
 
-- **Default charset**: Configurable via Setup (F4) - used when saving files
+- **Default charset**: Configurable via Setup (F4) - used as default for reading and saving files
 - **Per-file charset**: Temporary override via F3 to view/save specific files
 - **TTF encoding** (AmigaOS): UTF-8 mode supports full Unicode (0x000000-0x10FFFF) including emojis
 
@@ -300,16 +267,15 @@ Configuration:
 
 tinyedit can show or hide line numbers in the left margin:
 
-- Enable/disable from Setup
 - Useful for navigation and reference in large files
-- Each tab can have its own line number configuration
+- Toggle line numbers globally from Setup (Alt+D)
 
 ## Clipboard
 
 tinyedit supports system clipboard:
 
 - **AmigaOS/Windows**: Uses clipboard.device or Windows clipboard automatically
-- **Unix/*nix**: Uses xclip or wl-clipboard if available
+- **Unix/*nix**: Uses xclip, xsel, wl-paste or pbpaste if available; falls back to OSC 52 in SSH sessions
 - **SSH**: In SSH sessions, uses internal clipboard if no external backend is available
 - Copy/cut blocks to system clipboard automatically
 
@@ -360,7 +326,6 @@ tinyedit allows inserting the content of another file at the cursor position:
 tinyedit includes text editing commands:
 
 - **Delete line**: Delete current line
-- **Delete word**: Delete word to the left or right of cursor
 - **Insert/overwrite mode**: Toggle between inserting and overwriting text
 
 ## Navigation
@@ -396,14 +361,14 @@ On AmigaOS, tinyedit supports TTF rendering with advanced options:
 
 tinyedit includes an integrated help system:
 
-- Press F1 or ? to view available keyboard shortcuts
+- Press F1 or Alt+Y to view available keyboard shortcuts
 - Help shows all commands and their key combinations
 
 ## Mouse Support
 
 tinyedit supports mouse in compatible terminals:
 
-- **Single click**: Place cursor and anchor block start
+- **Single click**: Place cursor (begin drag to extend selection)
 - **Double click**: Select word under pointer
 - **Triple click**: Select entire paragraph
 - **Drag**: Extend selection
@@ -425,8 +390,8 @@ The status bar at the bottom shows:
 The title bar at the top shows:
 
 - Current filename
-- Cursor information
-- Configured charset
+- Modified indicator
+- Wrapper/process identifier on Unix/*nix
 
 ## File Picker
 
@@ -434,7 +399,7 @@ tinyedit includes an integrated file picker:
 
 - **Open file**: Browse and select file to open
 - **Save as**: Specify name and path to save
-- **Select directory**: Browse directories for configuration
+- **Select directory**: Browse directories
 
 ## Tab System
 
@@ -454,7 +419,7 @@ tinyedit includes a spell checker panel and a translator panel:
 - **Spell Checker**: Verifies spelling of words in document using Hunspell (*nix) or native implementation (AmigaOS/Windows)
 - **Panel information**: Shows if the current word is correct or incorrect, and provides suggestions for misspelled words
 - **Custom dictionary**: Allows adding custom words that are saved to a custom dict file
-- **Translator**: Supports online translation via HTTP backends (MyMemory, LibreTranslate, Lingva) and offline dictionary lookup
+- **Translator**: Supports online translation via HTTP backends (MyMemory, LibreTranslate, Lingva, DeepL) and offline dictionary lookup
 - **StarDict-compatible offline dictionary**: Pure C implementation compatible with StarDict dictionary format (.ifo, .idx, .dict files), no external dependencies
 
 The panel can be toggled to show spell checker, translator, or dictionary interface (Alt+S cycles between them)
@@ -485,9 +450,7 @@ tinyedit includes thesaurus functionality to find synonyms:
 - Search synonyms of word under cursor
 - Integrates with spell checker for stemming fallback
 
-=========
-Screenshots
-=========
+## Screenshots
 
 ![AmigaOS 3.2](img/amiga.png)
 

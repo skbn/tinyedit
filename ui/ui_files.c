@@ -1476,8 +1476,6 @@ int ui_files_open_path(TeApp *app, const char *path)
 
         fclose(fp);
 
-        port_mem_release();
-
         if (rc != 0)
         {
             te_status(app, "Memory error during load");
@@ -1509,9 +1507,6 @@ int ui_files_open_path(TeApp *app, const char *path)
     }
 
     fclose(fp);
-
-    /* Hand back heap freed by the reload before continuing. */
-    port_mem_release();
 
     /* Update filename */
     te_app_set_filename(app, path);

@@ -522,8 +522,6 @@ int main(int argc, char **argv)
                     }
                 }
 
-                port_mem_release();
-
                 detected = ui_editor_detect_wrap_hyphens(app);
 
                 if (detected > 0)

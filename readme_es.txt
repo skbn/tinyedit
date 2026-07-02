@@ -37,7 +37,7 @@ Copiar y pegar
 5. Ve a donde quieres pegar
 6. Presiona Ctrl+V para pegar
 
-También puedes cortar con Ctrl+X, o exportar el bloque a un archivo con Ctrl+O.
+También puedes cortar con Ctrl+X, o exportar el bloque a un archivo con Ctrl+O
 
 Buscar texto
 1. Presiona F5 o Alt+F
@@ -132,5 +132,5 @@ Otros atajos útiles
 - Ins / Alt+I: toggle insert/overwrite
 
 Ayuda
-Presiona F1 o ? en cualquier momento para ver los atajos de teclado.
+Presiona F1 o ? en cualquier momento para ver los atajos de teclado
 

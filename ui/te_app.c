@@ -302,9 +302,6 @@ int te_app_close_tab(TeApp *app, int index)
     {
         te_tab_free(app->tabs[index]);
         app->tabs[index] = NULL;
-
-        /* Hand freed document memory back to the OS */
-        port_mem_release();
     }
 
     for (i = index; i < app->tab_count - 1; i++)

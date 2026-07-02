@@ -1268,7 +1268,6 @@ int charset_select(TeApp *app)
 
                 ed_clear_undo_redo(te_app_get_editor(app));
                 ed_load_stream_charset(te_app_get_editor(app), fp, cs);
-                port_mem_release();
                 fclose(fp);
             }
         }

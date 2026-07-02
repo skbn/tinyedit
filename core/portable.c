@@ -1501,9 +1501,6 @@ unsigned long pf_now_ms(void)
 }
 #else
 #include <sys/time.h>
-#if defined(__GLIBC__)
-#include <malloc.h>
-#endif
 
 unsigned long pf_now_ms(void)
 {
@@ -2049,12 +2046,4 @@ int pf_grep_files(const char *root_dir, const char *ext_csv, const char *needle,
         max_depth = 20;
 
     return pf_grep_walk(root_dir, ext_csv ? ext_csv : "", needle, 0, max_depth, cb, user, &stopped);
-}
-
-/* Return freed heap pages to the OS where supported (glibc) */
-void port_mem_release(void)
-{
-#if defined(__GLIBC__)
-    malloc_trim(0);
-#endif
 }
