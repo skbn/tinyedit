@@ -257,27 +257,82 @@ static int grab_source_text(TeApp *app, char **out_text, int *out_row_first, int
     return 0;
 }
 
-/* Replace lines [first..last] with `new_utf8`. Used by the "Replace" action of the popup */
+/* Replace lines [first..last] with new_utf8. Used by the "Replace" action of the popup */
 static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
 {
     Ed *ed = te_app_get_editor(app);
-    int row;
+    char *snapshot_before = NULL;
+    char *snapshot_after = NULL;
+    int old_count;
+    int new_count;
+    int cursor_row_before;
+    int cursor_col_before;
+    int cursor_row_after;
+    int cursor_col_after;
+    EdInfo info;
 
     if (!ed)
         return -1;
 
-    ed_save_undo(ed);
+    if (ed->undo_snapshot_mode)
+        return -1;
 
-    /* Delete the lines first..last */
-    ed_set_pos(ed, first, 0);
+    /* Open a single undo group covering the whole line-range replacement */
+    if (ed_undo_open_group(ed) != 0)
+        return -1;
 
-    for (row = first; row <= last; row++)
-        ed_delete_line(ed);
+    ed_get_info(ed, &info);
+    cursor_row_before = info.row;
+    cursor_col_before = info.col;
 
-    /* Insert new text via paste (handles newlines, undo, etc) */
-    ed_set_pos(ed, first, 0);
+    old_count = last - first + 1;
 
-    return ed_paste_text(ed, new_utf8);
+    /* Snapshot the original lines so undo can restore them in one step */
+    snapshot_before = ed_range_to_string(ed, first, last + 1);
+
+    if (!snapshot_before)
+    {
+        ed->undo_open = 0;
+        return -1;
+    }
+
+    /* Replace the whole range in one operation */
+    new_count = ed_replace_range_from_utf8(ed, first, old_count, new_utf8);
+
+    if (new_count <= 0)
+    {
+        free(snapshot_before);
+
+        ed->undo_open = 0;
+        return -1;
+    }
+
+    /* Snapshot the new lines for redo */
+    snapshot_after = ed_range_to_string(ed, first, first + new_count);
+
+    if (!snapshot_after)
+    {
+        free(snapshot_before);
+
+        ed->undo_open = 0;
+        return -1;
+    }
+
+    /* Place cursor at end of inserted text, like ed_paste_text does */
+    cursor_row_after = first + new_count - 1;
+    cursor_col_after = ed_line_len(ed, cursor_row_after);
+
+    ed->undo_open = 0;
+
+    /* Record one OP_SNAPSHOT_RANGE for the entire replacement */
+    if (undo_push_snapshot_range(ed, first, 0, snapshot_before, snapshot_after, old_count, new_count, cursor_row_before, cursor_col_before, cursor_row_after, cursor_col_after) != 0)
+        return -1;
+
+    ed_set_modified(ed, 1);
+    ed_prefix_invalidate_from(ed, first);
+    ed_ensure_visible(ed);
+
+    return 0;
 }
 
 /* Compact set of lang options for the popup. Order = display order */
@@ -484,7 +539,7 @@ int ui_translate_action(TeApp *app)
             ed_set_pos(ed, last, ed_line_len(ed, last));
             ed_enter(ed); /* line break */
 
-            if (ed_paste_text(ed, result) == 0)
+            if (ed_paste_text_with_undo(ed, result) == 0)
             {
                 te_status(app, "Inserted translation below paragraph");
 

@@ -1679,6 +1679,12 @@ static void recent_add_internal(const char *path)
         return;
     }
 
+    /* Duplicate before mutating list to avoid NULL entries */
+    moved = strdup(path);
+
+    if (!moved)
+        return;
+
     if (s_recent_count == RECENT_MAX)
     {
         free(s_recent_files[s_recent_count - 1]);
@@ -1688,7 +1694,7 @@ static void recent_add_internal(const char *path)
     for (i = s_recent_count; i > 0; i--)
         s_recent_files[i] = s_recent_files[i - 1];
 
-    s_recent_files[0] = strdup(path);
+    s_recent_files[0] = moved;
     s_recent_count++;
 }
 

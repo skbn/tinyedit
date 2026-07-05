@@ -1,0 +1,319 @@
+# gramcheck rule pack -- generated from LanguageTool by lt2rul.py
+# LanguageTool rules are LGPL; keep this file with its notice.
+LANG   de
+NAME   de (from LanguageTool)
+
+PUNCT_NO_SPACE_BEFORE ,.;:!?)
+PUNCT_SPACE_AFTER ,
+PUNCT_NO_SPACE_AFTER (
+PUNCT_NO_DOUBLE ,;
+EXCESSIVE_PUNCT 2
+WORD_CAP montag,dienstag,mittwoch,donnerstag,freitag,samstag,sonntag,januar,februar,märz,april,mai,juni,juli,august,september,oktober,november,dezember,deutschland,berlin,europa
+WORD_UPPER eu,uno,nato,bip,mwst,dna,usb,pdf,html,url
+ALL_CAPS_WORD 6
+REPEAT_WORD_SKIP der,die,das,und,oder,zu,ha,so
+BRACKET_PAIRS ()[]{}„“
+ARTICLE_FEM die,eine
+ARTICLE_MASC der,ein
+SENTENCE_TOO_LONG 30
+TOO_MANY_COMMAS 4 10
+WORD_DENSITY 3 12
+
+# 297 PAIR entries
+PAIR  air bnb              Airbnb  info  # Der Name des Online-Portals Airbnb wird zusammengeschrieben.
+PAIR  aller hand           allerhand  info  # Das Adverb allerhand wird zusammengeschrieben.
+PAIR  alles                Gute  info  # Meinten Sie Gute?
+PAIR  am                   Rhein  info  # Meinten Sie den Rhein (den Fluss)?
+PAIR  am eigenen           Leib  info  # Meinten Sie die Wendung "am eigenen Leib"?
+PAIR  am laufenden         Band  info  # &subanfang;Band&subende;
+PAIR  anbetracht           in  info  # Die korrekte Präposition hier ist in.
+PAIR  anders               als  info  # 'anders wie' ist umgangssprachlich. Verwenden Sie zum Ausdrücken von Ungleich...
+PAIR  angang               Anfang  info  # Meinten Sie Anfang?
+PAIR  angebot und          Nachfrage  info  # In dieser Redewendung wird Nachfrage als Nomen großgeschrieben.
+PAIR  angst                Angst  info  # Das Nomen Angst sollte großgeschrieben werden (außer in Redewendungen wie "an...
+PAIR  ans                  Eingemachte  info  # &inwend;wird Eingemachte großgeschrieben.
+PAIR  ans herz             gewachsen  info  # Meinten Sie gewachsen?
+PAIR  apache               OpenOffice  info  # Meinten Sie das freie Apache OpenOffice?
+PAIR  apartheit            Apartheid  info  # Meinten Sie wirklich 'Apartheit' (Feinheit, Eleganz) oder doch Apartheid (Pol...
+PAIR  art und              Weise  info  # &verw;Meinten Sie Weise (Art, Methode)?
+PAIR  astra zeneca         AstraZeneca  info  # Der Name des Pharmaunternehmens AstraZeneca wird ohne Leerzeichen geschrieben.
+PAIR  auf                  Wunsch  info  # Meinten Sie Wunsch?
+PAIR  auf                  Lager  info  # Das Nomen Lager wird großgeschrieben.
+PAIR  auf                  Anhieb  info  # Das Nomen Anhieb wird großgeschrieben.
+PAIR  auf                  Touren  info  # Das Nomen Touren wird großgeschrieben.
+PAIR  auf                  Angriff  info  # &subanfang;Angriff&subende;
+PAIR  auf dem              Trockenen  info  # In dieser Redewendung wird Trockenen nominalisiert und sollte daher großgesch...
+PAIR  auf die              Pelle  info  # &subanfang;Pelle&subende;
+PAIR  auf die              Schliche  info  # &inwend;'jmdm. auf die Schliche kommen' wird Schliche großgeschrieben.
+PAIR  auf die              Knie  info  # &subanfang;Knie&subende;
+PAIR  auf fall             jeden  info  # Meinten Sie jeden?
+PAIR  auf hohen            Hacken  info  # &subanfang;Hacken&subende;
+PAIR  auf passen           aufpassen  info  # aufpassen (aufmerksam sein) wird zusammengeschrieben.
+PAIR  auf rosen            gebettet  info  # Meinten Sie gebettet?
+PAIR  auf weiteres         bis  info  # Meinten Sie bis?
+PAIR  aufs                 Spiel  info  # &inwend;"aufs Spiel setzen" wird Spiel großgeschrieben.
+PAIR  aufs bringen         Tapet  info  # &verw;Meinten Sie Tapet?
+PAIR  auge behalten        im  info  # Grammatik: Meinten Sie im?
+PAIR  aus                  Versehen  info  # &inwend;'aus Versehen' wird Versehen großgeschrieben.
+PAIR  aus                  mehreren  info  # Meinten Sie mehreren?
+PAIR  aus den              Segeln  info  # &subanfang;Segeln&subende;
+PAIR  aus den              Latschen  info  # &subanfang;Latschen&subende;
+PAIR  ausklingst           ausklinkst  info  # &verw;Meinten Sie ausklinkst oder ausklingt?
+PAIR  bekannt              als  info  # Meinten Sie als?
+PAIR  beruf                von  info  # Hier scheint von die korrekte Präposition zu sein.
+PAIR  besseres wissen      wider  info  # Meinten Sie wider (wider = gegen, wieder = nochmals)?
+PAIR  best                 beste  info  # Meinten Sie beste?
+PAIR  bestehende           bereits  info  # Meinten Sie bereits?
+PAIR  bis                  Gültigkeit  info  # Meinten Sie Gültigkeit?
+PAIR  bis zum              Gehtnichtmehr  info  # Meinten Sie das Gehtnichtmehr?
+PAIR  bisherig             bisher  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  bitte                sprich  info  # Statt 'sprech' sollte hier eventuell sprich benutzt werden.
+PAIR  break even           Break-even  info  # Meinten Sie das Wort Break-even (= Gewinnschwelle, Wirtschaftsjargon)?
+PAIR  brief und            Siegel  info  # &verw;Meinten Sie Siegel?
+PAIR  chat gpt             ChatGPT  info  # ChatGPT (= Künstliche Intelligenz) wird zusammengeschrieben.
+PAIR  christi              Leib  info  # Meinten Sie den Leib (= Körper)?
+PAIR  christi himmelpfad   "Christi Himmelfahrt"  info  # Meinten Sie den Feiertag Christi Himmelfahrt?
+PAIR  cum ex               Cum-Ex  info  # Die gängige Schreibweise ist Cum-Ex (= Dividendenstripping).
+PAIR  damen und            Herren  info  # Möglicher Tippfehler: Meinten Sie Herren?
+PAIR  das                  Niveau  info  # Meinten Sie Niveau (Ebene, Stufe) statt Nivea (Kosmetikhersteller)?
+PAIR  das                  dass
+PAIR  den                  Katarern  info  # Wenn Sie den/die Einwohner Katars meinen, ist die standardsprachliche Form im...
+PAIR  denn je              gefragt  info  # Meinten Sie gefragt?
+PAIR  der                  zu  info  # Meinten Sie zu?
+PAIR  der                  Regen  info  # Meinten Sie das Nomen Regen, das großgeschrieben wird?
+PAIR  der nach             Reihe  info  # &subanfang;Reihe&subende;
+PAIR  der wegen            Liebe  info  # &subanfang;Liebe&subende;
+PAIR  dich                 bewirb  info  # Meinten Sie die Imperativform bewirb?
+PAIR  dich                 ergib  info  # Meinten Sie die Imperativform ergib?
+PAIR  die                  Zeit  info  # Meinten Sie das Nomen Zeit?
+PAIR  die                  "Spreu vom Weizen"  info  # Meinten Sie Spreu vom Weizen (= Teil einer Redewendung)?
+PAIR  die machen           Runde  info  # &inwend;'die Runde machen' wird Runde großgeschrieben.
+PAIR  diesem einem         "diesem einen"  info  # Meinten Sie diesem einen?
+PAIR  diesen jahres        "dieses Jahres"  info  # Diese häufig benutzte Formulierung lautet standardsprachlich korrekt dieses J...
+PAIR  dm                   dem  info  # Meinten Sie dem?
+PAIR  doch kein            Zustand  info  # &subanfang;Zustand&subende;
+PAIR  drauf                darauf  info  # Meinten Sie darauf? 'Drauf'&umgangsspr;
+PAIR  drauf los            drauflos  info  # Das Adverb drauflos wird zusammengeschrieben.
+PAIR  drumherum reden      "drum herumreden"  info  # Diese Wendung wird drum herumreden geschrieben.
+PAIR  du                   kannst  info  # Meinten Sie kannst?
+PAIR  durch aus            durchaus  info  # Meinten Sie durchaus?
+PAIR  dutzend mal          dutzendmal  info  # Das Adverb dutzendmal wird zusammengeschrieben.
+PAIR  eben falls           ebenfalls  info  # Meinten Sie ebenfalls (im Sinne von 'auch')?
+PAIR  ein                  Schwamm  info  # &subanfang;Schwamm&subende;
+PAIR  ein fach             einfach  info  # Meinten Sie das Adjektiv/Adverb einfach oder das Nomen "Fach"?
+PAIR  ein sack             Kartoffeln  info  # Meinten Sie Kartoffeln?
+PAIR  einem                Laien  info  # Meinten Sie Laien (Laie = jemand, der auf einem bestimmten Gebiet keine Fachk...
+PAIR  einem paar           "ein Paar"  info  # Meinten Sie ein Paar (genau zwei Dinge) oder ein paar?
+PAIR  einen schweren       Stand  info  # &subanfang;Stand&subende;
+PAIR  einstig              Einstieg  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  einzige              der  info  # Meinten Sie der?
+PAIR  eis am               Stiel  info  # &verw;Meinten Sie Stiel?
+PAIR  ende vom             Lied  info  # &verw;Meinten Sie Lied? (Lid = Augenlid)
+PAIR  endgültig            endgültig
+PAIR  erstaunt             bass  info  # Meinten Sie bass? 'bass erstaunt' ist eine feste Wendung.
+PAIR  erweisen             Dienst  info  # &subanfang;Dienst&subende;
+PAIR  es                   wird  info  # Meinten Sie wird?
+PAIR  etwaig               etwa  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  euch                 alle  info  # Meinten Sie alle?
+PAIR  feldherrenhalle      Feldherrnhalle  info  # Meinten Sie die Münchner Feldherrnhalle am Odeonsplatz?
+PAIR  feuer und            Flamme  info  # Meinten Sie Flamme?
+PAIR  finden               Anklang  info  # &subanfang;Anklang&subende;
+PAIR  freiherr von         Leibniz  info  # Meinten Sie den Philosophen Leibniz?
+PAIR  freude zu            bereiten  info  # Meinten Sie bereiten?
+PAIR  freund               Freund  info  # Das Nomen Freund sollte großgeschrieben werden.
+PAIR  fuchs                Reineke  info  # Meinten Sie Reineke Fuchs (literarische Figur)?
+PAIR  fühlen               alleingelassen  info  # In der übertragenen Bedeutung von 'im Stich gelassen' wird alleingelassen zus...
+PAIR  für alle             Mal  info  # In der Wendung 'ein für alle Mal' wird Mal großgeschrieben.
+PAIR  für allem            "vor allem"  info  # Meinten Sie vor allem?
+PAIR  für alles            gewappnet  info  # Meinten Sie gewappnet?
+PAIR  gang                 Gang  info  # Das Nomen Gang sollte großgeschrieben werden (außer in Redewendungen wie "gan...
+PAIR  geben                viel  info  # Meinten Sie viel?
+PAIR  geben zu             viel  info  # Meinten Sie viel?
+PAIR  geboten              Eile  info  # &subanfang;Eile&subende;
+PAIR  genossinnen und      Genossen  info  # &subanfang;Genossen&subende;
+PAIR  geometrie der        Ebene  info  # &subanfang;Ebene&subende;
+PAIR  gilbt                gibt  info  # Meinten Sie gibt oder gilt?
+PAIR  gluck                Glück  info  # Wenn es sich nicht um einen Nachnamen handelt: Meinten Sie Glück?
+PAIR  glätten die          Wogen  info  # &subanfang;Wogen&subende;
+PAIR  grunde               Gründe  info  # Hier scheint ein Umlaut zu fehlen. Meinten Sie Gründe?
+PAIR  gründgens            Gustaf  info  # Meinen Sie den deutschen Schauspieler Gustaf Gründgens? (Das ist die von ihm ...
+PAIR  gut dünken           Gutdünken  info  # Das Nomen Gutdünken wird zusammengeschrieben.
+PAIR  haben                bereits  info  # Meinten Sie bereits (=schon)?
+PAIR  haben                Unrecht  info  # Unrecht scheint wird als Nomen benutzt zu werden und wird dann großgeschrieben.
+PAIR  halbachtstellung     Habachtstellung  info  # Meinten Sie Habachtstellung?
+PAIR  hand                 von  info  # Meinten Sie von?
+PAIR  hard disk            Harddisk  info  # Empfehlung: Möchten Sie die Schreibweise Harddisk verwenden?
+PAIR  heinrich             Hertz  info  # Meinten Sie den deutschen Physiker Heinrich Rudolf Hertz?
+PAIR  heinrich rudolf      Hertz  info  # Meinten Sie den deutschen Physiker Heinrich Rudolf Hertz?
+PAIR  herbert dies         "Herbert Diess"  info  # Meinten Sie den Auto-Manager Herbert Diess?
+PAIR  himmel und           Erde  info  # &subanfang;Erde&subende;
+PAIR  hin und              wieder  info  # Meinten Sie wieder?
+PAIR  hochdruck            mit  info  # 'mir' (Dativ) ist hier weniger wahrscheinlich als mit.
+PAIR  höchst wahrscheinlich höchstwahrscheinlich  info  # Das Adverb höchstwahrscheinlich wird in einem Wort geschrieben.
+PAIR  höhen und            Tiefen  info  # &subanfang;Tiefen&subende;
+PAIR  ich                  sehe  info  # Meinten Sie sehe?
+PAIR  ich                  verhalte  info  # Meinten Sie verhalte oder verwalte?
+PAIR  ich mich             bedanke  info  # Meinten Sie bedanke?
+PAIR  ihr                  wart  info  # Meinten Sie wart (Form des Verbs 'sein')?
+PAIR  ihr ihr              schreibt  info  # Meinten Sie schreibt?
+PAIR  im                   Endeffekt  info  # Möglicher Tippfehler gefunden: Meinten Sie Endeffekt?
+PAIR  im                   Grabe  info  # &subanfang;Grabe&subende;
+PAIR  im halten            Zaum  info  # Meinten Sie Zaum ('im Zaum halten')?
+PAIR  im lassen            Stich  info  # &subanfang;Stich&subende;
+PAIR  in                   Echtzeit  info  # Das Nomen Echtzeit wird zusammengeschrieben.
+PAIR  in                   Rage  info  # Das Nomen Rage (von "in Rage reden") wird großgeschrieben.
+PAIR  in der               Nähe  info  # Meinten Sie Nähe?
+PAIR  in die               Schule  info  # &subanfang;Schule&subende;
+PAIR  in die               Knie  info  # &subanfang;Knie&subende;
+PAIR  in form              top  info  # Meinten Sie das Adjektiv top (= super)?
+PAIR  in nehmen            Acht  info  # &inwend;'(sich) in Acht nehmen' wird Acht großgeschrieben.
+PAIR  in realiter          realiter  info  # Die Wendung realiter (\1 Wirklichkeit) wird ohne 'in' gebraucht.
+PAIR  ins befördern        Jenseits  info  # &subanfang;Jenseits&subende;
+PAIR  ins kommen           Reine  info  # &inwend;'ins Reine kommen' wird Reine großgeschrieben.
+PAIR  insbesonders         insbesondere  info  # Bei "\1" handelt es sich um eine nicht korrekte Verschmelzung aus insbesonder...
+PAIR  ist die              Frage  info  # &subanfang;Frage&subende;
+PAIR  java script          JavaScript  info  # Meinten Sie JavaScript (= Programmiersprache)?
+PAIR  jedem das            Seine  info  # In dieser Redewendung wird Seine großgeschrieben.
+PAIR  jeden falls          jedenfalls  info  # Meinten Sie das Adverb jedenfalls?
+PAIR  jeder zeit           jederzeit  info  # Das Adverb jederzeit wird als ein Wort geschrieben.
+PAIR  jetzig               jetzt  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  jeweilig             jeweils  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  jong un              Jong-un  info  # Meinten Sie Jong-un (= Person aus Nordkorea)?
+PAIR  jongun               Jong-un  info  # Meinten Sie Jong-un (= Person aus Nordkorea)?
+PAIR  kann nicht           sein  info  # Meinten Sie den Infinitiv sein?
+PAIR  kein                 Verlass  info  # Das Nomen Verlass wird großgeschrieben.
+PAIR  kein als             Geringerer  info  # Meinten Sie das Nomen Geringerer?
+PAIR  keine                Wahl  info  # Meinten Sie Wahl (Auswahl, Abstimmung)?
+PAIR  keine                Gültigkeit  info  # Meinten Sie Gültigkeit?
+PAIR  keine                Rede  info  # &subanfang;Rede&subende;
+PAIR  keine miene          verzieht  info  # Meinten Sie verzieht?
+PAIR  kenntnis             zur  info  # Meinten Sie zur ('zur Kenntnis nehmen' im Sinne von 'beachten')?
+PAIR  know how             Know-how  info  # Meinten Sie Know-how oder Knowhow?
+PAIR  komma                Punkt  info  # Meinten Sie Punkt statt 'Punk' (Musikstil)?
+PAIR  kundige              kündige  info  # Meinten Sie kündige (1. Person des Verbs "kündigen" = seine Kündigung einreic...
+PAIR  kundigen             kündigen  info  # Meinten Sie kündigen (seine Kündigung einreichen)?
+PAIR  käse                 Käse  info  # Das Nomen Käse wird großgeschrieben.
+PAIR  leibe                Liebe  info  # Meinten Sie Liebe?
+PAIR  letztes endes        "letzten Endes"  info  # Möglicher Tippfehler: Meinten Sie letzten Endes?
+PAIR  lieht                liegt  info  # Meinten Sie liegt?
+PAIR  machen               Ernst  info  # &subanfang;Ernst&subende;
+PAIR  mal                  etwa  info  # Meinten Sie etwa?
+PAIR  mehrere              Versuche  info  # &subanfang;Versuche&subende;
+PAIR  meissener            Meißener  info  # Das Wort Meißener wird in Deutschland und Österreich mit ß geschrieben.
+PAIR  messer               Schneide  info  # &verw;Meinten Sie Schneide?
+PAIR  mir mir              "mit mir"  info  # Hier wird ein Dativ-Pronomen wiederholt. Meinten Sie vielleicht mit mir oder ...
+PAIR  mit                  Gehacktem  info  # Meinten Sie Gehacktem (=Hackfleisch)? Das Wort wird wie ein Adjektiv dekliniert.
+PAIR  mit der              Angst  info  # Meinten Sie das Nomen Angst?
+PAIR  mit schrecken        Ende  info  # &subanfang;Ende&subende;
+PAIR  mit treten           Füßen  info  # Meinten Sie Füßen (Plural von 'Fuß')? Füssen ist eine Stadt in Bayern.
+PAIR  mit zweierlei        Maß  info  # &subanfang;Maß&subende;
+PAIR  mitgliederin         Mitglied  info  # Das Wort "Mitglied" ist ein Neutrum ("das Mitglied") und bezeichnet sowohl Fr...
+PAIR  mitgliederinnen      Mitglieder  info  # Das Wort "Mitglied" ist ein Neutrum ("das Mitglied") und bezeichnet sowohl Fr...
+PAIR  naja                 "na ja"  info  # Meinten Sie die Interjektion na ja (im Gegensatz zur Giftnatter Naja)?
+PAIR  nehmen               viel  info  # Meinten Sie viel?
+PAIR  nehmen               "in Angriff"  info  # In der Redewendung 'etwas in Angriff nehmen' (im Sinne von 'eine Sache angehe...
+PAIR  nicht                "zu lange"  info  # Meinten Sie zu lange anstatt des Verbs "zulangen"?
+PAIR  nicht wieder         "so bald"  info  # In Wendungen wie 'wir tun das so bald (nicht) wieder' wird so bald getrennt g...
+PAIR  nichtsdestotrotz     dennoch  info  # '\1' ist umgangssprachlich. Möchten Sie stattdessen das standardsprachliche ,...
+PAIR  no go                No-Go  info  # Meinten Sie das Nomen No-Go?
+PAIR  nur                  vage  info  # &verw;Meinten Sie vage (=unklar, unpräzise)?
+PAIR  obig                 oben  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  objective c          Objective-C  info  # Meinten Sie die Programmiersprache Objective-C?
+PAIR  ohne                 Gewähr  info  # Meinten Sie Gewähr (Garantie/Gewährleistung/Sicherheit)? Ein Gewehr ist eine ...
+PAIR  orangene             orange  info  # '\1' ist umgangssprachlich. Standardsprachlich heißt es orange.
+PAIR  per                  Nachnahme  info  # Meinten Sie Nachnahme ('Nachnahme' = Versandart, 'Nachname' = Familienname)?
+PAIR  per                  Default  info  # Default ist ein Nomen und sollte auch in der Redewendung "per Default" großge...
+PAIR  per definition       definitionsgemäß  info  # '\1 \2' ist umgangssprachlich: Die lateinische Wendung \1 heißt übersetzt def...
+PAIR  power shell          PowerShell  info  # Meinten Sie PowerShell (= Windows Framework)?
+PAIR  qual der             Wahl  info  # Meinten Sie Wahl (Auswahl, Abstimmung)?
+PAIR  reit im              Winkl  info  # Meinten Sie die oberbayerische Gemeinde Reit im Winkl?
+PAIR  ruhm und             Ehre  info  # &subanfang;Ehre&subende;
+PAIR  schlicht weg         schlichtweg  info  # Das Adverb schlichtweg wird in der Regel zusammengeschrieben.
+PAIR  schön                danke  info  # Meinten Sie danke?
+PAIR  seid                 "seit / seid"
+PAIR  sein                 bereits  info  # Meinten Sie bereits (=schon)?
+PAIR  seit                 "seit / seid"
+PAIR  seitherig            seither  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  sich                 bewährt  info  # Meinten Sie bewährt? (sich bewähren = gut funktionieren, sich bewehren = sich...
+PAIR  sicher gestellt      sichergestellt  info  # sichergestellt im Sinne von "beschlagnahmt" oder "garantiert" wird zusammenge...
+PAIR  sofortig             sofort  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  sonder               sondern  info  # Meinten Sie sondern?
+PAIR  sonstig              sonst  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  sozial media         "Social Media"  info  # Meinten Sie Social Media?
+PAIR  space x              SpaceX  info  # Meinten Sie SpaceX (= Raumfahrtunternehmen)?
+PAIR  sprechen in          Rätseln  info  # &subanfang;Rätseln&subende;
+PAIR  standart             Standard
+PAIR  stundenkilometer     "Kilometer pro Stunde"  info  # In förmlichen Texten empfehlen sich die offiziellen Bezeichnungen oder Kilome...
+PAIR  stundenkilometern    "Kilometern pro Stunde"  info  # In förmlichen Texten empfehlen sich die offiziellen Bezeichnungen oder Kilome...
+PAIR  teuer kommen         "zu stehen"  info  # &getrennt;: Meinten Sie zu stehen?
+PAIR  tik tok              TikTok  info  # Meinten Sie TikTok (= App/Videoportal)?
+PAIR  tik toks             TikToks  info  # Meinten Sie TikToks (= Videos von TikTok)?
+PAIR  tod                  tot
+PAIR  trinken              Champagner  info  # Meinten Sie Champagner?
+PAIR  trotz dem            trotzdem  info  # Meinten Sie trotzdem oder trotz des? (Beachten Sie, dass im zweiten Fall verm...
+PAIR  tschuldigung         Entschuldigung  info  # '\1' ist umgangssprachlich. Möchten Sie die standardsprachliche Schreibweise ...
+PAIR  um die               Ecke  info  # &subanfang;Ecke&subende;
+PAIR  und antwort          Rede  info  # &subanfang;Rede&subende;
+PAIR  und denker           Dichter  info  # &subanfang;Dichter&subende;
+PAIR  und ehre             Ruhm  info  # Meinten Sie Ruhm (= Ansehen)?
+PAIR  und familie          Ehe  info  # &subanfang;Ehe&subende;
+PAIR  und gewissen         Ehre  info  # &subanfang;Ehre&subende;
+PAIR  und gäbe             ging  info  # Außerhalb der Wendung 'gang und gäbe' wird 'Gang' großgeschrieben. Meinten Si...
+PAIR  und quer             Kreuz  info  # &subanfang;Kreuz&subende;
+PAIR  und rauch            Schall  info  # Meinten Sie Schall (=Schwingung, die sich in einem Medium ausbreitet)?
+PAIR  und zwar             berechtigterweise  info  # &verw;Wenn Sie berechtigterweise meinen, schreiben Sie bitte getrennt: zu Recht.
+PAIR  uns                  in  info  # Meinten Sie in?
+PAIR  unterm               Strich  info  # &subanfang;Strich&subende;
+PAIR  vegas                Las  info  # Als Bestandteil des Namens 'Las Vegas' wird Las großgeschrieben.
+PAIR  verbreiten           "Angst und Schrecken"  info  # &inwend;Angst und Schrecken werden 'Angst' und 'Schrecken' großgeschrieben.
+PAIR  vergehen             "Hören und Sehen"  info  # &prgk;: Meinten Sie Hören und Sehen?
+PAIR  verwandet            verwandte  info  # Meinten Sie möglicherweise verwandte oder das Verb verwandelt?
+PAIR  verzinnst            verzinst  info  # Meinten Sie verzinst, eine Form von 'verzinsen'?
+PAIR  vom brechen          Zaun  info  # Meinten Sie Zaun (= Ab-/Begrenzung)?
+PAIR  von                  "vorne herein"  info  # Außerhalb der Wendung 'von vornherein' wird vorne herein getrennt geschrieben.
+PAIR  von                  Teil  info  # Das Nomen Teil wird großgeschrieben.
+PAIR  von bis              März  info  # Meinten Sie den Monat März?
+PAIR  von einen            "von einem"  info  # Meinten Sie von einem?
+PAIR  von nöten            vonnöten  info  # Meinten Sie vonnöten (im Sinne von notwendig)?
+PAIR  von wegen            Rechts  info  # &subanfang;Rechts&subende;
+PAIR  vorherig             vorher  info  # Diese Form des Adjektivs '\1' ist sehr ungebräuchlich. Meinten Sie das Adverb...
+PAIR  war                  wahr  info  # Meinten Sie wahr (=wahrhaftig, authentisch) statt 'war' (Vergangenheit von 's...
+PAIR  was lange            währt  info  # Meinten Sie währt?
+PAIR  werfen               Falten  info  # &subanfang;Falten&subende;
+PAIR  wetter               Wetter  info  # Das Nomen Wetter wird großgeschrieben.
+PAIR  whats app            WhatsApp  info  # WhatsApp (= Chat-App) wird zusammengeschrieben.
+PAIR  wie                  "so viel"  info  # Meinten Sie so viel?
+PAIR  wie                  genauso  info  # &getrennt;: Meinten Sie genauso als Adverb (= ebenso, gleichermaßen, in der g...
+PAIR  wie sehr             "viel mehr"  info  # Falls viel mehr hier als Steigerung von 'viel' verwendet wird, schreiben Sie ...
+PAIR  wieder               wider
+PAIR  wieder von           schon  info  # Meinten Sie schon?
+PAIR  wir uns              bedanken  info  # Meinten Sie bedanken?
+PAIR  wird                 wirt
+PAIR  worden               gehängt  info  # &verw;Meinten Sie gehängt? 'Hängen' als transitives Verb wird regelmäßig flek...
+PAIR  zeil                 Ziel  info  # Meinten Sie die Einkaufsmeile 'Zeil' in Frankfurt/Main oder vielleicht Ziel o...
+PAIR  zeit und             Muße  info  # Meinten Sie Muße (= innere Ruhe, Muse = Inspiration eines Künstlers)?
+PAIR  ziehen               Nutzen  info  # &subanfang;Nutzen&subende;
+PAIR  zu                   sein  info  # Meinten Sie den Infinitiv sein oder das Possessivpronomen seinen?
+PAIR  zu allem             Übel  info  # Meinten Sie das Nomen Übel?
+PAIR  zu diensten          stets  info  # Meinten Sie stets (= immer)?
+PAIR  zu gleich            zugleich  info  # Meinten Sie das Adverb zugleich?
+PAIR  zu haben             verschrieben  info  # Meinten Sie verschrieben?
+PAIR  zu nichte            zunichte  info  # Meinten Sie zunichte (= hinfällig)?
+PAIR  zu nutze             "zu Nutze"  info  # &inwend;zu Nutze wird 'Nutze' großgeschrieben oder es wird zusammengeschriebe...
+PAIR  zu schlagen          Buche  info  # &inwend;'zu Buche schlagen' schreibt man Buche groß.
+PAIR  zu tragen            Schuld  info  # &subanfang;Schuld&subende;
+PAIR  zu verbreiten        "Angst und Schrecken"  info  # &inwend;Angst und Schrecken werden 'Angst' und 'Schrecken' großgeschrieben.
+PAIR  zu ziehen            Nutzen  info  # &subanfang;Nutzen&subende;
+PAIR  zuckerbrot und       Peitsche  info  # Meinten Sie das Nomen Peitsche?
+PAIR  zuhause              "zu Hause"  info  # Empfehlung: Möchten Sie die Schreibweise zu Hause verwenden?
+PAIR  zum geben            Besten  info  # &inwend;'zum Besten geben' schreibt man Besten groß.
+PAIR  zum halten           Narren  info  # &inwend;'zum Narren halten' schreibt man Narren groß.
+PAIR  zur                  Anzeige  info  # &subanfang;Anzeige&subende;
+PAIR  zur                  Schule  info  # &subanfang;Schule&subende;
+PAIR  zur                  Flucht  info  # &subanfang;Flucht&subende;
+PAIR  zur                  Klage  info  # &subanfang;Klage&subende;
+PAIR  zur                  Reife  info  # &subanfang;Reife&subende;
+PAIR  zur verfügungstellung Zurverfügungstellung  info  # Das Nomen Zurverfügungstellung wird zusammengeschrieben.
+PAIR  zweigleisiges schwert "zweischneidiges Schwert"  info  # Meinten Sie die feste Wendung zweischneidiges Schwert?
+PAIR  zwiebel              Zwiebel  info  # "zwiebel" ist kleingeschrieben ein Verb. Meinten Sie das Nomen Zwiebel?
+PAIR  zwiebeln             Zwiebeln  info  # Wenn "zwiebeln" ein Verb ist, wird es kleingeschrieben. Meinten Sie das Nomen...

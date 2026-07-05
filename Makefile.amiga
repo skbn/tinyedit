@@ -26,8 +26,10 @@ HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 USE_HUNSPELL ?= 0
 USE_HYPHEN ?= 0
 USE_MYTHES ?= 0
+USE_GRAMMAR ?= 0
 USE_TRANSLATE ?= 0
 USE_STARDICT ?= 0
+USE_TTS ?= 0
 WITH_AMISSL ?= 0
 
 # AmiSSL SDK path for TLS support
@@ -74,6 +76,18 @@ ifeq ($(USE_MYTHES),1)
   THES_OBJS = $(OBJDIR)/spellchecker_thes.o
 endif
 
+# Grammar checker support (independent of Hunspell; small self-contained C module)
+GRAMMAR_DIR = $(HERE)grammar
+ifeq ($(USE_GRAMMAR),1)
+  CFLAGS += -DHAVE_GRAMMAR -I$(GRAMMAR_DIR)
+  GRAMMAR_OBJS = $(OBJDIR)/grammar_utils.o \
+                 $(OBJDIR)/grammar_cache.o \
+                 $(OBJDIR)/grammar_rules.o \
+                 $(OBJDIR)/grammar_core.o  \
+                 $(OBJDIR)/grammar_api.o   \
+                 $(OBJDIR)/ui_grammar.o
+endif
+
 # Translator support (HTTP backends via external curl)
 ifeq ($(USE_TRANSLATE),1)
   CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP -I$(HERE)translate
@@ -85,6 +99,21 @@ ifeq ($(USE_TRANSLATE),1)
     CFLAGS += -DHAVE_TRANSLATE_STARDICT
     TRANSLATE_OBJS += $(OBJDIR)/translate_stardict.o
   endif
+endif
+
+# Text-To-Speech support on AmigaOS.
+#
+# The Amiga backend opens translator.library (v43 from Aminet
+# preferred; v37 from Commodore falls back if v43 isn't installed) and
+# narrator.device (v34 or v37 from a legally-owned Workbench 1.x or
+# 2.0.x disk copied to DEVS: by the user). Because both are opened
+# dynamically at runtime via OpenLibrary/OpenDevice, NOTHING needs to
+# be linked here -- no extra -l flag, no SDK path. If the user hasn't
+# installed them, tts_new() returns NULL and the editor keeps working
+# without TTS (a status-bar message tells them why).
+ifeq ($(USE_TTS),1)
+  CFLAGS += -DHAVE_TTS -I$(HERE)tts
+  TTS_OBJS = $(OBJDIR)/tts.o $(OBJDIR)/tts_amiga.o
 endif
 
 # Set WITH_AMISSL=1 to enable TLS support via AmiSSL (requires USE_TRANSLATE=1)
@@ -146,11 +175,14 @@ UI_OBJS    += $(OBJDIR)/ui_dict_picker.o
 UI_OBJS    += $(OBJDIR)/ui_dict_reverse.o
 endif
 endif
+ifeq ($(USE_TTS),1)
+UI_OBJS    += $(OBJDIR)/ui_tts.o
+endif
 
 # spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
 SPELL_UTILS_OBJS = $(OBJDIR)/spell_utils.o
 
-ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS) $(TRANSLATE_OBJS)
+ALL_OBJS   = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS) $(GRAMMAR_OBJS) $(TRANSLATE_OBJS) $(TTS_OBJS)
 
 # FreeType objects (with gzip + lzw modules) - all in OBJDIR
 FT_OBJS    := \
@@ -547,6 +579,20 @@ $(OBJDIR)/translate_stardict.o: $(HERE)translate/translate_stardict.c $(HERE)tra
 endif
 endif
 
+# TTS objects (only if USE_TTS=1). On Amiga we compile the backend-
+# agnostic core plus the narrator.device/translator.library backend.
+# No extra link libraries; both are opened dynamically at runtime.
+ifeq ($(USE_TTS),1)
+$(OBJDIR)/tts.o: $(HERE)tts/tts.c $(HERE)tts/tts.h $(HERE)tts/tts_backend.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/tts_amiga.o: $(HERE)tts/tts_amiga.c $(HERE)tts/tts.h $(HERE)tts/tts_backend.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/ui_tts.o: $(UIDIR)/ui_tts.c $(UIDIR)/ui_tts.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+endif
+
 # spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
 $(OBJDIR)/spell_utils.o: $(SPELL_DIR)/spell_utils.c $(SPELL_DIR)/spell_priv.h $(SPELL_DIR)/spell.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
@@ -576,6 +622,27 @@ $(OBJDIR)/spellchecker_custom.o: $(SPELL_DIR)/spell_custom.c $(SPELL_PRIV) | $(O
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 $(OBJDIR)/spellchecker_dict_scan.o: $(SPELL_DIR)/dict_scan.c $(SPELL_DIR)/dict_scan.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+# Grammar checker objects (only if USE_GRAMMAR=1)
+GRAMMAR_PRIV = $(GRAMMAR_DIR)/grammar.h $(GRAMMAR_DIR)/grammar_priv.h
+
+$(OBJDIR)/grammar_utils.o: $(GRAMMAR_DIR)/grammar_utils.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/grammar_cache.o: $(GRAMMAR_DIR)/grammar_cache.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/grammar_rules.o: $(GRAMMAR_DIR)/grammar_rules.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/grammar_core.o: $(GRAMMAR_DIR)/grammar_core.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/grammar_api.o: $(GRAMMAR_DIR)/grammar_api.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/ui_grammar.o: $(UIDIR)/ui_grammar.c $(UIDIR)/ui_grammar.h $(GRAMMAR_PRIV) | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 clean:

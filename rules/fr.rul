@@ -1,0 +1,151 @@
+# gramcheck rule pack -- generated from LanguageTool by lt2rul.py
+# LanguageTool rules are LGPL; keep this file with its notice.
+LANG   fr
+NAME   fr (from LanguageTool)
+
+PUNCT_NO_SPACE_BEFORE ,.)]}
+PUNCT_SPACE_AFTER ,;:
+PUNCT_NO_SPACE_AFTER (
+PUNCT_NO_DOUBLE .
+EXCESSIVE_PUNCT 2
+NBSP_REQUIRED :
+WORD_CAP france,paris,europe,français,anglais,allemand
+WORD_LOWER janvier,février,mars,avril,mai,juin,juillet,août,septembre,octobre,novembre,décembre,lundi,mardi,mercredi,jeudi,vendredi,samedi,dimanche
+WORD_UPPER ue,onu,otan,pib,tva,adn,usb,pdf,html,url
+ALL_CAPS_WORD 6
+REPEAT_WORD_SKIP le,la,les,de,du,des,et,ou,à,ni,ha,hé
+BRACKET_PAIRS ()[]{}«»
+ARTICLE_FEM la,une,les
+ARTICLE_MASC le,un,les
+SENTENCE_TOO_LONG 30
+TOO_MANY_COMMAS 4 10
+WORD_DENSITY 3 12
+SPACE_MULTIPLE
+
+# 126 PAIR entries
+PAIR  a                    à
+PAIR  acte                 dont  info  # Il paraît que vous voulez écrire la locution « dont acte ».
+PAIR  ailleront            aileron  info  # Vouliez-vous dire aileron, comme celui des poissons ou certains véhicules ?
+PAIR  aller de             pair  info  # Confusion probable entre « \2 » et pair.
+PAIR  aller dire           sans  info  # Voulez-vous écrire sans ?
+PAIR  alors                ou  info  # Si vous souhaitez parler d'une alternative, utilisez la conjonction ou.
+PAIR  andré agassi         "Andre Agassi"  info  # Écrivez Andre Agassi s’il s’agit du joueur de tennis.
+PAIR  au cas               où  info  # Pour évoquer un lieu, un temps ou une situation, écrivez où. La conjonction "...
+PAIR  au lait              riz  info  # Voulez-vous écrire riz ?
+PAIR  au moment            où  info  # Pour évoquer un lieu, un temps ou une situation, écrivez où. La conjonction "...
+PAIR  avoir                été  info  # Vouliez-vous dire été (participe passé)?
+PAIR  avoir belle          échappé  info  # Dans l’expression « avoir échappé belle » le participe passé échappé reste in...
+PAIR  beasty boys          "Beastie Boys"  info  # Écrivez Beastie Boys s’il s’agit du groupe de hip-hop américain.
+PAIR  bien                 ou  info  # Si vous souhaitez parler d'une alternative, utilisez la conjonction ou.
+PAIR  bien des             années  info  # Le mot années est plus approprié, car il exprime une durée.
+PAIR  bill gate            "Bill Gates"  info  # Écrivez Bill Gates s’il s’agit du cofondateur de Microsoft.
+PAIR  billy squire         "Billy Squier"  info  # Écrivez Billy Squier s’il s’agit du chanteur américain.
+PAIR  bon an               "bonne année"  info  # L'expression bonne année semble plus appropriée.
+PAIR  bonne marché         "bonne marche"  info  # Vouliez-vous dire bonne marche ?
+PAIR  bons ans             "bonnes années"  info  # L'expression bonnes années semble plus appropriée.
+PAIR  ca                   ça
+PAIR  cad                  c'est-à-dire
+PAIR  ces                  ses
+PAIR  chaque an            "chaque année"  info  # L'expression chaque année semble plus appropriée.
+PAIR  charlotte bronte     "Charlotte Brontë"  info  # Écrivez Charlotte Brontë s’il s’agit de l’auteur anglais.
+PAIR  china                Chine  info  # Si c'est le nom d'un pays, il est écrit Chine.
+PAIR  cliff richards       "Cliff Richard"  info  # Écrivez Cliff Richard s’il s’agit du musicien anglais.
+PAIR  clos                 huis  info  # Voulez-vous écrire huis ?
+PAIR  clémenceau           Clemenceau  info  # Écrivez Clemenceau sans accent s’il s’agit du nom de famille de l’homme polit...
+PAIR  cours des            années  info  # Le mot années est plus approprié, car il exprime une durée.
+PAIR  cée                  CEE  info  # « CÉE » est une faute de typographie. Employez CEE. Il ne faut pas écrire les...
+PAIR  d'                   où  info  # Pour évoquer un lieu, un temps ou une situation, écrivez où. La conjonction "...
+PAIR  dan                  dans  info  # Vouliez-vous dire dans ? "Dan" est un degré au judo et dans d'autres arts mar...
+PAIR  de                   affilée  info  # Voulez-vous écrire affilée ?
+PAIR  de agneau            souris  info  # Confusion entre souris et « sourie ».
+PAIR  de commerce          fonds  info  # Cette expression est formée avec le mot fonds.
+PAIR  de suite             tout  info  # Employez tout dans l’expression « tout de suite ».
+PAIR  des accusés          banc  info  # Confusion probable entre « ban » et banc.
+PAIR  des les              des  info  # La préposition des est attendue ici.
+PAIR  dit                  ceci  info  # Voulez-vous écrire ceci ?
+PAIR  en avoir             marre  info  # Confusion entre « mare » et marre.
+PAIR  en cas               tout  info  # Employez tout dans l’expression « en tout cas ».
+PAIR  en de                voie  info  # Voulez-vous écrire voie ?
+PAIR  eva mendez           "Eva Mendes"  info  # Écrivez Eva Mendes s’il s’agit de l’actrice d’origine cubaine.
+PAIR  fait                 ça  info  # Le pronom démonstratif ça est attendu devant un verbe.
+PAIR  faits                actuels  info  # Dans cet idiome, actuels s'accorde toujours avec «faits».
+PAIR  fakes news           "fake news"  info  # L'expression anglaise est fake news.
+PAIR  fond de              teint  info  # Voulez-vous écrire teint ?
+PAIR  forest gump          "Forrest Gump"  info  # Écrivez Forrest Gump s’il s’agit du personnage du film.
+PAIR  gentillement         gentiment  info  # L'orthographe correcte est gentiment.
+PAIR  giscard              Valéry  info  # Écrivez Valéry s’il s’agit du prénom du président de la République.
+PAIR  gras                 foie  info  # Le mot pour désigner ce met s'écrit foie.
+PAIR  hauvent              auvent  info  # Le mot « Hauvent » n’existe pas. Souhaitiez-vous écrire auvent ?
+PAIR  hilary clinton       "Hillary Clinton"  info  # Écrivez Hillary Clinton s’il s’agit de la femme politique américaine.
+PAIR  il sont              "ils ont"  info  # Voulez-vous écrire ils ont ?
+PAIR  in                   extremis  info  # Une erreur d'orthographe a été détectée dans cette expression. Souhaitez-vous...
+PAIR  java script          JavaScript  info  # Voulez-vous écrire JavaScript (le langage de programmation)?
+PAIR  je sui               "je suis"  info  # Vouliez-vous dire je suis ?
+PAIR  june                 juin  info  # Vouliez-vous dire juin (mois de l'année) ou June (nom propre) ?
+PAIR  jusqu'               où  info  # Pour évoquer un lieu, un temps ou une situation, écrivez où. La conjonction "...
+PAIR  justin beiber        "Justin Bieber"  info  # Écrivez Justin Bieber s’il s’agit du chanteur canadien.
+PAIR  keith richard        "Keith Richards"  info  # Écrivez Keith Richards s’il s’agit du guitariste des Rolling Stones.
+PAIR  la                   de  info  # La préposition de ou dès est attendue ici.
+PAIR  language             langage
+PAIR  langue de            oc  info  # Voulez-vous écrire oc ?
+PAIR  là                   où  info  # Pour indiquer un lieu, il convient d’utiliser où.
+PAIR  ma                   foi  info  # Cette expression est formée avec le mot foi.
+PAIR  malgres              malgré
+PAIR  max brothers         "Marx Brothers"  info  # Écrivez Marx Brothers s’il s’agit des comédiens américains.
+PAIR  merryl streep        "Meryl Streep"  info  # Écrivez Meryl Streep s’il s’agit de l’actrice américaine.
+PAIR  mettre mot           "maître mot"  info  # Vouliez-vous dire maître mot ?
+PAIR  mille merci          "mille mercis"  info  # « merci » s'accorde en nombre dans mille mercis.
+PAIR  mon                  beau-frère  info  # Ce terme est une contraction considérée comme familière. Souhaitez-vous le re...
+PAIR  montage rocheuse     "montagne rocheuse"  info  # Vouliez-vous dire montagne rocheuse ?
+PAIR  montages rocheuses   "montagnes Rocheuses"  info  # Vouliez-vous dire montagnes Rocheuses ?
+PAIR  même temps           qu'en  info  # Cette expression se construit avec qu'en.
+PAIR  n' a                 jamais  info  # Vouliez-vous dire jamais (en aucun temps)?
+PAIR  no vacancy           complet  info  # « No vacancy » peut être considéré comme un anglicisme. Employez complet (aff...
+PAIR  nouvel an            "Nouvel An"  info  # Si vous parlez de la fête, il faut deux majuscules : Nouvel An. Bonne année !
+PAIR  nul part             "nulle part"  info  # On écrit nulle part.
+PAIR  ou                   où
+PAIR  ou ça                où  info  # Pour évoquer un lieu, un temps ou une situation, écrivez où. La conjonction "...
+PAIR  où                   là  info  # Pour indiquer un lieu, il convient d’utiliser là.
+PAIR  par                  où  info  # Pour évoquer un lieu, un temps ou une situation, écrivez où. La conjonction "...
+PAIR  par rapport          à  info  # La préposition à est attendue.
+PAIR  parceque             "parce que"
+PAIR  part                 "quelque part"  info  # Voulez-vous écrire quelque part ?
+PAIR  pizza                Margherita  info  # Voulez-vous écrire Margherita ?
+PAIR  pomme de             pin  info  # Confusion probable entre « pain » et pin.
+PAIR  pour                 "bien tôt"  info  # Voulez-vous écrire bien tôt ?
+PAIR  prendre en           gré  info  # Voulez-vous écrire gré ?
+PAIR  qu'                  à  info  # La préposition à est attendue après cette conjonction.
+PAIR  quelle soit          qu'elle  info  # Une confusion entre le pronom et l'adjectif semble être détectée. Souhaitez-v...
+PAIR  quelles soient       qu'elles  info  # Une confusion entre le pronom et l'adjectif semble être détectée. Souhaitez-v...
+PAIR  quelque fois         "quelques fois"  info  # Voulez-vous écrire quelques fois ou quelquefois ?
+PAIR  quoi                 ou  info  # Si vous souhaitez parler d'une alternative, utilisez la conjonction ou.
+PAIR  rase                 campagne  info  # Le mot campagne semble plus probable que "\2".
+PAIR  raymond              Poincaré  info  # Écrivez Poincaré s’il s’agit du président de la République.
+PAIR  roger hogson         "Roger Hodgson"  info  # Écrivez Roger Hodgson s’il s’agit du membre du groupe Supertramp.
+PAIR  sa                   ça
+PAIR  sans                 fard  info  # Confusion probable entre « \2 » et fard.
+PAIR  savoir               gré  info  # Voulez-vous écrire gré ?
+PAIR  se                   ce
+PAIR  si                   ou  info  # Si vous souhaitez parler d'une alternative, utilisez la conjonction ou.
+PAIR  sid viscious         "Sid Vicious"  info  # Écrivez Sid Vicious.
+PAIR  siegmund freud       "Sigmund Freud"  info  # Écrivez Sigmund Freud s’il s’agit du fondateur de la psychanalyse.
+PAIR  son plein            bat  info  # Confusion probable entre « \1 » et bat (du verbe battre).
+PAIR  source               retenue  info  # « Déduction à la source » peut être considéré comme un anglicisme. Vous pouve...
+PAIR  spiderman            Spider-Man  info  # Écrivez Spider-Man avec un tiret s’il s’agit du personnage de fiction.
+PAIR  sue mesure           "sur mesure"  info  # Une faute de frappe semble s'être glissée dans ce mot. Vouliez-vous dire sur ...
+PAIR  tes ma               "t'es ma"  info  # Les mots « \1 \2 » ne peuvent pas se suivre. Vouliez-vous dire t'es ma ?
+PAIR  tik tok              TikTok  info  # Vouliez-vous dire TikTok?
+PAIR  tirer au             flanc  info  # Confusion probable entre « \3 » et flanc.
+PAIR  token                jeton  info  # « Token » peut être considéré comme un anglicisme. Employez jeton (pièce rond...
+PAIR  tokens               jetons  info  # « Token » peut être considéré comme un anglicisme. Employez jetons (pièce ron...
+PAIR  un                   quelqu'  info  # Une erreur semble de pronom être détectée dans cette phrase. Souhaitez-vous é...
+PAIR  wikipedia            Wikipédia  info  # On écrit Wikipédia avec un accent aigu en français.
+PAIR  à                    prêt  info  # Dans le sens de "disposé à" ou " préparé à" cet adjectif s'écrit prêt.
+PAIR  à de                 court  info  # Voulez-vous écrire court ?
+PAIR  à de                 flanc  info  # Confusion probable entre « \2 » et flanc.
+PAIR  à demie              "à demi"  info  # « demi » est invariable dans la locution à demi.
+PAIR  à des                fins  info  # Voulez-vous écrire fins ?
+PAIR  à haute              voix  info  # Voulez-vous écrire voix ?
+PAIR  à la                 tâche  info  # Voulez-vous écrire tâche ?
+PAIR  à peu                près  info  # Voulez-vous écrire près ?
+PAIR  à présent            dès  info  # Cette préposition s'écrit dès.

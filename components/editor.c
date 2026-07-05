@@ -2327,9 +2327,18 @@ void ed_auto_rewrap_capture_pre_snapshot(Ed *ed)
     if (!ed || ed->count <= 0)
         return;
 
-    /* Empty line: paragraph separator -- nothing to reflow */
+    /* Snapshot empty line to allow undo of first word in fresh paragraph */
     if (ed->lines[ed->row]->len == 0)
+    {
+        free(ed->auto_rewrap_pre_snapshot);
+
+        ed->auto_rewrap_pre_snapshot = ed_range_to_string(ed, ed->row, ed->row + 1);
+        ed->auto_rewrap_pre_start = ed->row;
+        ed->auto_rewrap_pre_end = ed->row + 1;
+        ed->auto_rewrap_pre_cursor_row = ed->row;
+        ed->auto_rewrap_pre_cursor_col = ed->col;
         return;
+    }
 
     first = ed->row;
 
@@ -2386,6 +2395,14 @@ void ed_ensure_visible(Ed *ed)
 
 void ed_clamp(Ed *ed)
 {
+    /* Skip clamp on empty document to avoid reading freed line */
+    if (ed->count <= 0)
+    {
+        ed->row = 0;
+        ed->col = 0;
+        return;
+    }
+
     if (ed->row < 0)
         ed->row = 0;
 
@@ -2708,7 +2725,6 @@ int ed_insert_char(Ed *ed, wchar_t ch)
         }
     }
 
-    ln->has_wrap_hyphen = 0;
     ed->col++;
 
     ed_set_modified(ed, 1);
@@ -2736,9 +2752,6 @@ int ed_enter(Ed *ed)
         return -1;
 
     line_truncate(ed, ln, ed->col);
-
-    ln->has_wrap_hyphen = 0;
-    nl->has_wrap_hyphen = 0;
 
     if (doc_insert_line(ed, ed->row + 1, nl) != 0)
         return -1;
@@ -2783,7 +2796,6 @@ int ed_backspace(Ed *ed)
         record_delete_back(ed, ed->row, ed->col - 1, deleted_ch);
         line_delete(ed, ln, ed->col - 1);
 
-        ln->has_wrap_hyphen = 0;
         ed->col--;
 
         ed_set_modified(ed, 1);
@@ -2841,8 +2853,6 @@ int ed_delete(Ed *ed)
         record_delete_fwd(ed, ed->row, ed->col, deleted_ch);
         line_delete(ed, ln, ed->col);
 
-        ln->has_wrap_hyphen = 0;
-
         ed_set_modified(ed, 1);
         ed_prefix_invalidate_from(ed, ed->row);
     }
@@ -2855,8 +2865,6 @@ int ed_delete(Ed *ed)
 
         line_append_line(ed, ln, nxt, 0, nxt->len);
         line_free(doc_remove_line(ed, ed->row + 1));
-
-        ln->has_wrap_hyphen = 0;
 
         ed_set_modified(ed, 1);
         ed_prefix_invalidate_from(ed, ed->row);
@@ -3255,6 +3263,8 @@ int ed_move_line_up(Ed *ed)
 
     if (snapshot_after)
         undo_push_snapshot_range(ed, start, cur_col, snapshot_before, snapshot_after, old_count, new_count, cur_row, cur_col, ed->row, ed->col);
+    else
+        free(snapshot_before);
 
     ed->undo_open = 0;
     ed_ensure_visible(ed);
@@ -3357,6 +3367,8 @@ int ed_move_line_down(Ed *ed)
 
     if (snapshot_after)
         undo_push_snapshot_range(ed, start, cur_col, snapshot_before, snapshot_after, old_count, new_count, cur_row, cur_col, ed->row, ed->col);
+    else
+        free(snapshot_before);
 
     ed->undo_open = 0;
     ed_ensure_visible(ed);
@@ -4039,7 +4051,13 @@ int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, ch
     int nc;
 
     if (ed->undo_top <= 0)
+    {
+        /* Function owns snapshots and frees them on any failure path */
+        free(snapshot_before);
+        free(snapshot_after);
+
         return -1;
+    }
 
     g = &ed->undo_stack[ed->undo_top - 1];
 
@@ -4557,7 +4575,24 @@ int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const cha
     if (new_lines_count > 0)
     {
         if (doc_insert_lines_bulk(ed, start, new_lines, new_lines_count) == 0)
+        {
             inserted = new_lines_count;
+
+            /* Mark artificial wrap-hyphens inserted by rewrap */
+            for (i = 0; i < new_lines_count - 1; i++)
+            {
+                EdLine *ln = new_lines[i];
+
+                if (ln->len >= 2)
+                {
+                    unsigned int last = ed_line_char(ln, ln->len - 1);
+                    unsigned int prev = ed_line_char(ln, ln->len - 2);
+
+                    if (last == (unsigned int)'-' && prev != (unsigned int)' ' && prev != (unsigned int)'\t')
+                        ln->has_wrap_hyphen = 1;
+                }
+            }
+        }
         else
         {
             for (i = 0; i < new_lines_count; i++)
@@ -4720,7 +4755,7 @@ static int apply_group_reverse(Ed *ed, UndoGroup *g)
                 int newc = op->end_col;
 
                 ed_replace_range_from_utf8(ed, start, newc, op->utf8_snapshot);
-                ed_set_pos(ed, op->row, op->col);
+                ed_set_pos(ed, g->cur_row, g->cur_col);
 
                 if (start < min_row)
                     min_row = start;
@@ -4911,7 +4946,7 @@ static int apply_group_forward(Ed *ed, UndoGroup *g)
                 ed_replace_range_from_utf8(ed, start, oldc, op->utf8_snapshot_new);
 
                 /* Jump to end cursor position stored when snapshot was taken */
-                ed_set_pos(ed, op->row, op->col);
+                ed_set_pos(ed, g->end_row, g->end_col);
 
                 if (start < min_row)
                     min_row = start;
@@ -4988,6 +5023,15 @@ int ed_undo(Ed *ed)
     /* Apply ops in reverse */
     min_row = apply_group_reverse(ed, &ed->redo_stack[ed->redo_top - 1]);
 
+    /* Ensure document has at least one line after undo */
+    if (ed->count <= 0)
+    {
+        EdLine *empty = line_empty(ed);
+
+        if (empty)
+            doc_insert_line(ed, 0, empty);
+    }
+
     ed->undo_snapshot_mode = 0;
 
     /* Restore cursor to before-state */
@@ -5030,6 +5074,15 @@ int ed_redo(Ed *ed)
 
     /* Apply ops forward */
     min_row = apply_group_forward(ed, &ed->undo_stack[ed->undo_top - 1]);
+
+    /* Ensure document has at least one line after undo */
+    if (ed->count <= 0)
+    {
+        EdLine *empty = line_empty(ed);
+
+        if (empty)
+            doc_insert_line(ed, 0, empty);
+    }
 
     ed->undo_snapshot_mode = 0;
 

@@ -1,0 +1,52 @@
+# gramcheck rule pack -- generated from LanguageTool by lt2rul.py
+# LanguageTool rules are LGPL; keep this file with its notice.
+LANG   it
+NAME   it (from LanguageTool)
+
+PUNCT_NO_SPACE_BEFORE ,.;:!?)
+PUNCT_SPACE_AFTER ,;:
+PUNCT_NO_SPACE_AFTER (
+PUNCT_NO_DOUBLE ,;
+EXCESSIVE_PUNCT 2
+WORD_CAP italia,roma,milano,europa
+WORD_LOWER gennaio,febbraio,marzo,aprile,maggio,giugno,luglio,agosto,settembre,ottobre,novembre,dicembre,lunedì,martedì,mercoledì,giovedì,venerdì,sabato,domenica
+WORD_UPPER ue,onu,nato,pil,iva,dna,usb,pdf,html,url
+ALL_CAPS_WORD 6
+REPEAT_WORD_SKIP il,la,lo,gli,le,di,e,o,a,in,ha
+BRACKET_PAIRS ()[]{}«»
+ARTICLE_FEM la,una,le
+ARTICLE_MASC il,lo,un,uno,gli,i
+FEM_ENDINGS a,e
+MASC_ENDINGS o,i
+MASC_EXCEPTION_ENDINGS ma
+AGREEMENT_EXCEPTIONS mano,foto,moto,radio,giorno,mappa,sofà,pianeta,poeta,problema,idioma,tema,sistema,programma,clima,grande,verde,triste,allegro,forte,intelligente,importante,possibile,amabile,libero,povero,dolce,breve,fermo,nobile,semplice,soave
+SENTENCE_TOO_LONG 30
+TOO_MANY_COMMAS 4 10
+WORD_DENSITY 3 12
+
+# 25 PAIR entries
+PAIR  a                    ha  info  # Forse volevi dire ha?
+PAIR  a gratis             gratis  info  # Si scrive gratis (senza la preposizione).
+PAIR  adire                "le vie legali"  info  # Adire è un verbo transitivo per cui si adisce le vie legali
+PAIR  ai                   hai  info  # Forse volevi dire hai?
+PAIR  asparagio            asparago  info  # Sostituire forme dialettali con l'equivalente Italiano per migliorare la legg...
+PAIR  attimino             attimo  info  # Si consiglia di utilizzare attimo.
+PAIR  budget               bilancio  info  # bilancio bilancio di previsione stanziamento
+PAIR  da                   dà
+PAIR  daccordo             d'accordo
+PAIR  dei                  gli  info  # L'articolo non concorda, usare: gli.
+PAIR  gli                  li
+PAIR  input                ingresso  info  # ingresso entrata immissione
+PAIR  momentino            momento  info  # Si consiglia di utilizzare momento.
+PAIR  ne                   né
+PAIR  output               uscita  info  # uscita prodotto produzione
+PAIR  penalty              rigore  info  # rigore calcio di rigore punizione
+PAIR  perchè               perché
+PAIR  più molto            "di più"  info  # E' un errore creare il comparativo di maggioranza degli avverbi molto e poco....
+PAIR  più poco             meno  info  # E' un errore creare il comparativo di maggioranza degli avverbi molto e poco....
+PAIR  po                   po'
+PAIR  qual'è               "qual è"
+PAIR  se                   sé
+PAIR  show                 spettacolo  info  # spettacolo
+PAIR  sopratutto           soprattutto
+PAIR  trend                tendenza  info  # tendenza orientamento corso evoluzione

@@ -1,0 +1,141 @@
+# gramcheck rule pack -- generated from LanguageTool by lt2rul.py
+# LanguageTool rules are LGPL; keep this file with its notice.
+LANG   pt
+NAME   pt (from LanguageTool)
+
+PUNCT_NO_SPACE_BEFORE ,.;:!?)
+PUNCT_SPACE_AFTER ,;:
+PUNCT_NO_SPACE_AFTER (
+PUNCT_NO_DOUBLE ,;
+EXCESSIVE_PUNCT 2
+WORD_CAP portugal,brasil,lisboa,europa
+WORD_LOWER janeiro,fevereiro,março,abril,maio,junho,julho,agosto,setembro,outubro,novembro,dezembro,segunda,terça,quarta,quinta,sexta,sábado,domingo
+WORD_UPPER ue,onu,otan,pib,iva,adn,usb,pdf,html,url
+ALL_CAPS_WORD 6
+REPEAT_WORD_SKIP a,o,de,que,e,ou,em,ha
+BRACKET_PAIRS ()[]{}«»
+ARTICLE_FEM a,uma,as
+ARTICLE_MASC o,um,os
+FEM_ENDINGS a,as
+MASC_ENDINGS o,os
+MASC_EXCEPTION_ENDINGS ma
+AGREEMENT_EXCEPTIONS mão,foto,moto,rádio,dia,mapa,sofá,planeta,poeta,problema,idioma,tema,sistema,programa,clima,grande,verde,triste,alegre,forte,inteligente,importante,possível,amável,livre,pobre,doce,breve,firme,nobre,simples,suave
+SENTENCE_TOO_LONG 30
+TOO_MANY_COMMAS 4 10
+WORD_DENSITY 3 12
+CAPITALIZE_SENTENCE
+QUOTE_SPACING
+TRIPLE_DOT
+REPEAT_WORD
+
+# 110 PAIR entries
+PAIR  a                    à
+PAIR  a dentro             adentro  info  # Substitua por adentro.
+PAIR  a quando             aquando  info  # Substitua por aquando.
+PAIR  a trás               atrás  info  # Substitua por atrás ou a traz.
+PAIR  abs                  abraços  info  # &internet_msg; Considere escrever abraços por extenso. Se for uma sigla, util...
+PAIR  acabar namoro        o  info  # Substitua por o.
+PAIR  acampanhando         acompanhando  info  # Será que quis dizer acompanhando ou acampando?
+PAIR  alem                 além  info  # 'Alem' é uma forma do verbo 'alar'. O advérbio escreve-se além.
+PAIR  alexius meinung      "Alexius Meinong"  info  # Pretende referir-se ao filósofo Alexius Meinong?
+PAIR  alias                aliás  info  # 'Alias' é uma forma do verbo 'aliar'. O advérbio escreve-se aliás.
+PAIR  andreas bader        "Andreas Baader"  info  # Pretende referir-se a Andreas Baader (membro do RAF)?
+PAIR  andré agassi         "Andre Agassi"  info  # Escreva Andre Agassi se se refere ao jogador de ténis.
+PAIR  anti vírus           antivírus  info  # Substitua por antivírus.
+PAIR  as                   às
+PAIR  atenção              devida  info  # Substitua por devida.
+PAIR  atrevimento a        "atrevimento para"  info  # Substitua por atrevimento para.
+PAIR  até manhã            "até amanhã"  info  # Substitua por até amanhã.
+PAIR  beasty boys          "Beastie Boys"  info  # Escreva Beastie Boys se se refere ao grupo de hip-hop americano.
+PAIR  bill gate            "Bill Gates"  info  # Escreva Bill Gates se se refere ao co-fundador da Microsoft.
+PAIR  billy squire         "Billy Squier"  info  # Escreva Billy Squier se se refere ao cantor americano.
+PAIR  blz                  beleza  info  # &internet_msg; Considere escrever beleza por extenso.
+PAIR  charlotte bronte     "Charlotte Brontë"  info  # Escreva Charlotte Brontë se se refere à autora inglesa.
+PAIR  cliff richards       "Cliff Richard"  info  # Escreva Cliff Richard se se refere ao músico inglês.
+PAIR  com                  contando  info  # Substitua por contando.
+PAIR  concerteza           "com certeza"
+PAIR  de espera            fila  info  # Substitua por fila.
+PAIR  de qualquer          maneira  info  # Substitua por maneira.
+PAIR  derrepente           "de repente"
+PAIR  desculpar desabafo   o  info  # Substitua por o.
+PAIR  dizer                olá  info  # Substitua por olá.
+PAIR  e                    "entre mim"  info  # Substitua por entre mim.
+PAIR  e                    "entre ti"  info  # Substitua por entre ti.
+PAIR  ead                  EaD  info  # Se estiver se referindo a "ensino a distância", prefira EaD.
+PAIR  em                   si  info  # Substitua por si ou “\2”.
+PAIR  em meado             "em meados"  info  # A forma mais aceita desta expressão é em meados.
+PAIR  emanuel kant         "Immanuel Kant"  info  # Pretende referir-se a Immanuel Kant (filósofo do iluminismo)?
+PAIR  enquanto ser         puder  info  # Substitua por puder.
+PAIR  estar                onde  info  # Substitua por onde.
+PAIR  eva mendez           "Eva Mendes"  info  # Escreva Eva Mendes se se refere à atriz de origem cubana.
+PAIR  face book            Facebook  info  # Você quis dizer Facebook?
+PAIR  foi quais            pelas  info  # Substitua por pelas.
+PAIR  forest gump          "Forrest Gump"  info  # Escreva Forrest Gump se se refere ao personagem do filme.
+PAIR  georg kantor         "Georg Cantor"  info  # Pretende referir-se ao matemático Georg Cantor?
+PAIR  google               Google  info  # Você quis dizer Google?
+PAIR  gottlieb frege       "Gottlob Frege"  info  # Pretende referir-se a Gottlob Frege (fundador da lógica moderna)?
+PAIR  gustav gründgens     "Gustaf Gründgens"  info  # Pretende referir-se ao ator alemão Gustaf Gründgens? (Esta é a sua própria or...
+PAIR  ha                   há
+PAIR  helmuth kohl         "Helmut Kohl"  info  # Pretende referir-se ao político alemão Helmut Kohl (Chanceler de 1982 a 1998)?
+PAIR  helmuth schmidt      "Helmut Schmidt"  info  # Pretende referir-se ao político alemão Helmut Schmidt (Chanceler de 1974 a 19...
+PAIR  henri                Poincaré  info  # Escreva Poincaré se se refere ao matemático francês.
+PAIR  hilary clinton       "Hillary Clinton"  info  # Escreva Hillary Clinton se se refere à mulher política americana.
+PAIR  hj                   hoje  info  # &internet_msg; Considere escrever hoje por extenso.
+PAIR  johannes guttenberg  "Johannes Gutenberg"  info  # Pretende referir-se a Johannes Gutenberg, o inventor da prensa de impressão?
+PAIR  justin beiber        "Justin Bieber"  info  # Escreva Justin Bieber se se refere ao cantor canadense.
+PAIR  keith richard        "Keith Richards"  info  # Escreva Keith Richards se se refere ao guitarrista dos Rolling Stones.
+PAIR  mais                 mas
+PAIR  mais grande          maior  info  # Se não se refere a pessoas, considere substituir por maior.
+PAIR  mais grandes         maiores  info  # Se não se refere a pessoas, considere substituir por maiores.
+PAIR  mais pequeno         menor  info  # Se não se refere a pessoas, considere substituir por menor.
+PAIR  mais pequenos        menores  info  # Se não se refere a pessoas, considere substituir por menores.
+PAIR  max brothers         "Marx Brothers"  info  # Escreva Marx Brothers se se refere aos comediantes americanos.
+PAIR  merryl streep        "Meryl Streep"  info  # Escreva Meryl Streep se se refere à atriz americana.
+PAIR  minoria              étnica  info  # Substitua por étnica.
+PAIR  minorias             étnicas  info  # Substitua por étnicas.
+PAIR  mulher carteiro      carteira  info  # Substitua por carteira.
+PAIR  mulher músico        música  info  # Substitua por música.
+PAIR  nesta caso           "neste caso"  info  # Substitua por neste caso.
+PAIR  notas ficais         "notas fiscais"  info  # Possível erro de digitação. Provavelmente quis escrever notas fiscais.
+PAIR  ok                   OK  info  # Prefira OK.
+PAIR  onde                 aonde
+PAIR  p                    para  info  # Se for linguagem de Internet, considere escrever para, por ou pela por extens...
+PAIR  par com              a  info  # Substitua por a.
+PAIR  per capta            "per capita"  info  # A expressão latina que significa "por cabeça" ou "por habitante" se escreve p...
+PAIR  pfvr                 "por favor"  info  # &internet_msg; Considere escrever por favor por extenso.
+PAIR  phillips             Phillips  info  # Caso se refira à marca, o correto é Phillips.
+PAIR  pior educado         "mais mal-educado"  info  # Substitua por mais mal-educado.
+PAIR  pizza                Margherita  info  # Pretende escrever Margherita?
+PAIR  por quê              porque  info  # Se "\1 \2" expressar uma explicação, considere escrever porque. Se puder subs...
+PAIR  porque               porquê
+PAIR  porquê               "por que"  info  # Se puder substituir por "por qual razão", utilize por que. Se "\1" expressar ...
+PAIR  pq                   porque  info  # &internet_msg; Se "pq" expressar uma explicação, considere escrever porque po...
+PAIR  puerto rico          "Porto Rico"  info  # Se estiver se referindo ao território não incorporado dos Estados Unidos no C...
+PAIR  q                    que  info  # Se for linguagem de Internet, considere escrever que por extenso. Se quis diz...
+PAIR  qm                   quem  info  # &internet_msg; Considere escrever quem por extenso.
+PAIR  qtar                 Catar  info  # Caso se refira ao país, o correto é Catar.
+PAIR  quando poder         "quando puder"  info  # Substitua por quando puder.
+PAIR  quando ser           puder  info  # Substitua por puder.
+PAIR  quanto muito         "quando muito"  info  # Substitua por quando muito.
+PAIR  raymond              Poincaré  info  # Escreva Poincaré se se refere ao presidente da República.
+PAIR  reinecke fuchs       "Reineke Fuchs"  info  # Pretende referir-se a Reineke Fuchs (figura literária)?
+PAIR  roger hogson         "Roger Hodgson"  info  # Escreva Roger Hodgson se se refere ao membro do grupo Supertramp.
+PAIR  ser                  recomendável  info  # Substitua por recomendável.
+PAIR  sera                 será  info  # Possível erro de acentuação. Verifique se não quis dizer será.
+PAIR  servir fazer         para  info  # Substitua por para.
+PAIR  sid viscious         "Sid Vicious"  info  # Escreva Sid Vicious.
+PAIR  siegmund freud       "Sigmund Freud"  info  # Escreva Sigmund Freud se se refere ao fundador da psicanálise.
+PAIR  sinao                senão
+PAIR  spiderman            Spider-Man  info  # Hifenize Spider-Man se se refere ao personagem de ficção.
+PAIR  tal vez              talvez  info  # Substitua por talvez.
+PAIR  till schweiger       "Til Schweiger"  info  # Pretende referir-se ao ator alemão e cineasta Til Schweiger?
+PAIR  ulrike meinhoff      "Ulrike Meinhof"  info  # Pretende referir-se a Ulrike Meinhof (membro do RAF)?
+PAIR  vc                   você  info  # &internet_msg; Considere escrever você por extenso.
+PAIR  vcs                  vocês  info  # &internet_msg; Considere escrever vocês por extenso.
+PAIR  whats app            WhatsApp  info  # Você quis dizer WhatsApp?
+PAIR  x windows            "X Window"  info  # Pretende dizer X Window?
+PAIR  you tube             YouTube  info  # Você quis dizer YouTube?
+PAIR  à bocado             "há bocado"  info  # Substitua por há bocado.
+PAIR  à maravilha          "às mil maravilhas"  info  # Substitua por às mil maravilhas.
+PAIR  à sós                "a sós"  info  # Substitua por a sós.
+PAIR  á                    à  info  # Verifique se não quis escrever à ou a.

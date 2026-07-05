@@ -31,6 +31,7 @@
 
 #include "ui_syntax.h"
 #include "ui_spell.h"
+#include "ui_grammar.h"
 #include "ui_dict.h"
 #include "ui_dict_picker.h"
 #include "ui_dict_reverse.h"
@@ -40,6 +41,10 @@
 
 #ifdef HAVE_TRANSLATE
 #include "ui_translate.h"
+#endif
+
+#ifdef HAVE_TTS
+#include "ui_tts.h"
 #endif
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
@@ -136,6 +141,23 @@ static const char *HELP_LINES[] =
         "    Alt+B            Exchange languages",
         "    Alt+D            Toggle line numbers / dict panel",
 #endif
+#ifdef HAVE_TTS
+        "",
+        "  Text-to-speech:",
+#ifdef PLATFORM_AMIGA
+        "    Alt+Shift+L     Speak selection / paragraph",
+        "    Alt+Shift+K     Speak entire document",
+        "    Alt+Shift+P     Pause / resume speech",
+        "    Alt+Shift+O     Stop speech",
+        "    Alt+Shift+J     Voice settings popup",
+#else
+        "    Ctrl+Alt+L      Speak selection / paragraph",
+        "    Ctrl+Alt+K      Speak entire document",
+        "    Ctrl+Alt+P      Pause / resume speech",
+        "    Ctrl+Alt+O      Stop speech",
+        "    Ctrl+Alt+J      Voice settings popup",
+#endif
+#endif
         "",
         "  Other:",
         "    F4 / Alt+T       Setup / configuration",
@@ -146,6 +168,7 @@ static const char *HELP_LINES[] =
         "    Ctrl+Alt+S       Cycle syntax language",
 #endif
 };
+
 #define HELP_N ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
 
 #ifdef PLATFORM_AMIGA
@@ -2023,6 +2046,13 @@ static void draw_body(TeApp *app)
                     }
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_GRAMMAR
+                    /* Grammar overlay for this sub-row segment, runs once per logical line (LRU cache absorbs subsequent sub-rows) */
+                    if (app->grammar_active && app->grammar_handle && l && len > 0 && seg_start < seg_end)
+                        ui_grammar_draw_row_segment(app, offset_y + sr, offset_x + ln_offset, s_tab_width, l, len, seg_start, seg_end, seg_start_vcol);
+
+#endif
+
                     standend();
 
                     /* Block-selection overlay */
@@ -2326,6 +2356,12 @@ static void draw_body(TeApp *app)
             }
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_GRAMMAR
+            /* Grammar/punctuation overlay, viewport-scoped, LRU cache absorbs redraws, prewarm extends coverage for smooth scrolling */
+            if (app->grammar_active && app->grammar_handle && wl && line_len > 0)
+                ui_grammar_draw_row(app, offset_y + i, offset_x + ln_offset, s_tab_width, wl, line_len);
+#endif
+
             standend();
 
             /* Whitespace overlay: paint tabs as "→" and trailing spaces as "·" using a dim colour */
@@ -2465,6 +2501,12 @@ static void draw_body(TeApp *app)
             }
         }
     }
+
+#ifdef HAVE_GRAMMAR
+    /* Prewarm grammar cache for a small margin above/below the viewport so that single-line scrolls hit cache instead of re-checking */
+    if (app->grammar_active && app->grammar_handle)
+        ui_grammar_prewarm(app, info.top, body_rows, info.line_count);
+#endif
 
     attroff(COLOR_PAIR(COL_NORMAL));
     standend();
@@ -3206,6 +3248,60 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         cycle_syntax_lang(app);
         return 1;
     }
+
+#ifdef HAVE_TTS
+    /* TTS shortcuts: Alt+Shift+L (Amiga) / Ctrl+Alt+L (rest) speak, Ctrl+Alt+P/O/J pause/stop/popup */
+#ifdef PLATFORM_AMIGA
+    if (is_key && ch == KEY_SHIFT('L'))
+#else
+    if (is_key && ch == KEY_ALT_CTRL('L'))
+#endif
+    {
+        ui_tts_speak_action(app);
+        return 1;
+    }
+
+    /* Whole-document dictation from line 0, Amiga: Alt+Shift+K, else: Ctrl+Alt+K */
+#ifdef PLATFORM_AMIGA
+    if (is_key && ch == KEY_SHIFT('K'))
+#else
+    if (is_key && ch == KEY_ALT_CTRL('K'))
+#endif
+    {
+        ui_tts_speak_doc_action(app);
+        return 1;
+    }
+
+#ifdef PLATFORM_AMIGA
+    if (is_key && ch == KEY_SHIFT('P'))
+#else
+    if (is_key && ch == KEY_ALT_CTRL('P'))
+#endif
+    {
+        ui_tts_pause_toggle(app);
+        return 1;
+    }
+
+#ifdef PLATFORM_AMIGA
+    if (is_key && ch == KEY_SHIFT('O'))
+#else
+    if (is_key && ch == KEY_ALT_CTRL('O'))
+#endif
+    {
+        ui_tts_stop(app);
+        return 1;
+    }
+
+#ifdef PLATFORM_AMIGA
+    if (is_key && ch == KEY_SHIFT('J'))
+#else
+    if (is_key && ch == KEY_ALT_CTRL('J'))
+#endif
+    {
+        ui_tts_popup(app);
+        return 1;
+    }
+#endif /* HAVE_TTS */
 
     return 0;
 }
@@ -4358,7 +4454,38 @@ void ui_editor_run(TeApp *app)
         if (body_rows < 1)
             body_rows = 1;
 
+#ifdef HAVE_TTS
+        /* Poll input with short timeout while speech plays, Amiga uses nodelay polling plus sleep */
+#ifdef PLATFORM_AMIGA
+        if (ui_tts_is_busy(app))
+            nodelay(stdscr, TRUE);
+        else
+            nodelay(stdscr, FALSE);
+#else
+        if (ui_tts_is_busy(app))
+            timeout(150);
+        else if (app->cfg.autosave)
+            timeout(1000);
+        else
+            timeout(-1);
+#endif
+#endif
+
         wrc = wrapper_read_key(&wch);
+
+#if defined(HAVE_TTS) && defined(PLATFORM_AMIGA)
+        /* Idle tick while speaking: don't spin the CPU */
+        if (wrc == ERR && ui_tts_is_busy(app))
+        {
+            if (ui_tts_tick(app))
+                te_draw_statusbar(app);
+
+#ifdef PLATFORM_AMIGA
+            pf_sleep_ms(60);
+#endif
+            continue;
+        }
+#endif
 
         /* Run autosave on timeout/error */
         if (app->cfg.autosave && app->cfg.autosave_interval > 0)
@@ -4375,6 +4502,12 @@ void ui_editor_run(TeApp *app)
                 s_last_autosave_ms = now;
             }
         }
+
+#ifdef HAVE_TTS
+        /* Advance TTS state machine and redraw status bar on state change */
+        if (ui_tts_tick(app))
+            te_draw_statusbar(app);
+#endif
 
         if (wrc == ERR)
             continue;

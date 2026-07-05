@@ -20,8 +20,10 @@ HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 USE_HUNSPELL ?= 1
 USE_HYPHEN ?= 1
 USE_MYTHES ?= 1
+USE_GRAMMAR ?= 1
 USE_TRANSLATE ?= 1
 USE_STARDICT ?= 1
+USE_TTS ?= 1
 
 # Detect OS
 OS := $(shell uname -s)
@@ -75,6 +77,18 @@ ifeq ($(USE_MYTHES),1)
   THES_OBJS = $(OBJDIR)/spellchecker_thes.o
 endif
 
+# Grammar checker support (independent of Hunspell)
+GRAMMAR_DIR = $(HERE)grammar
+ifeq ($(USE_GRAMMAR),1)
+  CFLAGS += -DHAVE_GRAMMAR -I$(GRAMMAR_DIR)
+  GRAMMAR_OBJS = $(OBJDIR)/grammar_utils.o \
+                 $(OBJDIR)/grammar_cache.o \
+                 $(OBJDIR)/grammar_rules.o \
+                 $(OBJDIR)/grammar_core.o  \
+                 $(OBJDIR)/grammar_api.o   \
+                 $(OBJDIR)/ui_grammar.o
+endif
+
 # Translator support (HTTP backends via libcurl)
 ifeq ($(USE_TRANSLATE),1)
   CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP -I$(HERE)translate
@@ -94,6 +108,15 @@ ifeq ($(USE_TRANSLATE),1)
     CDEFS += -DHAVE_TRANSLATE_STARDICT
     TRANSLATE_OBJS += $(OBJDIR)/translate_stardict.o
   endif
+endif
+
+# Text-To-Speech support. Zero build-time dependency: the module spawns
+# espeak-ng (or espeak, or macOS `say`, or festival) as a subprocess.
+# At runtime the user needs one of those in $PATH. Nothing to link.
+ifeq ($(USE_TTS),1)
+  CFLAGS += -DHAVE_TTS -I$(HERE)tts
+  CDEFS += -DHAVE_TTS
+  TTS_OBJS = $(OBJDIR)/tts.o $(OBJDIR)/tts_espeak.o
 endif
 
 # ncurses library detection
@@ -139,11 +162,14 @@ UI_OBJS   += $(OBJDIR)/ui_dict_picker.o
 UI_OBJS   += $(OBJDIR)/ui_dict_reverse.o
 endif
 endif
+ifeq ($(USE_TTS),1)
+UI_OBJS   += $(OBJDIR)/ui_tts.o
+endif
 
 # spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
 SPELL_UTILS_OBJS = $(OBJDIR)/spell_utils.o
 
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS) $(TRANSLATE_OBJS)
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPHWRAP_OBJS) $(THES_OBJS) $(GRAMMAR_OBJS) $(TRANSLATE_OBJS) $(TTS_OBJS)
 
 all: $(TARGET) tinyedit
 
@@ -308,6 +334,20 @@ $(OBJDIR)/translate_stardict.o: $(HERE)translate/translate_stardict.c $(HERE)tra
 endif
 endif
 
+# TTS backend objects (only if USE_TTS=1).
+# On Unix we compile tts.c (backend-agnostic core) and tts_espeak.c
+# (subprocess dispatcher).
+ifeq ($(USE_TTS),1)
+$(OBJDIR)/tts.o: $(HERE)tts/tts.c $(HERE)tts/tts.h $(HERE)tts/tts_backend.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/tts_espeak.o: $(HERE)tts/tts_espeak.c $(HERE)tts/tts.h $(HERE)tts/tts_backend.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_tts.o: $(UIDIR)/ui_tts.c $(UIDIR)/ui_tts.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
+
 # Application
 TINYEDIT = $(HERE)tinyedit
 
@@ -323,6 +363,28 @@ else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) -o $@ $(NCURSES_LIB) $(TRANSLATE_LIB)
 endif
+
+
+# Grammar checker objects (only if USE_GRAMMAR=1)
+GRAMMAR_PRIV = $(HERE)grammar/grammar.h $(HERE)grammar/grammar_priv.h
+
+$(OBJDIR)/grammar_utils.o: $(HERE)grammar/grammar_utils.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/grammar_cache.o: $(HERE)grammar/grammar_cache.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/grammar_rules.o: $(HERE)grammar/grammar_rules.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/grammar_core.o: $(HERE)grammar/grammar_core.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/grammar_api.o: $(HERE)grammar/grammar_api.c $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_grammar.o: $(UIDIR)/ui_grammar.c $(UIDIR)/ui_grammar.h $(GRAMMAR_PRIV) | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TINYEDIT)

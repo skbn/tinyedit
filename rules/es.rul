@@ -1,0 +1,125 @@
+# gramcheck rule pack -- generated from LanguageTool by lt2rul.py
+# LanguageTool rules are LGPL; keep this file with its notice.
+LANG   es
+NAME   es (from LanguageTool)
+
+PUNCT_NO_SPACE_BEFORE ,.;:!?)
+PUNCT_SPACE_AFTER ;
+PUNCT_NO_SPACE_AFTER (¿¡
+PUNCT_NO_DOUBLE ,;
+EXCESSIVE_PUNCT 2
+SENTENCE_OPEN_ES !
+WORD_CAP España,Europa,Madrid,Barcelona,Sevilla,Valencia,América,África,Asia,Alemania,Francia,Italia,Portugal,Canarias,Tenerife,Lunes,Martes,Miércoles,Jueves,Viernes,Sábados,Domingos,Enero,Febrero,Marzo,Abril,Mayo,Junio,Julio,Agosto,Septiembre,Octubre,Noviembre,Diciembre,abudabí,antiguano,asunceno,beirutí,burkinés,catarí,vaticano,comorense,marfileño,dominiqués,emiratí,holandés,salomonense,liechtensteiniano,malauí,malí,micronesio,palestino,puertorriqueño,ruso,sansalvadoreño,santotomense,trinitense,yemenita,yibutiano,bareiní,afgano,albanés,alemán,andorrano,angoleño,argelino,argentino,armenio,australiano,austríaco,azerbaiyano,bahameño,bahreiní,bangladesí,barbadense,belaruso,belga,beliceño,beninés,bhutanés,bielorruso,birmano,boliviano,bosniaco,bosnio,bosnio-herzegovino,bosníaco,botsuano,brasileño,británico,burundés,butanés,búlgaro,caboverdiano,camboyano,camerunés,canadiense,ceilandés,ceilanés,singalés,esrilanqués,centroafricano,chadiano,checo,chileno,chino,chipriota,colombiano,comorano,congoleño,congolés,costarricense,croata,cubano,danés,dinamarqués,dominicano,ecuatoriano,egipcio,eritreo,eslovaco,esloveno,español,estadounidense,estonio,etíope,filipino,finlandés,fiyiano,francés,gabonés,gambiano,georgiano,ghanés,granadino,griego,guatemalteco,guineano,ecuatoguineano,guineo,guyanés,haitiano,hondureño,húngaro,indio,indonesio,iraní,iraquí,irlandés,islandés,islándico,israelí,italiano,jamaicano,jamaiquino,japonés,jordano,kazajo,keniano,kirguiso,kirguís,kiribatiano,kiribatí,kuwaití,lao,laosiano,letón,libanés,liberiano,libio,lituano,luxemburgués,macedonio,malasio,malawiano,maldivo,malgache,maliense,maltés,marroquí,mauriciano,mauritano,mexicano,moldavo,monegasco,mongol,montenegrino,mozambiqueño,namibiano,namibio,nauruano,neerlandés,neozelandés,nepalés,nicaragüense,nigeriano,nigerino,niuano,norcoreano,norteamericano,americano,noruego,omaní,pakistaní,palauano,panameño,papú,papúa,paquistaní,paraguayo,peruano,polaco,polonés,portugués,qatarí,ruandés,rumano,rwandés,salvadoreño,samoano,sanmarinense,santalucense,saudita,saudí,senegalés,serbio,sierraleonés,singapurense,sirio,somalí,suazi,sudafricano,sudanés,sueco,suizo,surcoreano,surinamés,sursudanés,tailandés,tanzano,tayiko,timorense,togolés,tongano,tunecino,turco,turcomano,tuvaluano,ucraniano,ucranio,ugandés,uruguayo,uzbeko,vanuatense,venezolano,vietnamita,yemení,zambiano,zimbabuense,árabe
+WORD_UPPER UE,ONU,OTAN,PIB,IVA,DNI,ADN,USB,PDF,HTML,URL,ISP,BBS,FTN,RAE
+ALL_CAPS_WORD 6
+REPEAT_WORD_SKIP de,que,y,o,a,en,ni,muy,ja,je,ha
+BRACKET_PAIRS ()[]{}«»
+ARTICLE_FEM la,una,las
+ARTICLE_MASC el,un,los,unos
+FEM_ENDINGS a,as
+MASC_ENDINGS o,os
+MASC_EXCEPTION_ENDINGS ma
+AGREEMENT_EXCEPTIONS agua,alma,área,aula,hacha,águila,arma,ala,hambre,ave,mano,foto,moto,radio,día,mapa,sofá,planeta,poeta,pirata,cura,guía,turista,artista,dentista,periodista,futbolista,taxista,modelo,testigo,soprano,grande,verde,triste,alegre,fuerte,inteligente,interesante,importante,posible,amable,doble,libre,pobre,dulce,breve,firme,noble,simple,suave,humilde,rebelde,salvaje,cobarde
+SENTENCE_TOO_LONG 30
+TOO_MANY_COMMAS 4 10
+WORD_DENSITY 3 12
+SUBJUNCTIVE_AFTER para que|sin que|antes de que|a fin de que|con tal de que|a menos que|en caso de que|ojalá que
+SUBJUNCTIVE_BAD_ENDINGS aba,aban,abas,ía,ían,ías,aré,arás,será,serán,ienes,iene,uedes,uede,aces,ace,ienen
+TENSE_PAST_ENDINGS aba,aban,ábamos,aron,ieron,aste,iste,amos
+TENSE_PRESENT_MARKERS hoy,ahora,actualmente,estoy,estás,está,estamos,están
+WORD_LOWER
+CAPITALIZE_SENTENCE
+DOUBLE_DASH
+REPEAT_WORD
+
+# 90 PAIR entries
+PAIR  a abajo              abajo  info  # Para indicar posición, se escribe abajo.
+PAIR  a bajo               abajo  info  # Para indicar posición, se escribe abajo.
+PAIR  a ber                haber  info  # ¿Quería decir haber?
+PAIR  a caba               acaba  info  # ¿Quería decir acaba?
+PAIR  a parte              aparte  info  # En la mayoría de los casos se escribe aparte. Solo se escribe separado si equ...
+PAIR  a tu                 vez  info  # ¿Quería decir vez?
+PAIR  ace                  hace  info  # ¿Quería decir hace (del verbo 'hacer')? "Ace" es un término inglés usado en t...
+PAIR  ademas               además
+PAIR  agusto               "a gusto"  info  # ¿Quería decir a gusto?
+PAIR  al finales           "a finales"  info  # ¿Quería decir a finales?
+PAIR  al fines             "a fines"  info  # ¿Quería decir a fines?
+PAIR  ala vez              "a la vez"  info  # ¿Quería decir a la vez?
+PAIR  aleman               alemán
+PAIR  anos                 años
+PAIR  arriba a             abajo  info  # Para indicar posición, se escribe abajo.
+PAIR  aveces               "a veces"  info  # ¿Quería decir a veces? "Aveces" es una forma correcta del v. 'avezar'.
+PAIR  aver                 "a ver"  info  # ¿Quería decir a ver o haber?
+PAIR  aya                  haya
+PAIR  boca bajo            bocabajo  info  # Como adverbio, se escribe bocabajo o boca abajo.
+PAIR  borís johnson        "Boris Johnson"  info  # ¿Quiso decir Boris Johnson (político británico)?
+PAIR  con sin              o  info  # ¿Quería decir o?
+PAIR  contra más           "cuanto más"  info  # La forma correcta es cuanto más excepto en el contexto de litigar o luchar y ...
+PAIR  de                   repuesto  info  # ¿Quería decir repuesto?
+PAIR  debido que           "debido a que"  info  # ¿Quería decir debido a que?
+PAIR  decir                hola  info  # ¿Quería decir hola (saludo)?
+PAIR  del                  ay  info  # Si es una interjección, se escribe ay. Correcto si es el v. 'haber'.
+PAIR  del la               "de la"  info  # Posible confusión. ¿Quería decir de la? Puede ser correcto si se refieren a l...
+PAIR  des de               desde  info  # ¿Quería decir desde?
+PAIR  des del              "desde el"  info  # ¿Quería decir desde el?
+PAIR  dijistes             dijiste
+PAIR  disponible           esté  info  # Si es del verbo estar, se escribe esté.
+PAIR  durante a            "durante la"  info  # ¿Quería decir durante la?
+PAIR  durante al           "durante la"  info  # ¿Quería decir durante la?
+PAIR  echo                 hecho
+PAIR  el                   él
+PAIR  enserio              "en serio"  info  # ¿Quería decir en serio (locución adverbial)? "Enserio" es una forma del verbo...
+PAIR  eramos               éramos  info  # ¿Quería decir éramos (v. 'ser') o erramos (v. 'errar')? "Eramos" del v. 'erar...
+PAIR  erase                érase  info  # ¿Quería decir érase? 'Erar' es un verbo poco usual.
+PAIR  ere                  ERE  info  # ¿Quería decir ERE (expediente de regulación de empleo) o eres v. 'ser'?
+PAIR  espanol              español
+PAIR  esta                 está
+PAIR  estar                "de más"  info  # ¿Quería decir de más (de sobra, en demasía)? Es correcto si significa "el res...
+PAIR  frances              francés
+PAIR  google doc           "Google Docs"  info  # ¿Quería decir Google Docs?
+PAIR  haber                deshecho  info  # Si es del v. 'deshacer', se escribe deshecho.
+PAIR  haber                me  info  # ¿Quería decir me?
+PAIR  haber                "a ver"
+PAIR  haiga                haya
+PAIR  halla                haya
+PAIR  hechar               echar
+PAIR  hico                 hizo  info  # ¿Quería decir hizo (v. 'hacer')? Más raramente, es correcto con el sentido de...
+PAIR  ingles               inglés
+PAIR  jamas                jamás  info  # ¿Quería decir jamás (nunca)? "Jamas" puede ser una forma del v. 'jamar' (colo...
+PAIR  jean austen          "Jane Austen"  info  # ¿Quería decir Jane Austen (novelista inglesa)?
+PAIR  jean fonda           "Jane Fonda"  info  # ¿Quería decir Jane Fonda (actriz estadounidense)?
+PAIR  laque                "la que"  info  # ¿Quería decir la que? "Laque" es correcto si es del v. 'lacar'.
+PAIR  lo                   largo  info  # ¿Quería decir largo?
+PAIR  mas                  más
+PAIR  mismo                consigo  info  # ¿Quería decir consigo?
+PAIR  más aya              "más allá"  info  # ¿Quería decir más allá? "Aya" existe como sustantivo poco usual.
+PAIR  nesecito             necesito
+PAIR  ninos                niños
+PAIR  no                   hay  info  # Si es del verbo 'haber', se escribe hay.
+PAIR  no                   sino  info  # Probablemente hay que usar la conjunción adversativa sino.
+PAIR  numeral              año  info  # ¿Quería decir año (período de doce meses)?
+PAIR  ojala                ojalá  info  # ¿Quería decir ojalá (interjección)? "Ojala" es una forma del v. ojalar.
+PAIR  osea                 "o sea"
+PAIR  para que             haya  info  # Probablemente hay que escribir haya (v. haber). Correcto si es del v. 'hallar...
+PAIR  porque               "por qué"
+PAIR  porqué               "por qué"  info  # ¿Quería decir por qué ('por qué motivo') o porque ('por razón de que')?
+PAIR  que                  año  info  # ¿Quería decir año (período de doce meses)?
+PAIR  respuesto            respondido  info  # ¿Quería decir respondido (participio) o respuesta (sustantivo femenino)?
+PAIR  sao paulo            "São Paulo"  info  # ¿Quería decir São Paulo?
+PAIR  se                   vuelva  info  # ¿Quería decir vuelva?
+PAIR  se                   sé
+PAIR  si                   "a ver"  info  # ¿Quería decir a ver?
+PAIR  si                   sí
+PAIR  sino                 "si no"
+PAIR  tambien              también
+PAIR  te                   té
+PAIR  tu                   tú
+PAIR  tubo                 tuvo
+PAIR  tuvo                 tubo
+PAIR  u no                 uno  info  # ¿Quería decir uno?
+PAIR  valla                vaya
+PAIR  vaya                 valla
+PAIR  vinistes             viniste
+PAIR  vividamente          vívidamente  info  # ¿Quería decir vívidamente (derivado de 'vívido')?
+PAIR  whatsapps            WhatsApp  info  # Escribimos WhatsApp (aplicación) o wasaps (mensajes enviados con esta aplicac...
+PAIR  ó                    o  info  # La conjunción o se escribe siempre sin tilde, incluso entre cifras.

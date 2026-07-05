@@ -48,6 +48,7 @@ extern int amiga_add_ttf_fallback(const char *path, int size);
 
 #ifdef HAVE_HUNSPELL
 #include "ui/ui_spell.h"
+#include "ui/ui_grammar.h"
 
 #ifdef HAVE_HYPHEN
 #include "ui/ui_hyph.h"
@@ -61,6 +62,10 @@ extern int amiga_add_ttf_fallback(const char *path, int size);
 
 #ifdef HAVE_TRANSLATE
 #include "ui/ui_translate.h"
+#endif
+
+#ifdef HAVE_TTS
+#include "ui/ui_tts.h"
 #endif
 
 static void ui_init_locale(void)
@@ -151,7 +156,7 @@ int main(int argc, char **argv)
         amiga_set_ttf(cfg.ttf_font, cfg.ttf_size, cfg.ttf_antialias);
         amiga_set_ttf_encoding(cfg.ttf_use_utf8);
 
-        /* Pass any TTF_FALLBACK<N> entries to the engine. Empty slots are skipped by amiga_add_ttf_fallback() */
+        /* Pass TTF_FALLBACK entries to engine, empty slots skipped */
         amiga_clear_ttf_fallbacks();
 
         for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
@@ -176,8 +181,7 @@ int main(int argc, char **argv)
     /* Windows setup (before initscr): font */
     if (cfg.font[0] && (strchr(cfg.font, '\\') || strchr(cfg.font, '/') || strchr(cfg.font, ':')))
     {
-        /* cfg.font contains a file path (legacy misconfiguration or File mode in setup)
-         * Extract the real family name and move the path to the TTF font slot */
+        /* Extract font family name from path and move path to TTF slot */
         char family[256];
         char path[TE_CFG_STR_MAX];
 
@@ -207,8 +211,7 @@ int main(int argc, char **argv)
     /* Windows cursor color */
     win32_set_cursor_pen(cfg.cursor_color >= 0 ? cfg.cursor_color : COLOR_WHITE);
 
-    /* Optional TrueType fonts loaded from files (TTF_FONT + TTF_FALLBACK<N>)
-     * FONT must be set to the family name of the loaded TTF */
+    /* Load TrueType fonts from files, FONT set to family name */
     if (cfg.ttf_enabled)
     {
         int fi;
@@ -314,9 +317,9 @@ int main(int argc, char **argv)
     define_key("\033b", KEY_ALT('B'));
     define_key("\033B", KEY_ALT('B'));
     define_key("\033o", KEY_ALT('O'));
-    define_key("\033O", KEY_ALT('O'));
+    define_key("\033O", KEY_SHIFT('O'));
     define_key("\033p", KEY_ALT('P'));
-    define_key("\033P", KEY_ALT('P'));
+    define_key("\033P", KEY_SHIFT('P'));
     define_key("\033q", KEY_ALT('Q'));
     define_key("\033Q", KEY_ALT('Q'));
     define_key("\033z", KEY_ALT('Z'));
@@ -330,11 +333,11 @@ int main(int argc, char **argv)
     define_key("\033i", KEY_ALT('I'));
     define_key("\033I", KEY_ALT('I'));
     define_key("\033j", KEY_ALT('J'));
-    define_key("\033J", KEY_ALT('J'));
+    define_key("\033J", KEY_SHIFT('J'));
     define_key("\033k", KEY_ALT('K'));
-    define_key("\033K", KEY_ALT('K'));
+    define_key("\033K", KEY_SHIFT('K'));
     define_key("\033l", KEY_ALT('L'));
-    define_key("\033L", KEY_ALT('L'));
+    define_key("\033L", KEY_SHIFT('L'));
     define_key("\033w", KEY_ALT('W'));
     define_key("\033W", KEY_ALT('W'));
     define_key("\033u", KEY_ALT('U'));
@@ -439,6 +442,15 @@ int main(int argc, char **argv)
 
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_GRAMMAR
+    /* Initialize grammar checker from config */
+    app->grammar_enabled = cfg.grammar_enabled;
+    app->grammar_active = 0;
+    app->grammar_handle = NULL;
+
+    ui_grammar_load_from_config(app);
+#endif
+
 #ifdef HAVE_TRANSLATE
     /* Initialize translate_enabled from config */
     app->translate_enabled = cfg.translate_enabled;
@@ -446,6 +458,11 @@ int main(int argc, char **argv)
 
     /* Load translator from config */
     ui_translate_load_from_config(app);
+#endif
+
+#ifdef HAVE_TTS
+    /* Load TTS from config, editor works normally if backend unavailable */
+    ui_tts_load_from_config(app);
 #endif
 
     ui_editor_recent_load();

@@ -316,6 +316,9 @@ WINDOW *dupwin(WINDOW *win);
         }                       \
     } while (0)
 
+#define getcurx(win) ((win) ? (win)->_curx : 0)
+#define getcury(win) ((win) ? (win)->_cury : 0)
+
 #define getbegyx(win, y, x)     \
     do                          \
     {                           \

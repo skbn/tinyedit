@@ -24,6 +24,7 @@
 #include "../components/editor.h"
 #include "ui_editor_helper.h"
 #include "ui_spell.h"
+#include "ui_grammar.h"
 #include "../wrapper.h"
 
 #ifdef HAVE_TRANSLATE
@@ -32,6 +33,10 @@
 
 #ifdef HAVE_TRANSLATE_STARDICT
 #include "ui_dict.h"
+#endif
+
+#ifdef HAVE_TTS
+#include "ui_tts.h"
 #endif
 
 #ifdef HAVE_HUNSPELL
@@ -204,6 +209,10 @@ void te_app_free(TeApp *app)
     }
 #endif
 
+#ifdef HAVE_GRAMMAR
+    ui_grammar_free_app(app);
+#endif
+
 #ifdef HAVE_HYPHEN
     if (app->hyph_handle)
     {
@@ -228,6 +237,11 @@ void te_app_free(TeApp *app)
         translate_free((TranslateHandle *)app->translate_handle);
         app->translate_handle = NULL;
     }
+#endif
+
+#ifdef HAVE_TTS
+    /* Stop in-flight speech before freeing TtsHandle */
+    ui_tts_unload(app);
 #endif
 
     if (app->wm)
@@ -675,48 +689,60 @@ void te_draw_statusbar(TeApp *app)
 
     if (app)
     {
-        tab = te_app_get_active_tab(app);
+        const char *msg = NULL;
 
-        if (tab)
+        /* Show the transient status message if one is set */
+        if (app->status[0])
         {
-            const char *fn = NULL;
-            const char *last_slash = NULL;
-            char wc_str[32];
-
-            wc_str[0] = '\0';
-
-            if (app->cfg.word_count && tab->editor)
-                snprintf(wc_str, sizeof(wc_str), "  Words: %d", ed_word_count(tab->editor));
-
-            if (tab->filename[0])
-            {
-                last_slash = strrchr(tab->filename, '/');
-
-                if (!last_slash)
-                    last_slash = strrchr(tab->filename, '\\');
-
-                fn = last_slash ? last_slash + 1 : tab->filename;
-
-                snprintf(charset_info, sizeof(charset_info), "%s  View: %s  Save: %s%s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
-            }
-            else
-            {
-                snprintf(charset_info, sizeof(charset_info), "View: %s  Save: %s%s", tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
-            }
+            msg = app->status;
         }
         else
         {
-            snprintf(charset_info, sizeof(charset_info), "View: UTF-8  Save: UTF-8");
+            tab = te_app_get_active_tab(app);
+
+            if (tab)
+            {
+                const char *fn = NULL;
+                const char *last_slash = NULL;
+                char wc_str[32];
+
+                wc_str[0] = '\0';
+
+                if (app->cfg.word_count && tab->editor)
+                    snprintf(wc_str, sizeof(wc_str), "  Words: %d", ed_word_count(tab->editor));
+
+                if (tab->filename[0])
+                {
+                    last_slash = strrchr(tab->filename, '/');
+
+                    if (!last_slash)
+                        last_slash = strrchr(tab->filename, '\\');
+
+                    fn = last_slash ? last_slash + 1 : tab->filename;
+
+                    snprintf(charset_info, sizeof(charset_info), "%s  View: %s  Save: %s%s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
+                }
+                else
+                {
+                    snprintf(charset_info, sizeof(charset_info), "View: %s  Save: %s%s", tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
+                }
+            }
+            else
+            {
+                snprintf(charset_info, sizeof(charset_info), "View: UTF-8  Save: UTF-8");
+            }
+
+            msg = charset_info;
         }
 
-        msg_len = (int)strlen(charset_info);
+        msg_len = (int)strlen(msg);
         max_left = (rzone_start < COLS ? rzone_start : COLS) - 2;
 
         if (max_left > msg_len)
             max_left = msg_len;
 
         if (max_left > 0)
-            mvaddnstr(y, 1, charset_info, max_left);
+            mvaddnstr(y, 1, msg, max_left);
     }
 
     attroff(COLOR_PAIR(COL_STATUS));

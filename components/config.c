@@ -403,6 +403,25 @@ void te_cfg_defaults(TeConfig *cfg)
 
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_GRAMMAR
+    /* Grammar checker defaults: disabled, empty paths */
+    cfg->grammar_enabled = 0;
+
+#if defined(PLATFORM_BSD)
+    strncpy(cfg->grammar_dict_path, "/usr/local/share/gramcheck", sizeof(cfg->grammar_dict_path) - 1);
+#elif defined(PLATFORM_UNIX)
+    strncpy(cfg->grammar_dict_path, "/usr/share/gramcheck", sizeof(cfg->grammar_dict_path) - 1);
+#elif defined(PLATFORM_WIN32)
+    strncpy(cfg->grammar_dict_path, "C:\\gramcheck\\rules", sizeof(cfg->grammar_dict_path) - 1);
+#elif defined(PLATFORM_AMIGA)
+    strncpy(cfg->grammar_dict_path, "PROGDIR:rules", sizeof(cfg->grammar_dict_path) - 1);
+#else
+    cfg->grammar_dict_path[0] = '\0';
+#endif
+    cfg->grammar_dict_path[sizeof(cfg->grammar_dict_path) - 1] = '\0';
+    cfg->grammar_dict_name[0] = '\0';
+#endif /* HAVE_GRAMMAR */
+
 #ifdef HAVE_TRANSLATE
     /* Translator defaults: disabled, MyMemory backend, default endpoints */
     cfg->translate_enabled = 0;
@@ -419,6 +438,14 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->translate_timeout = 10;  /* 10 seconds */
     cfg->stardict_path[0] = '\0'; /* Empty by default */
 #endif                            /* HAVE_TRANSLATE */
+
+#ifdef HAVE_TTS
+    cfg->tts_enabled = 0;
+    cfg->tts_voice = 0; /* MALE */
+    cfg->tts_rate = 150;
+    cfg->tts_pitch = 110;
+    cfg->tts_volume = 100;
+#endif /* HAVE_TTS */
 
     /* White-on-black fallback */
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
@@ -1037,6 +1064,35 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         }
 #endif
 #endif /* HAVE_HUNSPELL */
+#ifdef HAVE_GRAMMAR
+        else if (strcasecmp(word, "GRAMMAR_ENABLED") == 0)
+        {
+            cfg->grammar_enabled = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "GRAMMAR_DICT_PATH") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+
+            if (tmp[0] != '\0')
+            {
+                strncpy(cfg->grammar_dict_path, tmp, sizeof(cfg->grammar_dict_path) - 1);
+                cfg->grammar_dict_path[sizeof(cfg->grammar_dict_path) - 1] = '\0';
+            }
+        }
+        else if (strcasecmp(word, "GRAMMAR_DICT_NAME") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+            strip_quotes(tmp);
+
+            strncpy(cfg->grammar_dict_name, tmp, sizeof(cfg->grammar_dict_name) - 1);
+            cfg->grammar_dict_name[sizeof(cfg->grammar_dict_name) - 1] = '\0';
+        }
+#endif /* HAVE_GRAMMAR */
 #ifdef HAVE_TRANSLATE
         else if (strcasecmp(word, "TRANSLATE_ENABLED") == 0)
         {
@@ -1129,6 +1185,62 @@ int te_cfg_load(TeConfig *cfg, const char *path)
             cfg->stardict_path[sizeof(cfg->stardict_path) - 1] = '\0';
         }
 #endif /* HAVE_TRANSLATE */
+#ifdef HAVE_TTS
+        else if (strcasecmp(word, "TTS_ENABLED") == 0)
+        {
+            cfg->tts_enabled = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "TTS_VOICE") == 0)
+        {
+            char val[24];
+
+            get_token(rest, val, sizeof(val));
+
+            if (strcasecmp(val, "MALE") == 0)
+                cfg->tts_voice = 0;
+            else if (strcasecmp(val, "FEMALE") == 0)
+                cfg->tts_voice = 1;
+            else if (strcasecmp(val, "MALE_ROBOT") == 0 || strcasecmp(val, "MALEROBOT") == 0)
+                cfg->tts_voice = 2;
+            else if (strcasecmp(val, "FEMALE_ROBOT") == 0 || strcasecmp(val, "FEMALEROBOT") == 0)
+                cfg->tts_voice = 3;
+            else
+                cfg->tts_voice = atoi(val); /* Accept numeric too */
+
+            if (cfg->tts_voice < 0 || cfg->tts_voice > 3)
+                cfg->tts_voice = 0;
+        }
+        else if (strcasecmp(word, "TTS_RATE") == 0)
+        {
+            cfg->tts_rate = atoi(rest);
+
+            if (cfg->tts_rate < 40)
+                cfg->tts_rate = 40;
+
+            if (cfg->tts_rate > 400)
+                cfg->tts_rate = 400;
+        }
+        else if (strcasecmp(word, "TTS_PITCH") == 0)
+        {
+            cfg->tts_pitch = atoi(rest);
+
+            if (cfg->tts_pitch < 65)
+                cfg->tts_pitch = 65;
+
+            if (cfg->tts_pitch > 320)
+                cfg->tts_pitch = 320;
+        }
+        else if (strcasecmp(word, "TTS_VOLUME") == 0)
+        {
+            cfg->tts_volume = atoi(rest);
+
+            if (cfg->tts_volume < 0)
+                cfg->tts_volume = 0;
+
+            if (cfg->tts_volume > 100)
+                cfg->tts_volume = 100;
+        }
+#endif /* HAVE_TTS */
     }
 
     fclose(f);
@@ -1181,7 +1293,8 @@ static const char *color_name(int c)
 
 int te_cfg_save(const TeConfig *cfg, const char *path)
 {
-    FILE *in, *out;
+    FILE *in = NULL;
+    FILE *out = NULL;
     char tmp_path[512];
     char line[1024];
     int fi;
@@ -1190,11 +1303,13 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
 
     out = fopen(tmp_path, "w");
+
     if (!out)
         return -1;
 
     /* Stream original file, filtering TTF_FALLBACK lines */
     in = fopen(path, "r");
+
     if (in)
     {
         while (fgets(line, sizeof(line), in))
@@ -1272,6 +1387,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 #ifdef HAVE_TRANSLATE
                 || strcasecmp(word, "TRANSLATE_ENABLED") == 0 || strcasecmp(word, "TRANSLATE_BACKEND") == 0 || strcasecmp(word, "TRANSLATE_ENDPOINT") == 0 || strcasecmp(word, "TRANSLATE_API_KEY") == 0 || strcasecmp(word, "TRANSLATE_EMAIL") == 0 || strcasecmp(word, "TRANSLATE_FROM_LANG") == 0 || strcasecmp(word, "TRANSLATE_TO_LANG") == 0 || strcasecmp(word, "TRANSLATE_TIMEOUT") == 0 || strcasecmp(word, "STARDICT_PATH") == 0
 #endif
+#ifdef HAVE_TTS
+                || strcasecmp(word, "TTS_ENABLED") == 0 || strcasecmp(word, "TTS_VOICE") == 0 || strcasecmp(word, "TTS_RATE") == 0 || strcasecmp(word, "TTS_PITCH") == 0 || strcasecmp(word, "TTS_VOLUME") == 0
+#endif
             )
             {
                 skip_line = 1;
@@ -1280,6 +1398,7 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
             if (!skip_line)
                 fputs(line, out);
         }
+
         fclose(in);
     }
     else
@@ -1400,6 +1519,12 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_GRAMMAR
+    fprintf(out, "GRAMMAR_ENABLED %s\n", cfg->grammar_enabled ? "YES" : "NO");
+    fprintf(out, "GRAMMAR_DICT_PATH %s\n", cfg->grammar_dict_path);
+    fprintf(out, "GRAMMAR_DICT_NAME %s\n", cfg->grammar_dict_name);
+#endif
+
 #ifdef HAVE_TRANSLATE
     const char *backend_name = "MYMEMORY";
 
@@ -1426,6 +1551,35 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "TRANSLATE_TIMEOUT %d\n", cfg->translate_timeout);
     fprintf(out, "STARDICT_PATH %s\n", cfg->stardict_path);
 #endif /* HAVE_TRANSLATE */
+
+#ifdef HAVE_TTS
+    const char *voice_name = "MALE";
+
+    switch (cfg->tts_voice)
+    {
+    case 0:
+        voice_name = "MALE";
+        break;
+    case 1:
+        voice_name = "FEMALE";
+        break;
+    case 2:
+        voice_name = "MALE_ROBOT";
+        break;
+    case 3:
+        voice_name = "FEMALE_ROBOT";
+        break;
+    default:
+        voice_name = "MALE";
+        break;
+    }
+
+    fprintf(out, "TTS_ENABLED %s\n", cfg->tts_enabled ? "YES" : "NO");
+    fprintf(out, "TTS_VOICE %s\n", voice_name);
+    fprintf(out, "TTS_RATE %d\n", cfg->tts_rate);
+    fprintf(out, "TTS_PITCH %d\n", cfg->tts_pitch);
+    fprintf(out, "TTS_VOLUME %d\n", cfg->tts_volume);
+#endif /* HAVE_TTS */
 
     fclose(out);
 

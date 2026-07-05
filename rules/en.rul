@@ -1,0 +1,425 @@
+# gramcheck rule pack -- generated from LanguageTool by lt2rul.py
+# LanguageTool rules are LGPL; keep this file with its notice.
+LANG   en
+NAME   en (from LanguageTool)
+
+PUNCT_NO_SPACE_BEFORE ,.;:!?)
+PUNCT_SPACE_AFTER ,;:
+PUNCT_NO_SPACE_AFTER (
+PUNCT_NO_DOUBLE ,;
+EXCESSIVE_PUNCT 2
+WORD_CAP monday,tuesday,wednesday,thursday,friday,saturday,sunday,january,february,march,april,june,july,august,september,october,november,december,english,american,british,european,spanish,french,german,london,paris,europe,america
+WORD_UPPER usa,uk,eu,un,nato,gdp,vat,dna,usb,pdf,html,url,isp,bbs,faq,ceo,ftn
+ALL_CAPS_WORD 5
+REPEAT_WORD_SKIP had,that,ha,ho,so,no,is,ok
+BRACKET_PAIRS ()[]{}
+SENTENCE_TOO_LONG 30
+TOO_MANY_COMMAS 4 10
+WORD_DENSITY 3 12
+SENTENCE_OPEN_ES ?
+DOUBLE_DASH
+QUOTE_SPACING
+TRIPLE_DOT
+
+# 401 PAIR entries
+PAIR  've to               got  info  # Did you mean got?
+PAIR  a                    way  info  # Did you mean way?
+PAIR  a but                "a bit"  info  # Did you mean a bit?
+PAIR  a lot                bigger  info  # Did you mean bigger?
+PAIR  abundance            enough  info  # Use enough or plenty, or give specific amount.
+PAIR  accelerate           "speed up"  info  # Technical. Elsewhere replace with speed up.
+PAIR  accentuate           stress  info  # Replace with stress or emphasize.
+PAIR  accepted             widely  info  # Did you mean widely?
+PAIR  accommodation        room  info  # room.
+PAIR  accomodate           accommodate
+PAIR  accompany            "go with"  info  # If not in musical context, use go with or with.
+PAIR  accurate             right  info  # If it is not about aiming, use right; also detailed or correct.
+PAIR  ad nauseum           "ad nauseam"  info  # Did you mean ad nauseam?
+PAIR  adopt to             "adapt to"  info  # Did you mean adapt to?
+PAIR  advertisement of     "advertisement for"  info  # The usual collocation for "\1" is "for", not "\2". Did you mean advertisement...
+PAIR  affect               effect
+PAIR  after been           "after being"  info  # Did you mean after being?
+PAIR  afterall             "after all"  info  # Did you mean after all?
+PAIR  ago                  "too long"  info  # Did you mean too long?
+PAIR  ala mode             "à la mode"  info  # Did you mean à la mode?
+PAIR  aline                "a line"  info  # This word is a less commonly used variant of the verb 'align'. Did you mean ,...
+PAIR  alines               Aline's  info  # This word is a less commonly used variant of the verb 'align'. Did you mean ,...
+PAIR  all of               and  info  # Did you mean and?
+PAIR  all sudden           "of a"  info  # Did you mean of a?
+PAIR  all the              best  info  # Did you mean best?
+PAIR  all ways             always  info  # Did you mean always?
+PAIR  allot of             "a lot of"  info  # Did you mean a lot of (=plenty)?
+PAIR  along side           alongside  info  # Did you mean alongside?
+PAIR  along time           "a long time"  info  # Did you mean a long time?
+PAIR  alot                 "a lot"
+PAIR  an                   invitation  info  # The noun invitation is usually used instead of 'invite' in formal writing.
+PAIR  an on                effect  info  # Did you mean effect (=influence)?
+PAIR  and also             and  info  # Consider using and or also.
+PAIR  another words        "in other words"  info  # Did you mean in other words?
+PAIR  any where            anywhere  info  # Did you mean anywhere?
+PAIR  anyways              anyway  info  # The word '\1' is informal American English. Did you mean anyway?
+PAIR  apart form           "apart from"  info  # Possible typo. Did you mean apart from?
+PAIR  appstore             "App Store"  info  # If you mean the Apple digital distribution platform, use App Store. For Amazo...
+PAIR  as as                rough  info  # Did you mean the adjective rough?
+PAIR  as as                tough  info  # Did you mean the adjective tough (like "strong" or "difficult")?
+PAIR  as as                good  info  # Did you mean good?
+PAIR  as follow            "as follows"  info  # Did you mean as follows?
+PAIR  as per               "in accordance with"  info  # Business jargon meaning in accordance with. Replace with as or modify the sen...
+PAIR  ascetic acid         "acetic acid"  info  # Did you mean acetic acid?
+PAIR  astra zeneca         AstraZeneca  info  # The pharma company AstraZeneca is spelled without a space in between.
+PAIR  at                   sea  info  # Did you mean sea or seeing?
+PAIR  attorney generals    "attorneys general"  info  # The set phrase "attorney general" is correctly pluralized as attorneys general.
+PAIR  attributable to      "because of"  info  # Did you mean because of?
+PAIR  awaiting for         awaiting  info  # Did you mean awaiting or waiting for?
+PAIR  away                 throw  info  # Did you mean throw?
+PAIR  away fro             "away from"  info  # Did you mean away from?
+PAIR  baited breath        "bated breath"  info  # Did you mean bated breath?
+PAIR  bayern               Bavaria  info  # The English name for this German state is Bavaria.
+PAIR  be                   seen  info  # Did you mean seen, the past participle of the verb "to see"?
+PAIR  be                   "in a hospital bed"  info  # The usual preposition with "\5" is "in". Did you mean in a hospital bed?
+PAIR  be                   white  info  # Did you mean the adjective white (whit = a tiny amount)?
+PAIR  be                   "allowed to"  info  # Possible typo. Did you mean allowed to?
+PAIR  be a                 quite  info  # Did you mean quite? 'quiet' means 'silent', 'quite' mean 'very' or 'to a mode...
+PAIR  be cause             because  info  # Did you mean because?
+PAIR  be sure              not  info  # Did you mean not?
+PAIR  be than              older  info  # Did you mean older?
+PAIR  be the               "one of"  info  # Did you mean one of?
+PAIR  be ware              beware  info  # Did you mean beware?
+PAIR  be with              fine  info  # Did you mean fine?
+PAIR  beckon call          "beck and call"  info  # Did you mean beck and call?
+PAIR  been                 added  info  # Did you mean added?
+PAIR  before hand          beforehand  info  # Did you mean beforehand?
+PAIR  begining             beginning
+PAIR  begs belief          "beggars belief"  info  # Did you mean beggars belief?
+PAIR  belated              late  info  # Outdated. Did you mean late?
+PAIR  bended               bent  info  # The past tense and past participle of the verb "bend" is bent.
+PAIR  best of              luck  info  # Did you mean luck?
+PAIR  bidded               bid  info  # The past tense of the verb "to bid" is bid.
+PAIR  bing ads             "Microsoft Ads"  info  # "Bing Ads" has been renamed to Microsoft Ads.
+PAIR  blessing in          disguise  info  # Did you mean disguise (a blessing in disguise = an unfortunate event that res...
+PAIR  bored of             "bored with"  info  # In standard English it's more accepted to use bored with or bored by.
+PAIR  brew haha            brouhaha  info  # Did you mean brouhaha?
+PAIR  busses               buses  info  # The more common plural form of "bus" (= motor vehicle) is buses.
+PAIR  buttload             boatload  info  # Did you mean boatload?
+PAIR  by                   multiply  info  # Did you mean the verb multiply?
+PAIR  by means             of  info  # It appears that of is the correct preposition here.
+PAIR  by of                means  info  # Did you mean means?
+PAIR  calender             calendar  info  # Did you mean calendar, a system of organizing days? A 'calender' is a machine.
+PAIR  can blackout         "can black out"  info  # Did you mean can black out?
+PAIR  can not              cannot  info  # Did you mean cannot?
+PAIR  cape                 Cod  info  # Did you mean Cod?
+PAIR  casted               cast  info  # The past tense and past participle of the verb "cast" is cast.
+PAIR  chalk full           chock-full  info  # Did you mean chock-full?
+PAIR  chat gpt             ChatGPT  info  # ChatGPT (= Artificial Intelligence) is spelled as one word.
+PAIR  choosed              chose  info  # The past tense and past participle of the verb "to choose" is chose. The past...
+PAIR  christmas time       Christmastime  info  # The noun Christmastime (= the Christmas season) is normally spelled as one word.
+PAIR  cold play            Coldplay  info  # Did you mean Coldplay (= music band)?
+PAIR  come                 through  info  # Did you mean through?
+PAIR  comprise of          comprise  info  # Did you mean comprise or consist of?
+PAIR  comprises of         comprises  info  # Did you mean comprises or consists of?
+PAIR  comprising of        comprising  info  # Did you mean comprising or consisting of?
+PAIR  congratulations      on  info  # The correct preposition here is on.
+PAIR  constellation prize  "consolation prize"  info  # Did you mean consolation prize?
+PAIR  constitutes of       "consists of"  info  # Did you mean consists of?
+PAIR  construction sight   "construction site"  info  # Did you mean construction site?
+PAIR  copy pasted          "copied and pasted"  info  # Did you mean copied and pasted?
+PAIR  copy pastes          "copies and pastes"  info  # Did you mean copies and pastes?
+PAIR  copy pasting         "copying and pasting"  info  # Did you mean copying and pasting?
+PAIR  could n't            "care less"  info  # Did you mean care less?
+PAIR  could of             "could have"
+PAIR  crowd sourcing       crowdsourcing  info  # Did you mean crowdsourcing?
+PAIR  currently            now  info  # Omit or replace with now
+PAIR  daily regiment       "daily regimen"  info  # Did you mean daily regimen?
+PAIR  damp squid           "damp squib"  info  # Did you mean damp squib?
+PAIR  de factor            "de facto"  info  # Did you mean de facto?
+PAIR  de juro              "de jure"  info  # This is an incorrect spelling of a Latin phrase. Did you mean de jure (accord...
+PAIR  death nail           "death knell"  info  # Did you mean death knell?
+PAIR  definately           definitely
+PAIR  dident               didn't  info  # Did you mean didn't?
+PAIR  different tact       "different tack"  info  # Did you mean different tack?
+PAIR  disc break           "disc brake"  info  # Did you mean disc brake?
+PAIR  do able              doable  info  # Did you mean the adjective doable?
+PAIR  door jam             "door jamb"  info  # Did you mean door jamb?
+PAIR  downpayment          "down payment"  info  # Did you mean down payment?
+PAIR  each                 other's  info  # Did you mean other's?
+PAIR  each and             "every one"  info  # Did you mean every one?
+PAIR  early adapter        "early adopter"  info  # Did you mean early adopter (=someone who takes something early on)?
+PAIR  ease use             of  info  # Did you mean of?
+PAIR  egg yoke             "egg yolk"  info  # Did you mean egg yolk?
+PAIR  eifel tower          "Eiffel Tower"  info  # Did you mean the Eiffel Tower in Paris?
+PAIR  en mass              "en masse"  info  # Did you mean en masse?
+PAIR  enjoy your           week  info  # Did you mean the noun week?
+PAIR  equally as           equally  info  # Use either equally or as on its own. When comparing two nouns, use just as.
+PAIR  erdogan              Erdoğan  info  # The name of the Turkish politician is spelled Erdoğan (= Recep Tayyip Erdoğan).
+PAIR  et all               "at all"  info  # Did you mean et al. (=and others) or at all?
+PAIR  european union       "European Union"  info  # Capitalize the proper noun European Union.
+PAIR  ever                 worst  info  # Did you mean the adjective worst?
+PAIR  every since          "ever since"  info  # Did you mean ever since?
+PAIR  every where          everywhere  info  # Did you mean everywhere?
+PAIR  expire               trial  info  # Did you mean trial?
+PAIR  fast                 paced  info  # Did you mean paced?
+PAIR  feel to              free  info  # Did you mean free?
+PAIR  first all            of  info  # It appears that of is the correct preposition here.
+PAIR  flashpoint           "flash point"  info  # Did you mean flash point?
+PAIR  for quite            "some time"  info  # Did you mean some time?
+PAIR  for sell             "for sale"  info  # Did you mean for sale?
+PAIR  forth place          "fourth place"  info  # Did you mean fourth place?
+PAIR  fowl swoop           "fell swoop"  info  # Did you mean fell swoop?
+PAIR  free lance           freelance  info  # Did you mean freelance?
+PAIR  free lances          freelances  info  # Did you mean freelances?
+PAIR  free lancing         freelancing  info  # Did you mean freelancing?
+PAIR  free reign           "free rein"  info  # Did you mean free rein?
+PAIR  fro                  for  info  # Did you mean for or from?
+PAIR  from                 "now on"  info  # Did you mean now on?
+PAIR  from the             get-go  info  # In this idiom, get-go is spelled with a hyphen.
+PAIR  further adieu        "further ado"  info  # Did you mean further ado?
+PAIR  g mail               Gmail  info  # Did you mean Gmail (= email client from Google)?
+PAIR  galaxy               tab  info  # Did you mean tab (short form for "tablet")?
+PAIR  get                  here  info  # Did you mean the adverb here (= at this place) or the verb heard?
+PAIR  get of               rid  info  # Did you mean rid ('get rid of' = 'discard' or 'get free of')?
+PAIR  get rid              of  info  # Did you mean of ('get rid of' = 'discard' or 'get free of')?
+PAIR  getted               got  info  # Did you mean got or get it?
+PAIR  git hub              GitHub  info  # Did you mean GitHub (= Coding Platform)?
+PAIR  go                   into  info  # Did you mean into?
+PAIR  google docks         "Google Docs"  info  # Did you mean the office suite Google Docs?
+PAIR  got shutout          "got shut out"  info  # Did you mean got shut out?
+PAIR  grill cheese         "grilled cheese"  info  # Did you mean grilled cheese?
+PAIR  guest stared         guest-starred  info  # Did you mean guest-starred?
+PAIR  happed               happened  info  # Did you mean happened or happen?
+PAIR  happy                "Women's Day"  info  # Did you mean the global holiday Women's Day?
+PAIR  happy to             discuss  info  # Did you mean the verb discuss (= talk about something)?
+PAIR  hardly never         "hardly ever"  info  # Did you mean hardly ever?
+PAIR  harison ford         "Harrison Ford"  info  # Did you mean the American actor and film producer Harrison Ford?
+PAIR  have to              be  info  # The correct verb form here appears to be be.
+PAIR  herbert dies         "Herbert Diess"  info  # Did you mean the automotive manager Herbert Diess?
+PAIR  historic record      "historical record"  info  # Did you mean historical record?
+PAIR  hopkins              Johns  info  # Did you mean Johns?
+PAIR  how ever             however  info  # Did you mean however?
+PAIR  if                   "it is"  info  # It seems you either mean it is, it or there is a comma missing.
+PAIR  imminent domain      "eminent domain"  info  # Did you mean eminent domain?
+PAIR  in affect            "in effect"  info  # Did you mean in effect (in substance, virtually)?
+PAIR  in masse             "en masse"  info  # Did you mean en masse?
+PAIR  in parenthesis       "in parentheses"  info  # Did you mean in parentheses? 'parenthesis' is the singular.
+PAIR  in vein              "in vain"  info  # Did you mean in vain (=unsuccessfully)?
+PAIR  incase of            "in case of"  info  # Did you mean in case of?
+PAIR  internet explorer    "Internet Explorer"  info  # The proper noun Internet Explorer (= Microsoft browser) needs to be capitalized.
+PAIR  irregardless         regardless  info  # 'Irregardless' is nonstandard. In formal style you should use regardless.
+PAIR  is                   where  info  # Did you mean where?
+PAIR  it 's                "it is"  info  # Wikipedia style. Replace "it's" with it is
+PAIR  it self              itself  info  # Did you mean itself?
+PAIR  it think             "I think"  info  # Did you mean I think?
+PAIR  its                  it's
+PAIR  its 's               it's  info  # Did you mean it's or its?
+PAIR  japan                Japan  info  # This noun needs to be capitalized if you mean the country Japan.
+PAIR  japanise             Japanese  info  # Did you mean Japanese (= people from Japan)?
+PAIR  java script          JavaScript  info  # Did you mean JavaScript (= programming language)?
+PAIR  jay z                Jay-Z  info  # The name of this rapper is spelled with a hyphen Jay-Z.
+PAIR  jimmy buffet         "Jimmy Buffett"  info  # Did you mean Jimmy Buffett?
+PAIR  jimmy hendrix        "Jimi Hendrix"  info  # Did you mean Jimi Hendrix?
+PAIR  jive with            "jibe with"  info  # Make sure that '\1' refers to a type of dance. Did you mean jibe with?
+PAIR  jongun               Jong-un  info  # Did you mean Jong-un (= person from North Korea)?
+PAIR  key words            keywords  info  # Did you mean keywords?
+PAIR  la paz               "La Paz"  info  # The city name La Paz needs to be capitalized.
+PAIR  laid ahead           "lay ahead"  info  # Did you mean lay ahead?
+PAIR  land lover           landlubber  info  # Did you mean landlubber?
+PAIR  laughing stock       laughingstock  info  # Did you mean laughingstock?
+PAIR  left overs           leftovers  info  # The noun leftovers is spelled as one word.
+PAIR  les                  less  info  # Did you mean less instead of the French article "les"?
+PAIR  let 's               assess  info  # The plural noun "\3" describes the back of a person ("buttocks"). Did you mea...
+PAIR  ling                 long  info  # Did you mean long?
+PAIR  lockhead martin      "Lockheed Martin"  info  # Did you mean the defense company Lockheed Martin?
+PAIR  look                 forward  info  # Did you mean the adverb forward?
+PAIR  loose                lose
+PAIR  mabey                maybe  info  # "Mabey" is a common surname. Did you mean maybe (= perhaps)?
+PAIR  macos x              "Mac OS X"  info  # Did you mean Mac OS X?
+PAIR  majority             most  info  # Majority in the sense of "more than half" is used with countable nouns only (...
+PAIR  make overs           makeovers  info  # The plural noun makeovers is normally spelled as one word.
+PAIR  managerial reigns    "managerial reins"  info  # Did you mean managerial reins?
+PAIR  many                 too  info  # Did you mean too?
+PAIR  many time            "much time"  info  # Did you mean \1 times or much time?
+PAIR  mash potatoes        "mashed potatoes"  info  # Did you mean mashed potatoes?
+PAIR  mcdonalds            McDonald's  info  # Did you mean the fast food chain McDonald's (always spelled with a possessive...
+PAIR  mean while           meanwhile  info  # Did you mean meanwhile?
+PAIR  meta data            metadata  info  # Did you mean metadata?
+PAIR  mi                   me  info  # Did you mean me or my?
+PAIR  minus well           "might as well"  info  # Did you mean might as well?
+PAIR  money                "a lot of"  info  # In this context, a lot of or so much is more likely.
+PAIR  more                 than  info  # Did you mean than?
+PAIR  mount fujiyama       "Mount Fuji"  info  # As “Yama” means “mountain” in Japanese, better write Mount Fuji?
+PAIR  much                 worse  info  # Did you mean worse?
+PAIR  much                 bigger  info  # Did you mean bigger?
+PAIR  must that            admit  info  # Did you mean admit (=confess)?
+PAIR  mute point           "moot point"  info  # Did you mean moot point?
+PAIR  my be                "may be"  info  # Did you mean may be or might be?
+PAIR  nation wide          nationwide  info  # Did you mean nationwide?
+PAIR  ne                   né  info  # Did you mean né, me, no, be?
+PAIR  near                 nowhere  info  # Did you mean nowhere?
+PAIR  near by              nearby  info  # Did you mean nearby?
+PAIR  neccessary           necessary
+PAIR  not                  use  info  # Did you mean use?
+PAIR  not                  "go on"  info  # Did you mean go on?
+PAIR  not able             unable  info  # Avoid using "not". Did you mean unable?
+PAIR  not accept           reject  info  # Avoid using "not". Did you mean reject?
+PAIR  not all              at  info  # Did you mean at?
+PAIR  not certain          uncertain  info  # Avoid using "not". Did you mean uncertain?
+PAIR  not many             few  info  # Avoid using "not". Did you mean few?
+PAIR  not unlike           similar  info  # Avoid using "not". Did you mean similar or alike?
+PAIR  o'clock              two  info  # Did you mean two?
+PAIR  objective c          Objective-C  info  # Did you mean the programming language Objective-C?
+PAIR  obtain               get  info  # Did you mean simpler get?
+PAIR  occured              occurred
+PAIR  of                   lots  info  # Did you mean lots?
+PAIR  of                   half  info  # The word "\1" is a verb. Did you mean half?
+PAIR  of                   state  info  # Did you mean state?
+PAIR  of                   bit  info  # Reduce redundancy by only using bit.
+PAIR  of all               worst  info  # Did you mean the adjective worst?
+PAIR  of scope             breadth  info  # Did you mean breadth?
+PAIR  oft chance           "off chance"  info  # Did you mean off chance?
+PAIR  on                   dependent  info  # Did you mean dependent on?
+PAIR  on behave            "on behalf"  info  # Did you mean on behalf (in the name of, as a representative of)?
+PAIR  on boarding          onboarding  info  # The word onboarding is spelled as one word.
+PAIR  on the               lookout  info  # In this idiom, lookout is spelled as one word.
+PAIR  once twice           or  info  # Did you mean or?
+PAIR  one swoop            fell  info  # Did you mean fell?
+PAIR  opining              opening  info  # Did you mean opening (= present participle of "to open")?
+PAIR  or                   either  info  # Did you mean either?
+PAIR  other then           "other than"  info  # Did you mean other than?
+PAIR  out of               nowhere  info  # Did you mean nowhere?
+PAIR  out of               sight  info  # Did you mean the noun sight?
+PAIR  out side             outside  info  # Did you mean outside?
+PAIR  over looked          overlooked  info  # Did you mean overlooked?
+PAIR  over looking         overlooking  info  # Did you mean overlooking?
+PAIR  over rated           overrated  info  # Did you mean overrated?
+PAIR  over seas            overseas  info  # Did you mean overseas?
+PAIR  past time            pastime  info  # Did you mean pastime?
+PAIR  patriots day         "Patriots' Day"  info  # This US public holiday is spelled Patriots' Day.
+PAIR  pawn off             "palm off"  info  # Did you mean palm off?
+PAIR  per                  month  info  # Did you mean month?
+PAIR  per say              "per se"  info  # Did you mean per se (=by itself, by themselves)?
+PAIR  phillips arena       "Philips Arena"  info  # Did you mean Philips Arena?
+PAIR  playoff birth        "playoff berth"  info  # Did you mean playoff berth?
+PAIR  please               attach  info  # Did you mean the verb attach?
+PAIR  please               accept  info  # Did you mean accept?
+PAIR  please find          attached  info  # Did you mean the verb attached?
+PAIR  portland trailblazers "Portland Trail Blazers"  info  # Did you mean Portland Trail Blazers?
+PAIR  power point          PowerPoint  info  # Did you mean PowerPoint (= Microsoft presentation software)?
+PAIR  power shell          PowerShell  info  # Did you mean PowerShell (= task automation from Microsoft)?
+PAIR  presidents day       "Presidents' Day"  info  # It appears that a possessive apostrophe is missing, if you mean the legal hol...
+PAIR  price sensibility    "price sensitivity"  info  # Did you mean price sensitivity (= degree to which the price of a product affe...
+PAIR  qui bono             "cui bono"  info  # Non-standard Latin. Did you mean cui bono (=to whose benefit)?
+PAIR  re cent              recent  info  # Did you mean recent?
+PAIR  recieve              receive
+PAIR  regards              best  info  # Did you mean best?
+PAIR  right know           "right now"  info  # Did you mean right now?
+PAIR  role call            "roll call"  info  # Did you mean roll call?
+PAIR  rolls royce          Rolls-Royce  info  # This car brand is normally spelled with a hyphen Rolls-Royce.
+PAIR  sainsburys           Sainsbury's  info  # Did you mean the grocery shopping company Sainsbury's (spelled with a possess...
+PAIR  sams club            "Sam's Club"  info  # Did you mean the retail warehouse Sam's Club (always spelled with a possessiv...
+PAIR  school principle     "school principal"  info  # Did you mean school principal (=head of school)?
+PAIR  self fish            selfish  info  # Did you mean the adjective selfish (spelled as one word)?
+PAIR  seperate             separate
+PAIR  should of            "should have"
+PAIR  side affect          "side effect"  info  # Did you mean side effect (=adverse effect, unintended consequence)?
+PAIR  side affects         "side effects"  info  # Did you mean side effects (=adverse effect, unintended consequence)?
+PAIR  side ways            sideways  info  # The adjective or adverb sideways is spelled as one word.
+PAIR  sinking              ship  info  # Did you mean ship?
+PAIR  sky diving           skydiving  info  # Did you mean skydiving?
+PAIR  sobber               sober  info  # Did you mean sober (=not intoxicated)? "Sobber" means "weeper, someone one wh...
+PAIR  some how             somehow  info  # Did you mean somehow?
+PAIR  some times           sometimes  info  # Did you mean the adverb sometimes (= occasionally)?
+PAIR  some where           somewhere  info  # Did you mean somewhere?
+PAIR  sound byte           "sound bite"  info  # Did you mean sound bite?
+PAIR  souse chef           "sous chef"  info  # Did you mean sous chef?
+PAIR  space x              SpaceX  info  # Did you mean SpaceX (= aerospace company)?
+PAIR  spider man           Spider-Man  info  # The name of the fictional superhero is Spider-Man.
+PAIR  spiderman            Spider-Man  info  # The name of the fictional superhero is Spider-Man.
+PAIR  splitted             split  info  # The past tense and past participle of the verb "to split" is split. Alternati...
+PAIR  states               United  info  # Did you mean United?
+PAIR  striked              struck  info  # The past tense or the past participle of the verb "to strike" is struck.
+PAIR  subsequent to        after  info  # Consider using after
+PAIR  sufficient           enough  info  # Use enough.
+PAIR  sufficient enough    sufficient  info  # 'Sufficient enough' is redundant. Consider using only sufficient.
+PAIR  summer time          summer  info  # Consider using summer.
+PAIR  summery              summary  info  # "\1" (= fit for summer) is an adjective. Did you mean summary (= abstract)?
+PAIR  t he                 the  info  # Did you mean the?
+PAIR  take                 "some time"  info  # Did you mean some time?
+PAIR  take awhile          "take a while"  info  # Did you mean take a while?
+PAIR  take it              personally  info  # It seems that the adverb personally should be used here (as in the expression...
+PAIR  tape                 duct  info  # Did you mean duct?
+PAIR  teh                  the
+PAIR  th                   The  info  # Make sure that 'Th' is the chemical symbol for thorium, and not a typing erro...
+PAIR  than                 bigger  info  # Did you mean bigger?
+PAIR  than                 less  info  # Did you mean less instead of the French article "les"?
+PAIR  thanksgiving         Thanksgiving  info  # If you're writing about the holiday Thanksgiving, the name should be capitali...
+PAIR  that                 ensure  info  # Did you mean ensure (=make sure)? 'Insure' means 'pay money to insurance comp...
+PAIR  the                  "Third World"  info  # The term Third World is considered a proper noun and is normally capitalized.
+PAIR  the                  latter  info  # Did you mean latter (=the second of two items)?
+PAIR  the end              very  info  # Did you mean very?
+PAIR  the point            beside  info  # Did you mean beside?
+PAIR  the undersigned      I  info  # Legalese. Did you mean I, me or we?
+PAIR  them selves          themselves  info  # Did you mean themselves?
+PAIR  then                 than
+PAIR  there                exists  info  # Did you mean exists?
+PAIR  there                their
+PAIR  through out          throughout  info  # Did you mean throughout?
+PAIR  tiflis               Tbilisi  info  # The capital city of Georgia is today known under the name Tbilisi.
+PAIR  tik tok              TikTok  info  # Did you mean TikTok (= social networking app)?
+PAIR  tired about          "tired of"  info  # The usual collocation for "\1" is "of" or "from", not "\2". Did you mean tire...
+PAIR  to                   "clean up"  info  # Did you mean the phrasal verb clean up instead of the noun 'cleanup'?
+PAIR  to                   amenable  info  # Did you mean amenable?
+PAIR  to about             worry  info  # Did you mean worry?
+PAIR  to aide              "to aid"  info  # Did you mean to aid?
+PAIR  to backout           "to back out"  info  # Did you mean to back out?
+PAIR  to the               extent  info  # Did you mean extent ('extent' is a noun, 'extend' is a verb)?
+PAIR  to work              overtime  info  # Did you mean overtime (=time someone works beyond normal working hours)?
+PAIR  today night          tonight  info  # This is a non-standard collocation. Normally, tonight is used instead.
+PAIR  todo                 "to do"  info  # It appears that a hyphen is missing in the noun (= task) or did you mean the ...
+PAIR  todos                to-dos  info  # It appears that a hyphen is missing in the plural noun to-dos?
+PAIR  too                  soon  info  # Did you mean soon?
+PAIR  tot he               "to the"  info  # Did you mean to the?
+PAIR  treasure trough      "treasure trove"  info  # Did you mean treasure trove?
+PAIR  uncle bens           "Uncle Ben's"  info  # Did you mean the rice brand Uncle Ben's (capitalized and spelled with a posse...
+PAIR  under cover          undercover  info  # The adjective undercover is spelled as one word if you mean it in the context...
+PAIR  under wear           underwear  info  # Did you mean underwear (=underclothes)?
+PAIR  unite kingdom        "United Kingdom"  info  # Did you mean United Kingdom?
+PAIR  up                   hurry  info  # Did you mean the verb hurry or the name ?
+PAIR  up to                date  info  # Did you mean date?
+PAIR  urine analysis       urinalysis  info  # Did you mean urinalysis?
+PAIR  use                  Twitter  info  # Did you mean Twitter (= microblogging service, capitalized)?
+PAIR  used to              "be able to"  info  # Did you mean be able to?
+PAIR  very                 sad  info  # Did you mean the adjective sad?
+PAIR  very known           "very well-known"  info  # Incorrect phrase. Use very well-known or well-known instead.
+PAIR  very thanks          "thanks a lot"  info  # Did you mean thanks a lot or many thanks?
+PAIR  vintage point        "vantage point"  info  # Did you mean vantage point?
+PAIR  waived off           "waved off"  info  # Did you mean waved off?
+PAIR  was been             was  info  # Did you mean was or has been?
+PAIR  was n't              "was not"  info  # Wikipedia style. Replace "wasn't" with was not.
+PAIR  way side             wayside  info  # Did you mean wayside?
+PAIR  week end             weekend  info  # Did you mean the noun weekend (Saturday + Sunday)?
+PAIR  wendys               Wendy's  info  # Did you mean the name Wendy's (spelled with a possessive apostrophe)?
+PAIR  whats app            WhatsApp  info  # Did you mean WhatsApp (= Messenger) or what's up (= question)?
+PAIR  who                  won't  info  # Did you mean won't?
+PAIR  who                  then  info  # Did you mean then?
+PAIR  wi fi                Wi-Fi  info  # Did you mean Wi-Fi? (This is the officially approved term by the Wi-Fi Allian...
+PAIR  wich                 which
+PAIR  wien                 Vienna  info  # The English name for this Austrian city is Vienna.
+PAIR  wifi                 Wi-Fi  info  # Did you mean Wi-Fi? (This is the officially approved term by the Wi-Fi Allian...
+PAIR  wining               winning  info  # Did you mean winning (= to win the championship) or whining (= to cry)?
+PAIR  with out             without  info  # This word is usually spelled as one word. Did you mean without?
+PAIR  without out          without  info  # Did you mean without?
+PAIR  work to              overtime  info  # Did you mean overtime (=time someone works beyond normal working hours)?
+PAIR  working progress     "work in progress"  info  # Did you mean work in progress?
+PAIR  world                dog-eat-dog  info  # Did you mean dog-eat-dog?
+PAIR  worth while          worthwhile  info  # Did you mean worthwhile?
+PAIR  would of             "would have"
+PAIR  wreck havoc          "wreak havoc"  info  # Did you mean wreak havoc?
+PAIR  write in             verse  info  # Did you mean verse?
+PAIR  x rated              X-rated  info  # The adjective X-rated is spelled with a hyphen.
+PAIR  ya 'll               y'all  info  # Did you mean y'all?
+PAIR  yesterday night      "last night"  info  # This is a non-standard collocation. Normally, last night is used.
+PAIR  you                  "very much"  info  # Did you mean very much?
+PAIR  you much             very  info  # Did you mean very?
+PAIR  your                 you're
+PAIR  your 're             you're  info  # Did you mean you're or your?
+PAIR  your responds        "you respond"  info  # Did you mean \1 response or you respond?
+PAIR  z wave               Z-Wave  info  # Did you mean Z-Wave (= wireless protocol)?

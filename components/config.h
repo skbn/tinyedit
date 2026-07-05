@@ -151,6 +151,13 @@ typedef struct
 #endif
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_GRAMMAR
+    /* Grammar checker configuration */
+    int grammar_enabled;
+    char grammar_dict_path[TE_CFG_STR_MAX]; /* Directory holding .rul files */
+    char grammar_dict_name[TE_CFG_STR_MAX]; /* Base name (e.g. "en", "es")   */
+#endif
+
 #ifdef HAVE_TRANSLATE
     /* Translator configuration */
     int translate_enabled;
@@ -164,6 +171,15 @@ typedef struct
     int translate_timeout;              /* HTTP timeout in seconds */
     char stardict_path[TE_CFG_STR_MAX]; /* Directory or .ifo file for StarDict */
 #endif                                  /* HAVE_TRANSLATE */
+
+#ifdef HAVE_TTS
+    /* Language set by OS, no tts_language field needed */
+    int tts_enabled;
+    int tts_voice;  /* 0=male, 1=female, 2=male_robot, 3=female_robot */
+    int tts_rate;   /* WPM, 40..400. Default 150 */
+    int tts_pitch;  /* Hz-like, 65..320. Default 110 */
+    int tts_volume; /* 0..100. Default 100 */
+#endif              /* HAVE_TTS */
 
     /* Editor assistance toggles (independent of spell support) */
     int assist_smart_quotes;

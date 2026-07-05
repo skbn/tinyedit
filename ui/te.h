@@ -147,6 +147,12 @@ typedef struct
 
 #endif /* HAVE_HUNSPELL */
 
+#ifdef HAVE_GRAMMAR
+    void *grammar_handle; /* GramCheck* (opaque, avoids header pull-in) */
+    int grammar_enabled;  /* mirrors cfg.grammar_enabled */
+    int grammar_active;   /* runtime on/off */
+#endif
+
 #ifdef HAVE_TRANSLATE
     void *translate_handle;    /* TranslateHandle* (opaque) */
     int translate_enabled;     /* Translator enabled in config */
@@ -154,12 +160,16 @@ typedef struct
     int translate_http_inited; /* flag: http_client_init was called */
 #endif
 
+#ifdef HAVE_TTS
+    void *tts_handle; /* TtsHandle* (opaque) */
+    int tts_enabled;  /* TTS enabled in config */
+#endif
+
     char charset_in[32];
     char charset_out[32];
 
-    /* Editor assistance toggles. Default off; enabled via setup UI
-     * Each one independent: smart_quotes, repeat_check, auto_cap */
-    int assist_smart_quotes; /* '  -> ‘/’ ; "  -> “/”            */
+    /* Independent editor assistance toggles */
+    int assist_smart_quotes; /* '  -> ‘/’ ; "  -> “/” */
     int assist_repeat_check; /* warn/highlight on "the the" etc */
     int assist_auto_cap;     /* capitalize after ". ", "? ", "! " */
 } TeApp;
