@@ -20,10 +20,10 @@ HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 USE_HUNSPELL ?= 1
 USE_HYPHEN ?= 1
 USE_MYTHES ?= 1
-USE_GRAMMAR ?= 1
 USE_TRANSLATE ?= 1
 USE_STARDICT ?= 1
 USE_TTS ?= 1
+USE_GRAMMAR ?= 1
 
 # Detect OS
 OS := $(shell uname -s)
