@@ -93,6 +93,45 @@ static int wcs_to_utf8_buf(const wchar_t *wcs, int wlen, char *out, int outsz)
     return o;
 }
 
+static int prev_line_terminated(TeApp *app, int line_idx)
+{
+    Ed *ed = NULL;
+    const wchar_t *wl = NULL;
+    int len;
+    int i;
+    int prev;
+
+    if (!app || line_idx <= 0)
+        return 0;
+
+    ed = te_app_get_editor(app);
+
+    if (!ed)
+        return 0;
+
+    for (prev = line_idx - 1; prev >= 0; prev--)
+    {
+        wl = ed_line_wcs(ed, prev);
+        len = ed_line_len(ed, prev);
+
+        if (!wl || len <= 0)
+            return 1;
+
+        for (i = len - 1; i >= 0; i--)
+        {
+            if (wl[i] == L' ' || wl[i] == L'\t')
+                continue;
+
+            if (wl[i] == L'.' || wl[i] == L'!' || wl[i] == L'?')
+                return 1;
+
+            return 0;
+        }
+    }
+
+    return 0;
+}
+
 static void gg_join(char *out, size_t outsz, const char *dir, const char *name)
 {
     size_t dl;
@@ -162,7 +201,7 @@ void ui_grammar_free_app(TeApp *app)
     app->grammar_active = 0;
 }
 
-int ui_grammar_check_row(TeApp *app, const wchar_t *wl, int line_len, GcIssue *out, int cap)
+int ui_grammar_check_row(TeApp *app, const wchar_t *wl, int line_len, int line_idx, GcIssue *out, int cap)
 {
     char utf8[UI_GRAM_MAX_UTF8];
     int n;
@@ -178,7 +217,7 @@ int ui_grammar_check_row(TeApp *app, const wchar_t *wl, int line_len, GcIssue *o
     if (n < 0)
         return 0;
 
-    return gc_check_line((GramCheck *)app->grammar_handle, utf8, out, cap);
+    return gc_check_line_ctx((GramCheck *)app->grammar_handle, utf8, prev_line_terminated(app, line_idx), out, cap);
 }
 
 /* Map byte offset from GcIssue.byte_off/len produced by encoding wl as UTF-8 back to wchar_t index in wl, linear scan is fine because lines are short and issues are few */
@@ -217,7 +256,7 @@ static int byte_off_to_wcs(const wchar_t *wl, int line_len, int byte_off)
     return line_len;
 }
 
-void ui_grammar_draw_row(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len)
+void ui_grammar_draw_row(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int line_idx)
 {
     GcIssue gis[GC_MAX_ISSUES_PER_LINE];
     int gn, k;
@@ -230,7 +269,7 @@ void ui_grammar_draw_row(TeApp *app, int screen_y, int col_offset, int tab_width
     if (!wl || line_len <= 0)
         return;
 
-    gn = ui_grammar_check_row(app, wl, line_len, gis, GC_MAX_ISSUES_PER_LINE);
+    gn = ui_grammar_check_row(app, wl, line_len, line_idx, gis, GC_MAX_ISSUES_PER_LINE);
 
     if (gn <= 0)
         return;
@@ -257,7 +296,7 @@ void ui_grammar_draw_row(TeApp *app, int screen_y, int col_offset, int tab_width
     }
 }
 
-void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int seg_start, int seg_end, int seg_start_vcol)
+void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int seg_start, int seg_end, int seg_start_vcol, int line_idx)
 {
     GcIssue gis[GC_MAX_ISSUES_PER_LINE];
     int gn, k;
@@ -279,7 +318,7 @@ void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int t
         return;
 
     /* Cache-friendly, same line hash across all sub-rows of the line */
-    gn = ui_grammar_check_row(app, wl, line_len, gis, GC_MAX_ISSUES_PER_LINE);
+    gn = ui_grammar_check_row(app, wl, line_len, line_idx, gis, GC_MAX_ISSUES_PER_LINE);
 
     if (gn <= 0)
         return;
@@ -425,9 +464,6 @@ void ui_grammar_apply_toggles(TeApp *app)
 
     if (!app->cfg.assist_repeat_check)
         mask &= ~(unsigned)GC_CAT_REPEAT;
-
-    if (!app->cfg.assist_auto_cap)
-        mask &= ~(unsigned)GC_CAT_CASE;
 
     gc_set_enabled_categories(g, ~0u, 0);
     gc_set_enabled_categories(g, mask, 1);

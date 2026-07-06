@@ -895,6 +895,26 @@ static void render_cell(int row, int col, Cell *cell)
     /* render glyph, surrogate-pair aware */
     if (draw_cp >= 0x20)
         draw_glyph_te(rect.left, rect.top, cell_w, draw_cp);
+
+    /* Draw underline if requested */
+    if (attrs & A_UNDERLINE)
+    {
+        int uy = row * fh + fb + 1;
+        HPEN hPen;
+        HPEN hOldPen;
+
+        if (uy >= (row + 1) * fh)
+            uy = (row + 1) * fh - 1;
+
+        hPen = CreatePen(PS_SOLID, 1, s_rgb_map[s_cur_fg_idx]);
+        hOldPen = (HPEN)SelectObject(hMemDC, hPen);
+
+        MoveToEx(hMemDC, rect.left, uy, NULL);
+        LineTo(hMemDC, rect.right, uy);
+
+        SelectObject(hMemDC, hOldPen);
+        DeleteObject(hPen);
+    }
 }
 
 /* Force complete redraw (call after font change) */

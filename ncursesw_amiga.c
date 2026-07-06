@@ -572,6 +572,21 @@ static void render_cell(int row, int col, chtype ch, int attrs)
         Move(ami_rp, x, y + fb);
         Text(ami_rp, (STRPTR)buf, 1);
     }
+
+    /* Draw underline for this cell if requested */
+    if (attrs & A_UNDERLINE)
+    {
+        int uy = y + fb + 1;
+
+        if (uy >= y + fh)
+            uy = y + fh - 1;
+
+        if (uy >= y)
+        {
+            SetAPen(ami_rp, saved);
+            RectFill(ami_rp, x, uy, x + cell_w - 1, uy);
+        }
+    }
 }
 
 static void shadow_invalidate() { s_shadow_dirty = 1; }
@@ -653,8 +668,8 @@ static void render_all()
 
                 p = (int)PAIR_NUMBER(cc->attrs);
 
-                /* Compare color pair and A_REVERSE specifically, ignore other attrs */
-                if (p != run_pair || ((cc->attrs ^ run_attrs) & A_REVERSE))
+                /* Compare color pair and A_REVERSE/A_UNDERLINE specifically, ignore other attrs */
+                if (p != run_pair || ((cc->attrs ^ run_attrs) & (A_REVERSE | A_UNDERLINE)))
                     break;
 
                 /* TRAILING cell: skip run_buf but advance c for area/RectFill */
@@ -805,6 +820,21 @@ static void render_all()
             else
             {
                 Text(ami_rp, (STRPTR)run_buf, run_len);
+            }
+
+            /* Draw underline for the run if requested */
+            if (run_attrs & A_UNDERLINE)
+            {
+                int uy = y + fb + 1;
+
+                if (uy >= y + fh)
+                    uy = y + fh - 1;
+
+                if (uy >= y)
+                {
+                    SetAPen(ami_rp, saved);
+                    RectFill(ami_rp, x, uy, rx, uy);
+                }
             }
         }
 

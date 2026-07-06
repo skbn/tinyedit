@@ -113,6 +113,7 @@ struct gc_cache_entry
     unsigned short n_issues;
     short prev; /* LRU list linkage */
     short next;
+    unsigned char prev_terminated; /* 1 = previous line ended with . / ! / ? */
     GcIssue issues[GC_MAX_ISSUES_PER_LINE];
 };
 
@@ -252,11 +253,11 @@ unsigned long gc_hash32(const char *s, size_t n);
 unsigned long gc_hash32b(const char *s, size_t n);
 
 void gc_cache_init(GramCheck *g);
-int gc_cache_find(GramCheck *g, unsigned long h1, unsigned long h2);
+int gc_cache_find(GramCheck *g, unsigned long h1, unsigned long h2, int prev_terminated);
 int gc_cache_acquire(GramCheck *g);
 void gc_cache_unlink(GramCheck *g, int idx);
 void gc_cache_push_front(GramCheck *g, int idx);
-void gc_cache_store(GramCheck *g, unsigned long h1, unsigned long h2, const GcIssue *issues, int n);
+void gc_cache_store(GramCheck *g, unsigned long h1, unsigned long h2, int prev_terminated, const GcIssue *issues, int n);
 
 int gc_load_rules(GramCheck *g, const char *path);
 int gc_add_pair(GramCheck *g, const char *src, const char *dst, int severity, const char *msg);
@@ -268,7 +269,7 @@ int gc_wl_add(GramCheck *g, struct gc_wordlist *wl, const char *word);
 void gc_wl_sort(struct gc_wordlist *wl);
 int gc_wl_contains(const struct gc_wordlist *wl, const char *lower_word, size_t len);
 
-int gc_run_checks(GramCheck *g, const char *line, GcIssue *out, int cap);
+int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *out, int cap);
 
 /* Utility to append an issue while respecting cap. Returns updated count */
 int gc_emit(GcIssue *out, int cur, int cap, unsigned short off, unsigned short len, unsigned short rule_id, unsigned char sev, unsigned short cat);

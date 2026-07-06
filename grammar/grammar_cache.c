@@ -32,7 +32,7 @@ void gc_cache_init(GramCheck *g)
     }
 }
 
-int gc_cache_find(GramCheck *g, unsigned long h1, unsigned long h2)
+int gc_cache_find(GramCheck *g, unsigned long h1, unsigned long h2, int prev_terminated)
 {
     int i;
 
@@ -41,7 +41,7 @@ int gc_cache_find(GramCheck *g, unsigned long h1, unsigned long h2)
 
     for (i = g->head; i != -1; i = g->cache[i].next)
     {
-        if (g->cache[i].key_hash == h1 && g->cache[i].key_secondary == h2)
+        if (g->cache[i].key_hash == h1 && g->cache[i].key_secondary == h2 && (int)g->cache[i].prev_terminated == (prev_terminated ? 1 : 0))
             return i;
     }
     return -1;
@@ -119,7 +119,7 @@ int gc_cache_acquire(GramCheck *g)
     return i;
 }
 
-void gc_cache_store(GramCheck *g, unsigned long h1, unsigned long h2, const GcIssue *issues, int n)
+void gc_cache_store(GramCheck *g, unsigned long h1, unsigned long h2, int prev_terminated, const GcIssue *issues, int n)
 {
     int idx;
     struct gc_cache_entry *e = NULL;
@@ -141,6 +141,7 @@ void gc_cache_store(GramCheck *g, unsigned long h1, unsigned long h2, const GcIs
     e = &g->cache[idx];
     e->key_hash = h1;
     e->key_secondary = h2;
+    e->prev_terminated = (unsigned char)(prev_terminated ? 1 : 0);
     e->n_issues = (unsigned short)n;
 
     if (n > 0 && issues)
@@ -160,8 +161,8 @@ void gc_cache_invalidate_line(GramCheck *g, const char *utf8_line)
     unsigned long h1;
     unsigned long h2;
     size_t len;
-    int idx;
-    struct gc_cache_entry *e = NULL;
+    int i;
+    int next;
 
     if (!g || !utf8_line)
         return;
@@ -170,19 +171,26 @@ void gc_cache_invalidate_line(GramCheck *g, const char *utf8_line)
     h1 = gc_hash32(utf8_line, len);
     h2 = gc_hash32b(utf8_line, len);
 
-    idx = gc_cache_find(g, h1, h2);
+    /* Walk all entries; remove every one whose hash pair matches this line (both prev_terminated states) */
+    for (i = g->head; i != -1;)
+    {
+        struct gc_cache_entry *e = &g->cache[i];
 
-    if (idx < 0)
-        return;
+        next = e->next;
 
-    e = &g->cache[idx];
+        if (e->key_hash == h1 && e->key_secondary == h2)
+        {
+            gc_cache_unlink(g, i);
 
-    gc_cache_unlink(g, idx);
+            e->key_hash = 0;
+            e->key_secondary = 0;
+            e->n_issues = 0;
+            e->prev_terminated = 0;
 
-    e->key_hash = 0;
-    e->key_secondary = 0;
-    e->n_issues = 0;
+            if (g->count > 0)
+                g->count--;
+        }
 
-    if (g->count > 0)
-        g->count--;
+        i = next;
+    }
 }

@@ -43,13 +43,13 @@ int ui_grammar_load_from_config(TeApp *app);
 void ui_grammar_free_app(TeApp *app);
 
 /* Query single visible line, fills out with up to cap issues, returns count, cache-hit is hash + memcpy */
-int ui_grammar_check_row(TeApp *app, const wchar_t *wl, int line_len, GcIssue *out, int cap);
+int ui_grammar_check_row(TeApp *app, const wchar_t *wl, int line_len, int line_idx, GcIssue *out, int cap);
 
 /* One-call helper for render loop: check row and paint underline spans over issues, zero-alloc uses stack buffers, screen_y and col_offset are row origin on screen, tab_width is editor's active tab width for visual column mapping, does nothing if checker inactive */
-void ui_grammar_draw_row(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len);
+void ui_grammar_draw_row(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int line_idx);
 
 /* Soft-wrap variant: draw only issues intersecting sub-row segment [seg_start, seg_end) of logical line, visual column of seg_start within sub-row is seg_start_vcol (0 for first sub-row, non-zero if tab stop mid-line), grammar check runs on FULL line, cache-friendly across sub-rows */
-void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int seg_start, int seg_end, int seg_start_vcol);
+void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int seg_start, int seg_end, int seg_start_vcol, int line_idx);
 
 /* Prewarm LRU cache for lines just outside viewport, call once after visible-row render loop completes, top = first visible line index, body_rows = number of visible rows, line_count = total logical lines in buffer, does nothing if grammar checker inactive */
 void ui_grammar_prewarm(TeApp *app, int top, int body_rows, int line_count);
@@ -71,9 +71,9 @@ int ui_grammar_color_for_severity(unsigned char sev);
 /* Stubs so callers don't need #ifdef around each call */
 #define ui_grammar_load_from_config(app) (-1)
 #define ui_grammar_free_app(app) ((void)0)
-#define ui_grammar_check_row(app, wl, len, out, cap) (0)
-#define ui_grammar_draw_row(app, y, x, tw, wl, len) ((void)0)
-#define ui_grammar_draw_row_segment(app, y, x, tw, wl, len, s, e, v) ((void)0)
+#define ui_grammar_check_row(app, wl, len, idx, out, cap) (0)
+#define ui_grammar_draw_row(app, y, x, tw, wl, len, idx) ((void)0)
+#define ui_grammar_draw_row_segment(app, y, x, tw, wl, len, s, e, v, idx) ((void)0)
 #define ui_grammar_prewarm(app, t, b, c) ((void)0)
 #define ui_grammar_invalidate_row(app, wl, len) ((void)0)
 #define ui_grammar_flush(app) ((void)0)

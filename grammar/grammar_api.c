@@ -172,7 +172,7 @@ void gc_free(GramCheck *g)
     free(g);
 }
 
-int gc_check_line(GramCheck *g, const char *utf8_line, GcIssue *out, int cap)
+int gc_check_line_ctx(GramCheck *g, const char *utf8_line, int prev_terminated, GcIssue *out, int cap)
 {
     unsigned long h1;
     unsigned long h2;
@@ -195,7 +195,8 @@ int gc_check_line(GramCheck *g, const char *utf8_line, GcIssue *out, int cap)
     if (h1 == 0ul)
         h1 = 0x9E3779B1ul; /* Golden-ratio odd */
 
-    idx = gc_cache_find(g, h1, h2);
+    idx = gc_cache_find(g, h1, h2, prev_terminated);
+
     if (idx >= 0)
     {
         n = g->cache[idx].n_issues;
@@ -212,14 +213,19 @@ int gc_check_line(GramCheck *g, const char *utf8_line, GcIssue *out, int cap)
         return n;
     }
 
-    n = gc_run_checks(g, utf8_line, out, cap);
+    n = gc_run_checks(g, utf8_line, prev_terminated, out, cap);
 
     if (n < 0)
         n = 0;
 
-    gc_cache_store(g, h1, h2, out, n);
+    gc_cache_store(g, h1, h2, prev_terminated, out, n);
 
     return n;
+}
+
+int gc_check_line(GramCheck *g, const char *utf8_line, GcIssue *out, int cap)
+{
+    return gc_check_line_ctx(g, utf8_line, g ? g->sentence_start : 0, out, cap);
 }
 
 char **gc_list_langs(const char *dir_path, int *n_out)

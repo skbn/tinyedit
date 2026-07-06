@@ -2049,7 +2049,7 @@ static void draw_body(TeApp *app)
 #ifdef HAVE_GRAMMAR
                     /* Grammar overlay for this sub-row segment, runs once per logical line (LRU cache absorbs subsequent sub-rows) */
                     if (app->grammar_active && app->grammar_handle && l && len > 0 && seg_start < seg_end)
-                        ui_grammar_draw_row_segment(app, offset_y + sr, offset_x + ln_offset, s_tab_width, l, len, seg_start, seg_end, seg_start_vcol);
+                        ui_grammar_draw_row_segment(app, offset_y + sr, offset_x + ln_offset, s_tab_width, l, len, seg_start, seg_end, seg_start_vcol, li);
 
 #endif
 
@@ -2359,7 +2359,7 @@ static void draw_body(TeApp *app)
 #ifdef HAVE_GRAMMAR
             /* Grammar/punctuation overlay, viewport-scoped, LRU cache absorbs redraws, prewarm extends coverage for smooth scrolling */
             if (app->grammar_active && app->grammar_handle && wl && line_len > 0)
-                ui_grammar_draw_row(app, offset_y + i, offset_x + ln_offset, s_tab_width, wl, line_len);
+                ui_grammar_draw_row(app, offset_y + i, offset_x + ln_offset, s_tab_width, wl, line_len, line_idx);
 #endif
 
             standend();

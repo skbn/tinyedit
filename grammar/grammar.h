@@ -101,6 +101,9 @@ int gc_is_available(void);
 /* Check one UTF-8 line. Returns issue count or -1 on error */
 int gc_check_line(GramCheck *g, const char *utf8_line, GcIssue *out, int cap);
 
+/* Check one UTF-8 line with context: 1 = previous line ended with . / ! / ? */
+int gc_check_line_ctx(GramCheck *g, const char *utf8_line, int prev_terminated, GcIssue *out, int cap);
+
 /* Set whether line starts a new sentence (1) or continues (0) */
 void gc_set_sentence_start(GramCheck *g, int is_start);
 
