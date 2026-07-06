@@ -967,6 +967,7 @@ static int hwrap_try_hyphenation(HwrapSplitCtx *ctx)
     int word_start = avail - 1;
     int word_end;
     int wlen;
+    int core_len;
     int col_limit;
     int bp;
     int emit;
@@ -990,15 +991,38 @@ static int hwrap_try_hyphenation(HwrapSplitCtx *ctx)
     if (wlen < 4 || wlen >= 512)
         return 0;
 
-    /* If the whole word fits, don't hyphenate at all */
+    /* Hyphenate only if word is mid-line and trailing space does not fit */
     if (word_start + wlen <= avail)
+    {
+        if (word_start == 0)
+            return 0;
+
+        if (word_end < (int)ctx->jlen && ctx->joined[pos + word_end] == L' ' && word_end + 1 <= avail)
+            return 0;
+    }
+
+    /* Strip trailing punctuation before hyphenation */
+    while (word_end > word_start)
+    {
+        wchar_t c = ctx->joined[pos + word_end - 1];
+
+        if (c == L'-' || !iswpunct(c))
+            break;
+
+        word_end--;
+    }
+
+    core_len = word_end - word_start;
+
+    if (core_len < 4)
         return 0;
 
-    col_limit = avail - word_start - 1; /* -1 to leave room for the hyphen char */
+    col_limit = avail - word_start - 1;
 
-    bp = ctx->hyph_cb(ctx->hyph_data, &ctx->joined[pos + word_start], wlen, col_limit);
+    bp = ctx->hyph_cb(ctx->hyph_data, &ctx->joined[pos + word_start], core_len, col_limit);
 
-    if (bp <= 0 || bp >= wlen)
+    /* Need 2+ chars before and after break */
+    if (bp < 2 || bp > core_len - 2)
         return 0;
 
     emit = word_start + bp;
