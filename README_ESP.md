@@ -12,6 +12,8 @@ Editor de texto ligero para AmigaOS, Linux y Windows usando ncurses
 - Corrector ortográfico con implementación nativa (AmigaOS/Windows) o integración Hunspell (*nix) (opcional, USE_HUNSPELL=1)
 - Guiones (hyphenation) con implementación nativa (AmigaOS/Windows) o libhyphen (*nix) (opcional, USE_HYPHEN=1)
 - Tesauro (thesaurus) con implementación nativa (AmigaOS/Windows) o libmythes (*nix) (opcional, USE_MYTHES=1)
+- Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
+- Corrector gramatical/estilístico experimental usando packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1)
 - Panel de traductor con soporte online y diccionario offline compatible con StarDict
 - Soporte de ratón (funciona en terminal, SSH y sesiones remotas)
 - Colores configurables (y fuentes TTF en AmigaOS)
@@ -68,6 +70,26 @@ Para compilar con soporte de traductor (opcional):
 - FreeBSD: `doas pkg install curl`
 - macOS: `brew install curl`
 
+Para compilar con soporte de texto a voz (opcional):
+```bash
+make -f Makefile.unix USE_TTS=1
+```
+- Debian/Ubuntu: `sudo apt install espeak-ng` (instala también `espeak-ng-data`)
+- Arch Linux: `sudo pacman -S espeak-ng`
+- FreeBSD: `doas pkg install espeak-ng`
+- NetBSD: `pkgin install espeak-ng`
+- OpenBSD: `pkg_add espeak`
+- macOS: `brew install espeak-ng` (o usa el comando `say` nativo)
+
+No requiere dependencia en tiempo de compilación: tinyedit ejecuta el backend TTS como subproceso en tiempo de ejecución
+
+Para compilar con soporte de corrector gramatical (opcional):
+```bash
+make -f Makefile.unix USE_GRAMMAR=1
+```
+- Sin dependencia de librería externa; usa un módulo C autocontenido y packs de reglas `.rul`
+- Los packs de reglas pueden generarse desde los XML de LanguageTool usando `tools/lt2rul.py`
+
 Diccionarios, patrones de guiones y datos de tesauro:
 - Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
 - Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us hyphen-es hyphen-en mythes-es mythes-en`
@@ -96,7 +118,7 @@ Compilando con `USE_HUNSPELL=1`, la versión Windows incluye la misma implementa
 
 ### AmigaOS
 
-Para AmigaOS el programa usa FreeType con libpng y zlib para el renderizado TTF.
+Para AmigaOS el programa usa FreeType con libpng y zlib para el renderizado TTF
 
 Usando bebbo gcc:
 
@@ -105,7 +127,7 @@ Usando bebbo gcc:
 - FreeType: https://freetype.org/
 
 Para compilar, en el directorio tinyedit extrae freetype-2.14.3.tar.xz,
-libpng-1.6.58.tar.xz y zlib.tar.gz y renómbralos a `freetype`, `zlib` y `libpng`.
+libpng-1.6.58.tar.xz y zlib.tar.gz y renómbralos a `freetype`, `zlib` y `libpng`
 
 Para preparar headers y compilar:
 ```bash
@@ -125,9 +147,9 @@ La versión AmigaOS incluye implementaciones nativas (se habilitan en tiempo de 
 - Guiones (compatible con archivos hyph_*.dic, implementa algoritmo de Liang) (`USE_HUNSPELL=1 USE_HYPHEN=1`)
 - Tesauro (compatible con archivos th_*.idx/dat de mythes) (`USE_HUNSPELL=1 USE_MYTHES=1`)
 
-Estas son implementaciones puras diseñadas para AmigaOS con caché LRU, sin dependencias de C++.
+Estas son implementaciones puras diseñadas para AmigaOS con caché LRU, sin dependencias de C++
 
-**Nota**: El soporte de traductor online en AmigaOS requiere AmiSSL para conexiones HTTPS.
+**Nota**: El soporte de traductor online en AmigaOS requiere AmiSSL para conexiones HTTPS
 
 Fuentes Freetype probadas:
 
@@ -161,7 +183,7 @@ Diccionarios compatibles con StarDict para búsqueda offline:
 - O de https://freedict.org/downloads/ (bilingües con licencia CC)
 - Coloca los archivos .ifo, .idx y .dict en el directorio de diccionarios configurado en Setup
 
-El ejecutable es grande, pero no necesitas ninguna librería. Está optimizado para RTG y también funciona con OCS, ECS, o AGA.
+El ejecutable es grande, pero no necesitas ninguna librería. Está optimizado para RTG y también funciona con OCS, ECS, o AGA
 
 ## Soporte de Guiones y Tesauro
 
@@ -449,6 +471,37 @@ tinyedit incluye una funcionalidad de tesauro para encontrar sinónimos:
 - **libmythes** (*nix): Usa la librería libmythes
 - Buscar sinónimos de palabras bajo el cursor
 - Se integra con el corrector ortográfico para fallback de stemming
+
+## Texto a Voz (TTS)
+
+tinyedit soporta texto a voz al compilar con `USE_TTS=1`:
+
+- **Unix/*nix**: Lanza `espeak-ng` (preferido), `espeak`, `festival` o `say` de macOS como subproceso
+- **Windows**: Usa SAPI 5 (no requiere paquete externo)
+- **AmigaOS**: Usa `translator.library` v43 y `narrator.device` v34/v37
+
+Atajos:
+- **Hablar selección / párrafo**: `Ctrl+Alt+L` (Unix/Windows), `Alt+Shift+L` (AmigaOS)
+- **Hablar documento completo**: `Ctrl+Alt+K` (Unix/Windows), `Alt+Shift+K` (AmigaOS)
+- **Pausar / reanudar voz**: `Ctrl+Alt+P` (Unix/Windows), `Alt+Shift+P` (AmigaOS)
+- **Detener voz**: `Ctrl+Alt+O` (Unix/Windows), `Alt+Shift+O` (AmigaOS)
+- **Popup de ajustes de voz**: `Ctrl+Alt+J` (Unix/Windows), `Alt+Shift+J` (AmigaOS)
+
+Configura voz, velocidad, tono y volumen desde Configuración (F4)
+
+## Corrector Gramatical (Experimental)
+
+tinyedit incluye un corrector gramatical/estilístico experimental al compilar con `USE_GRAMMAR=1`:
+
+- Módulo C autocontenido, sin librería externa
+- Carga packs de reglas `.rul` desde el directorio configurado (por defecto: `/usr/share/gramcheck` en Linux, `/usr/local/share/gramcheck` en BSD, `C:\gramcheck\rules` en Windows, `PROGDIR:rules` en AmigaOS)
+- El directorio `rules/` incluye packs para inglés, español, alemán, francés, italiano y portugués
+- Los packs de reglas se derivan de los XML de LanguageTool usando `tools/lt2rul.py`
+- Repositorio fuente de LanguageTool: https://github.com/languagetool-org/languagetool
+- Solo se extrae un subconjunto de reglas de LanguageTool (pares literales simples, puntuación, espacios, mayúsculas, repeticiones, emparejamiento de paréntesis y sugerencias de estilo)
+- **No es un corrector ortográfico/gramatical completo por idioma**: no sabe dónde poner acentos ni elegir palabras según el contexto de la frase o la morfología. Es un asistente ligero para problemas superficiales comunes.
+
+Habilita y configura el pack de reglas desde Configuración (F4) en el panel de diccionario
 
 ## Capturas de Pantalla
 

@@ -994,7 +994,8 @@ static int hwrap_try_hyphenation(HwrapSplitCtx *ctx)
     if (word_start + wlen <= avail)
         return 0;
 
-    col_limit = avail - word_start;
+    col_limit = avail - word_start - 1; /* -1 to leave room for the hyphen char */
+
     bp = ctx->hyph_cb(ctx->hyph_data, &ctx->joined[pos + word_start], wlen, col_limit);
 
     if (bp <= 0 || bp >= wlen)
@@ -1088,15 +1089,36 @@ static int hwrap_try_hard_cut(HwrapSplitCtx *ctx)
 
     if (word_len > 0 && word_len <= ctx->width)
     {
-        /* Move the whole word to the next line */
-        if (ctx->out_used == 0 || ctx->outw[ctx->out_used - 1] != L'\n')
+        /* If we are at the very start of the output or of a fresh line, emit the word directly rather than creating an empty line */
+        int at_line_start = (ctx->out_used == 0 || ctx->outw[ctx->out_used - 1] == L'\n');
+
+        if (at_line_start)
         {
+            /* Emit the word on this line, then newline */
+            int k;
+
+            if (hwrap_grow_out(ctx, (size_t)word_len + 1) != 0)
+                return -1;
+
+            for (k = 0; k < word_len; k++)
+                ctx->outw[ctx->out_used++] = ctx->joined[pos + k];
+
+            ctx->outw[ctx->out_used++] = L'\n';
+            ctx->pos = pos + (size_t)word_len;
+
+            /* Skip trailing spaces */
+            while (ctx->pos < ctx->jlen && ctx->joined[ctx->pos] == L' ')
+                ctx->pos++;
+        }
+        else
+        {
+            /* Move the whole word to the next line */
             if (hwrap_grow_out(ctx, 1) != 0)
                 return -1;
 
             ctx->outw[ctx->out_used++] = L'\n';
+            ctx->pos = pos + (size_t)word_len;
         }
-        ctx->pos = pos + (size_t)word_len;
     }
     else
     {

@@ -484,7 +484,11 @@ void ui_tts_popup(TeApp *app)
     {
         char buf[64];
 
+        standend();
+
         ui_draw_popup_frame(y, x, h, w, " Speech ");
+
+        attron(COLOR_PAIR(COL_POPUP));
 
         /* Draw 4 fields, one per line */
         for (i = 0; i < 4; i++)

@@ -144,7 +144,10 @@ int ui_dict_reverse(TeApp *app)
 
         if (replace_wcs)
         {
+            ed_auto_rewrap_capture_pre_snapshot(ed);
             ed_save_undo(ed);
+
+            ed->undo_snapshot_mode = 1;
             ed_set_pos(ed, info.row, word_start);
 
             for (i = 0; i < word_len; i++)
@@ -152,6 +155,9 @@ int ui_dict_reverse(TeApp *app)
 
             for (i = 0; i < replace_len; i++)
                 ed_insert_char(ed, replace_wcs[i]);
+
+            ed->undo_snapshot_mode = 0;
+            ed_auto_rewrap_after_edit(app);
 
             te_status(app, "Replaced with '%s'", items[selected]);
             free(replace_wcs);

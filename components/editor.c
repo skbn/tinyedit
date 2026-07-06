@@ -526,6 +526,10 @@ static int line_delete(Ed *ed, EdLine *ln, int pos)
     if (pos < 0 || pos >= ln->len)
         return -1;
 
+    /* If deleting the wrap-hyphen (last char), clear the flag */
+    if (ln->has_wrap_hyphen && pos == ln->len - 1)
+        ln->has_wrap_hyphen = 0;
+
     line_move(ln, pos, pos + 1, ln->len - pos);
     ln->len--;
     ln->wrap_count_cache = -1;
@@ -2810,6 +2814,20 @@ int ed_backspace(Ed *ed)
 
         ed->col = prev->len;
 
+        /* Joining lines: remove the wrap-hyphen character and clear the flag */
+        if (prev->has_wrap_hyphen && prev->len > 0)
+        {
+            unsigned int last_cp = ed_line_char(prev, prev->len - 1);
+
+            if (last_cp == (unsigned int)'-')
+            {
+                prev->len--;
+                ed->col = prev->len;
+            }
+
+            prev->has_wrap_hyphen = 0;
+        }
+
         line_append_line(ed, prev, ln, 0, ln->len);
         line_free(doc_remove_line(ed, ed->row));
 
@@ -2862,6 +2880,17 @@ int ed_delete(Ed *ed)
 
         /* Del at EOL joins lines: record as join from next line's perspective */
         record_join(ed, ed->row, ln->len);
+
+        /* Joining lines via Delete: remove the wrap-hyphen character and clear the flag */
+        if (ln->has_wrap_hyphen && ln->len > 0)
+        {
+            unsigned int last_cp = ed_line_char(ln, ln->len - 1);
+
+            if (last_cp == (unsigned int)'-')
+                ln->len--;
+
+            ln->has_wrap_hyphen = 0;
+        }
 
         line_append_line(ed, ln, nxt, 0, nxt->len);
         line_free(doc_remove_line(ed, ed->row + 1));

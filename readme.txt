@@ -13,12 +13,16 @@ Main features:
 - Mouse support (terminal, SSH and remote sessions)
 - Clipboard support
 - Bracketed paste support (Unix/Linux)
+- Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
+- Experimental grammar/style checker with rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1)
 - Configurable via file or menu
-
+ 
 Building
 AmigaOS requires FreeType, libpng and zlib. Extract freetype-2.14.3.tar.xz, libpng-1.6.58.tar.xz and zlib.tar.gz in the tinyedit directory and rename them to freetype, libpng and zlib. Use bebbo gcc
 
-For Linux/BSD/macOS use Makefile.unix; for Windows use Makefile.win32. Optional features are enabled with USE_HUNSPELL=1, USE_HYPHEN=1, USE_MYTHES=1, USE_TRANSLATE=1, USE_STARDICT=1
+For Linux/BSD/macOS use Makefile.unix; for Windows use Makefile.win32. Optional features are enabled with USE_HUNSPELL=1, USE_HYPHEN=1, USE_MYTHES=1, USE_TRANSLATE=1, USE_STARDICT=1, USE_TTS=1, USE_GRAMMAR=1
+
+TTS requires a backend at runtime (espeak-ng on Linux/BSD, SAPI 5 on Windows, translator.library+narrator.device on AmigaOS). Grammar uses bundled .rul rule packs; more can be generated from LanguageTool XML files with tools/lt2rul.py
 
 Getting Started
 

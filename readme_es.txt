@@ -10,10 +10,16 @@ Características principales:
 - Búsqueda de texto
 - Portapapeles
 - Pegado con corchetes (Unix/Linux)
+- Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
+- Corrector gramatical/estilístico experimental con packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1)
 - Configurable vía archivo o menú
-
+ 
 Compilación
 AmigaOS requiere ttengine.library de https://aminet.net/package/util/libs/ttengine-68k
+
+Para Linux/BSD/macOS usa Makefile.unix; para Windows Makefile.win32. Las funciones opcionales se activan con USE_HUNSPELL=1, USE_HYPHEN=1, USE_MYTHES=1, USE_TRANSLATE=1, USE_STARDICT=1, USE_TTS=1, USE_GRAMMAR=1
+
+TTS necesita un backend en tiempo de ejecución (espeak-ng en Linux/BSD, SAPI 5 en Windows, translator.library+narrator.device en AmigaOS). Grammar usa packs de reglas .rul incluidos; se pueden generar más desde los XML de LanguageTool con tools/lt2rul.py
 
 Empezar
 

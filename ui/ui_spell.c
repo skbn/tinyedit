@@ -588,6 +588,7 @@ static void hyphen_split_replace(Ed *ed, const HyphenSplit *hs, const wchar_t *s
         return;
 
     ed_save_undo(ed);
+    ed->undo_snapshot_mode = 1;
 
     /* Delete second half on second_row */
     ed_set_pos(ed, hs->second_row, hs->second_start);
@@ -608,6 +609,8 @@ static void hyphen_split_replace(Ed *ed, const HyphenSplit *hs, const wchar_t *s
     /* Join first_row with the following line (which now holds the remainder) */
     ed_set_pos(ed, hs->first_row, hs->first_start + suggestion_len);
     ed_delete(ed);
+
+    ed->undo_snapshot_mode = 0;
 }
 
 /* Check and correct word under cursor */
@@ -806,7 +809,11 @@ int spell_check_word(TeApp *app)
             if (is_hyphen_split)
             {
                 /* Replace the whole hyphen-split word with the suggestion */
+                ed_auto_rewrap_capture_pre_snapshot(ed);
+
                 hyphen_split_replace(ed, &hs, suggestion_wcs, suggestion_len);
+
+                ed_auto_rewrap_after_edit(app);
                 te_status(app, "Replaced hyphenated word with '%s'", suggestions[selected]);
             }
             else

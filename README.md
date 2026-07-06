@@ -12,6 +12,8 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 - Spell checker with native implementation (AmigaOS/Windows) or Hunspell integration (*nix) (optional, USE_HUNSPELL=1)
 - Hyphenation with native implementation (AmigaOS/Windows) or libhyphen (*nix) (optional, USE_HYPHEN=1)
 - Thesaurus with native implementation (AmigaOS/Windows) or libmythes (*nix) (optional, USE_MYTHES=1)
+- Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
+- Experimental grammar/style checker using rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1)
 - Translator panel with online support and StarDict-compatible offline dictionary
 - Mouse support (works in terminal, SSH and remote sessions)
 - Configurable colors (and TTF fonts on AmigaOS)
@@ -68,6 +70,26 @@ To compile with translator support (optional):
 - FreeBSD: `doas pkg install curl`
 - macOS: `brew install curl`
 
+To compile with text-to-speech support (optional):
+```bash
+make -f Makefile.unix USE_TTS=1
+```
+- Debian/Ubuntu: `sudo apt install espeak-ng` (also installs `espeak-ng-data`)
+- Arch Linux: `sudo pacman -S espeak-ng`
+- FreeBSD: `doas pkg install espeak-ng`
+- NetBSD: `pkgin install espeak-ng`
+- OpenBSD: `pkg_add espeak`
+- macOS: `brew install espeak-ng` (or use the built-in `say` command)
+
+No build-time dependency is required: tinyedit spawns the TTS backend as a subprocess at runtime.
+
+To compile with grammar checker support (optional):
+```bash
+make -f Makefile.unix USE_GRAMMAR=1
+```
+- No external library dependency; uses a self-contained C module and `.rul` rule packs.
+- Rule packs can be generated from LanguageTool XML files using `tools/lt2rul.py`.
+
 Dictionaries, hyphenation patterns and thesaurus data:
 - Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
 - Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us hyphen-es hyphen-en mythes-es mythes-en`
@@ -96,7 +118,7 @@ When compiled with `USE_HUNSPELL=1`, the Windows version includes the same nativ
 
 ### AmigaOS
 
-For AmigaOS the program uses FreeType with libpng and zlib for TTF rendering.
+For AmigaOS the program uses FreeType with libpng and zlib for TTF rendering
 
 Using bebbo gcc:
 
@@ -105,7 +127,7 @@ Using bebbo gcc:
 - FreeType: https://freetype.org/
 
 To compile, in the tinyedit directory extract freetype-2.14.3.tar.xz,
-libpng-1.6.58.tar.xz, and zlib.tar.gz and rename them to `freetype`, `zlib`, and `libpng`.
+libpng-1.6.58.tar.xz, and zlib.tar.gz and rename them to `freetype`, `zlib`, and `libpng`
 
 To prepare headers and build:
 ```bash
@@ -125,9 +147,9 @@ The AmigaOS version includes native implementations for (enable at build time):
 - Hyphenation (compatible with hyph_*.dic files, implements Liang algorithm) (`USE_HUNSPELL=1 USE_HYPHEN=1`)
 - Thesaurus (compatible with mythes th_*.idx/dat files) (`USE_HUNSPELL=1 USE_MYTHES=1`)
 
-These are pure implementations designed for AmigaOS with LRU cache, no C++ dependencies.
+These are pure implementations designed for AmigaOS with LRU cache, no C++ dependencies
 
-**Note**: Online translator support on AmigaOS requires AmiSSL for HTTPS connections.
+**Note**: Online translator support on AmigaOS requires AmiSSL for HTTPS connections
 
 Tested Freetype fonts:
 
@@ -161,7 +183,7 @@ StarDict-compatible dictionaries for offline lookup:
 - Or from https://freedict.org/downloads/ (CC-licensed bilinguals)
 - Place .ifo, .idx, and .dict files in the dictionary directory configured in Setup
 
-The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA.
+The executable is large, but you don't need any libraries. It's optimized for RTG and also works with OCS, ECS, or AGA
 
 ## Hyphenation and Thesaurus Support
 
@@ -402,7 +424,7 @@ tinyedit includes an integrated file picker:
 - **Select directory**: Browse directories
 
 ## Tab System
-
+ 
 tinyedit supports editing multiple files simultaneously using a tab system:
 
 - **Open new tab**: Open a new file or create a new document
@@ -449,6 +471,37 @@ tinyedit includes thesaurus functionality to find synonyms:
 - **libmythes** (*nix): Uses libmythes library
 - Search synonyms of word under cursor
 - Integrates with spell checker for stemming fallback
+
+## Text-to-Speech (TTS)
+
+tinyedit supports text-to-speech when compiled with `USE_TTS=1`:
+
+- **Unix/*nix**: Spawns `espeak-ng` (preferred), `espeak`, `festival`, or macOS `say` as a subprocess
+- **Windows**: Uses SAPI 5 (no external package required)
+- **AmigaOS**: Uses `translator.library` v43 and `narrator.device` v34/v37
+
+Shortcuts:
+- **Speak selection / paragraph**: `Ctrl+Alt+L` (Unix/Windows), `Alt+Shift+L` (AmigaOS)
+- **Speak entire document**: `Ctrl+Alt+K` (Unix/Windows), `Alt+Shift+K` (AmigaOS)
+- **Pause / resume speech**: `Ctrl+Alt+P` (Unix/Windows), `Alt+Shift+P` (AmigaOS)
+- **Stop speech**: `Ctrl+Alt+O` (Unix/Windows), `Alt+Shift+O` (AmigaOS)
+- **Voice settings popup**: `Ctrl+Alt+J` (Unix/Windows), `Alt+Shift+J` (AmigaOS)
+
+Configure voice, rate, pitch and volume from Setup (F4)
+
+## Grammar Checker (Experimental)
+
+tinyedit includes an experimental grammar/style checker when compiled with `USE_GRAMMAR=1`:
+
+- Self-contained C module, no external library required
+- Loads `.rul` rule packs from the configured directory (default: `/usr/share/gramcheck` on Linux, `/usr/local/share/gramcheck` on BSD, `C:\gramcheck\rules` on Windows, `PROGDIR:rules` on AmigaOS)
+- The bundled `rules/` directory contains packs for English, Spanish, German, French, Italian and Portuguese
+- Rule packs are derived from LanguageTool XML files using `tools/lt2rul.py`
+- LanguageTool source repository: https://github.com/languagetool-org/languagetool
+- Only a subset of LanguageTool rules is extracted (simple literal pairs, punctuation, spacing, case, repetition, bracket matching and style hints)
+- **This is not a full language-aware proofreader**: it does not know where to place accents or choose words based on sentence context or morphology. It is a lightweight assistant for common surface issues
+
+Enable and configure the rule pack from Setup (F4) under the dictionary panel
 
 ## Screenshots
 
