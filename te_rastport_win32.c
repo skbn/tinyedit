@@ -157,6 +157,8 @@ static void te_glyph_free(struct TEGlyph *g);
 static void te_cache_flush(struct TERenderContext *dc);
 static int te_decode_utf8(const unsigned char *p, const unsigned char *end, ULONG *cp_out, int *consumed_out);
 
+static void te_recompute_metrics(struct TERenderContext *dc);
+
 static unsigned int te_hash_cp_style(ULONG cp, unsigned char style)
 {
     ULONG h = cp ^ ((ULONG)style << 21);
@@ -1292,8 +1294,15 @@ void TE_RenderText(struct TERenderContext *dc, HDC hdc, int x, int y, const char
 
         if (cp == 0x09)
         {
-            int tabW = (dc->fonts[0].height / 2) * (int)dc->tabSpaces;
+            /* Tab advances by cell width, not font height */
+            int tabW;
+
+            if (!dc->metrics_valid)
+                te_recompute_metrics(dc);
+
+            tabW = dc->metrics_width * (int)dc->tabSpaces;
             penX += tabW;
+
             continue;
         }
 

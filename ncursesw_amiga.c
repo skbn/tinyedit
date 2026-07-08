@@ -775,6 +775,10 @@ static void render_all()
                             continue;
                         }
 
+                        /* Control chars render as spaces, same as bitmap path */
+                        if (wc < 0x20)
+                            wc = (uint32_t)' ';
+
                         /* TE_RenderText always expects UTF-8 */
                         ulen = utf32_to_utf8(wc, ubuf);
                         ubuf[ulen] = '\0';
@@ -801,8 +805,9 @@ static void render_all()
                         if (wc == TE_CELL_WIDE_TRAILING)
                             continue;
 
-                        /*if (wc < 0x20)
-                            wc = (uint32_t)' ';*/
+                        /* Control chars render as spaces, same as bitmap path */
+                        if (wc < 0x20)
+                            wc = (uint32_t)' ';
 
                         urun_len += utf32_to_utf8(wc, urun + urun_len);
                     }
@@ -814,7 +819,7 @@ static void render_all()
                     pos.x = (WORD)x;
                     pos.y = (WORD)(y + fb);
 
-                    TE_RenderText(ami_rp, ami_te_dc, &pos, urun, (ULONG)-1);
+                    TE_RenderTextCells(ami_rp, ami_te_dc, &pos, urun, (LONG)fw);
                 }
             }
             else

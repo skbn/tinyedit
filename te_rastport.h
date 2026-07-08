@@ -70,6 +70,9 @@ void TE_SetColorPen(struct TERenderContext *dc, struct Screen *screen, LONG txtP
 
 /* Measurement */
 void TE_GetMetrics(struct TERenderContext *dc, struct TEGlyphMetrics *out);
+
+/* Grid render: fixed cellW advance per character (monospace cell runs) */
+void TE_RenderTextCells(struct RastPort *rp, struct TERenderContext *dc, struct TEDrawPosition *pos, CONST_STRPTR utf8, LONG cellW);
 void TE_MeasureText(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars, struct TEGlyphMetrics *out);
 void TE_GetCharOffsets(struct TERenderContext *dc, CONST_STRPTR utf8, LONG maxChars, LONG *arrayout);
 
@@ -81,8 +84,7 @@ void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDra
 void TE_SetScreen(struct TERenderContext *dc, struct Screen *screen);
 void TE_UpdatePalette(struct TERenderContext *dc, struct Screen *screen);
 
-/* Optional global cleanup. Closes CyberGraphX if the engine opened it
- * Call once at app shutdown after the last TE_ContextRelease() */
+/* Optional global cleanup. Closes CyberGraphX if the engine opened it. Call once at app shutdown after the last TE_ContextRelease() */
 void TE_GlobalCleanup(void);
 
 /* Debug control - set debug level (0=none, 1=error, 2=warn, 3=info, 4=verbose, 5=all) */

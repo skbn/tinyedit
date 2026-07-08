@@ -1737,6 +1737,8 @@ void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDra
     const UBYTE *end = NULL;
     ULONG count = 0;
     int penX, penY;
+    int cell_w = 0;
+    struct TEGlyphMetrics tm;
 
     if (!rp || !dc || !pos || !utf8 || dc->numFonts <= 0)
         return;
@@ -1770,7 +1772,14 @@ void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDra
 
         if (cp == 0x09)
         {
-            penX += (int)(dc->fonts[0].height / 2) * (int)dc->tabSpaces;
+            /* Tab advances by cell width, not font height */
+            if (cell_w == 0)
+            {
+                TE_GetMetrics(dc, &tm);
+                cell_w = tm.width > 0 ? (int)tm.width : (int)(dc->fonts[0].height / 2);
+            }
+
+            penX += cell_w * (int)dc->tabSpaces;
             continue;
         }
 
@@ -1791,6 +1800,59 @@ void TE_RenderText(struct RastPort *rp, struct TERenderContext *dc, struct TEDra
         te_draw_glyph(dc, rp, g, penX, penY);
 
         penX += g->advance > 0 ? g->advance : g->width;
+    }
+
+    pos->x = (WORD)penX;
+    pos->y = (WORD)penY;
+}
+
+/* Grid variant: each character advances exactly cellW, so fallback glyphs with a different natural advance cannot shift the rest of the run */
+void TE_RenderTextCells(struct RastPort *rp, struct TERenderContext *dc, struct TEDrawPosition *pos, CONST_STRPTR utf8, LONG cellW)
+{
+    const UBYTE *p = NULL;
+    const UBYTE *end = NULL;
+    int penX;
+    int penY;
+
+    if (!rp || !dc || !pos || !utf8 || dc->numFonts <= 0 || cellW <= 0)
+        return;
+
+    p = (const UBYTE *)utf8;
+    end = p + strlen((const char *)utf8);
+
+    penX = pos->x;
+    penY = pos->y;
+
+    while (p < end)
+    {
+        ULONG cp;
+        int consumed = 0;
+        struct TEGlyph *g = NULL;
+
+        if (!te_decode_utf8(p, end, &cp, &consumed))
+            break;
+
+        p += consumed;
+
+        if (cp == 0)
+            break;
+
+        /* Cells never carry line controls; render everything else */
+        g = te_get_glyph(dc, cp);
+
+        if (!g)
+        {
+            /* Try replacement char in the chain */
+            g = te_get_glyph(dc, TE_REPLACEMENT_CP);
+
+            if (!g)
+                g = te_get_notfound(dc);
+        }
+
+        if (g)
+            te_draw_glyph(dc, rp, g, penX, penY);
+
+        penX += (int)cellW;
     }
 
     pos->x = (WORD)penX;

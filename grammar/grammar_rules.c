@@ -72,6 +72,43 @@ static char *gc_split_token(char *s, char **rest)
     return tok;
 }
 
+/* Like gc_split_token but a leading quote groups words until the closing quote */
+static char *gc_split_qtoken(char *s, char **rest)
+{
+    char *p = NULL;
+    char *tok = NULL;
+
+    p = gc_lstrip(s);
+
+    if (*p == '"')
+    {
+        p++;
+        tok = p;
+
+        while (*p && *p != '"')
+            p++;
+    }
+    else
+    {
+        tok = p;
+
+        while (*p && *p != ' ' && *p != '\t')
+            p++;
+    }
+
+    if (*p)
+    {
+        *p = '\0';
+        p++;
+        p = gc_lstrip(p);
+    }
+
+    if (rest)
+        *rest = p;
+
+    return tok;
+}
+
 static void gc_add_rule(GramCheck *g, unsigned short kind, unsigned short category, unsigned char severity, const char *data, const char *msg, const char *name)
 {
     struct gc_rule *r = NULL;
@@ -91,7 +128,44 @@ static void gc_add_rule(GramCheck *g, unsigned short kind, unsigned short catego
     r->param2 = 0;
 }
 
-int gc_add_pair(GramCheck *g, const char *src, const char *dst, int severity, const char *msg)
+/* Turn a comma list into an interned "|a|b|" membership string, lower-cased */
+static const char *gc_intern_ctx_list(GramCheck *g, const char *list)
+{
+    char buf[256];
+    char lower[256];
+    size_t n = 0;
+    const char *p = list;
+
+    if (!list || !*list)
+        return NULL;
+
+    buf[n++] = '|';
+
+    while (*p && n < sizeof(buf) - 2)
+    {
+        if (*p == ',')
+        {
+            if (buf[n - 1] != '|')
+                buf[n++] = '|';
+
+            p++;
+            continue;
+        }
+
+        buf[n++] = *p++;
+    }
+
+    if (buf[n - 1] != '|')
+        buf[n++] = '|';
+
+    buf[n] = '\0';
+
+    gc_utf8_lower(buf, lower, sizeof(lower));
+
+    return gc_arena_strdup(&g->arena, lower);
+}
+
+int gc_add_pair_ctx(GramCheck *g, const char *src, const char *dst, int severity, const char *msg, const char *prev, const char *next, unsigned char flags)
 {
     struct gc_pair *p = NULL;
     char lower[128];
@@ -117,17 +191,24 @@ int gc_add_pair(GramCheck *g, const char *src, const char *dst, int severity, co
     p->src = gc_arena_strdup(&g->arena, lower);
     p->dst = dst ? gc_arena_strdup(&g->arena, dst) : NULL;
     p->msg = msg ? gc_arena_strdup(&g->arena, msg) : NULL;
+    p->prev = gc_intern_ctx_list(g, prev);
+    p->next = gc_intern_ctx_list(g, next);
 
     if (!p->src)
         return -1;
 
     p->len_src = (unsigned short)strlen(p->src);
     p->severity = (unsigned char)severity;
-    p->reserved = 0;
+    p->flags = flags;
 
     g->n_pairs++;
 
     return 0;
+}
+
+int gc_add_pair(GramCheck *g, const char *src, const char *dst, int severity, const char *msg)
+{
+    return gc_add_pair_ctx(g, src, dst, severity, msg, NULL, NULL, 0);
 }
 
 static int gc_pair_cmp(const void *a, const void *b)
@@ -193,6 +274,41 @@ const struct gc_pair *gc_find_pair(GramCheck *g, const char *lower_word, size_t 
     }
 
     return NULL;
+}
+
+/* First entry of the equal-src run so callers can walk context variants */
+const struct gc_pair *gc_find_pair_first(GramCheck *g, const char *lower_word, size_t len)
+{
+    const struct gc_pair *p = gc_find_pair(g, lower_word, len);
+
+    if (!p)
+        return NULL;
+
+    while (p > g->pairs && strcmp((p - 1)->src, p->src) == 0)
+        p--;
+
+    return p;
+}
+
+/* Membership test against an interned "|a|b|" list */
+int gc_ctx_list_has(const char *list, const char *lower_tok, size_t len)
+{
+    const char *p = NULL;
+
+    if (!list || !lower_tok || len == 0)
+        return 0;
+
+    p = list;
+
+    while ((p = strchr(p, '|')) != NULL)
+    {
+        p++;
+
+        if (strncmp(p, lower_tok, len) == 0 && p[len] == '|')
+            return 1;
+    }
+
+    return 0;
 }
 
 int gc_wl_add(GramCheck *g, struct gc_wordlist *wl, const char *word)
@@ -710,8 +826,9 @@ int gc_load_rules(GramCheck *g, const char *path)
             char *msg = NULL;
             char *r2 = NULL;
 
-            src = gc_split_token(rest, &r2);
-            dst = gc_split_token(r2, &msg);
+            /* Quotes group multi-word sources and suggestions */
+            src = gc_split_qtoken(rest, &r2);
+            dst = gc_split_qtoken(r2, &msg);
             msg = gc_lstrip(msg);
 
             severity = GC_INFO;
@@ -738,6 +855,47 @@ int gc_load_rules(GramCheck *g, const char *path)
 
             if (src && *src && dst && *dst)
                 gc_add_pair(g, src, dst, severity, (msg && *msg) ? msg : NULL);
+        }
+        else if (strcmp(tok, "PAIRCTX") == 0)
+        {
+            char *src = NULL;
+            char *dst = NULL;
+            char *opt = NULL;
+            char *r2 = NULL;
+            char *prev = NULL;
+            char *next = NULL;
+            char *msg = NULL;
+            unsigned char flags = 0;
+
+            src = gc_split_qtoken(rest, &r2);
+            dst = gc_split_qtoken(r2, &r2);
+
+            severity = GC_INFO;
+
+            /* Options in any order: PREV=a,b NEXT=a,$ QMARK warn/err/info */
+            while (r2 && *r2 && *r2 != '#')
+            {
+                opt = gc_split_token(r2, &r2);
+
+                if (strncmp(opt, "PREV=", 5) == 0)
+                    prev = opt + 5;
+                else if (strncmp(opt, "NEXT=", 5) == 0)
+                    next = opt + 5;
+                else if (strcmp(opt, "QMARK") == 0)
+                    flags |= GC_PAIRF_QMARK;
+                else if (strcmp(opt, "warn") == 0)
+                    severity = GC_WARN;
+                else if (strcmp(opt, "err") == 0)
+                    severity = GC_ERROR;
+                else if (strcmp(opt, "info") == 0)
+                    severity = GC_INFO;
+            }
+
+            if (r2 && *r2 == '#')
+                msg = gc_lstrip(r2 + 1);
+
+            if (src && *src && dst && *dst && (prev || next || flags))
+                gc_add_pair_ctx(g, src, dst, severity, (msg && *msg) ? msg : NULL, prev, next, flags);
         }
     }
 

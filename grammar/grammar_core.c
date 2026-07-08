@@ -44,6 +44,27 @@ static int rule_enabled(GramCheck *g, const struct gc_rule *r)
     return (g->enabled_mask & (unsigned)r->category) != 0u;
 }
 
+/* One context pair: check PREV and QMARK now, defer on NEXT, else emit */
+static int gc_pair_try(const struct gc_pair *pp, const char *prev_lower, int word_q, unsigned short off, unsigned short wlen, unsigned short id_pair, unsigned short category, GcIssue *out, int n_out, int cap, const struct gc_pair **pend_pair, unsigned short *pend_off, unsigned short *pend_len)
+{
+    if ((pp->flags & GC_PAIRF_QMARK) && !word_q)
+        return n_out;
+
+    if (pp->prev && !gc_ctx_list_has(pp->prev, prev_lower, strlen(prev_lower)))
+        return n_out;
+
+    if (pp->next)
+    {
+        *pend_pair = pp;
+        *pend_off = off;
+        *pend_len = wlen;
+
+        return n_out;
+    }
+
+    return gc_emit(out, n_out, cap, off, wlen, id_pair, pp->severity, category);
+}
+
 static int is_skipped_word(GramCheck *g, const char *lower, size_t len)
 {
     int i;
@@ -604,6 +625,15 @@ int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *
     /* Output cursor */
     int n_out;
 
+    /* PAIR context: previous word lower-cased, question depth, deferred hit */
+    char prev_lower[128];
+    char combo[260];
+    int q_depth;
+    int word_q;
+    const struct gc_pair *pend_pair = NULL;
+    unsigned short pend_off;
+    unsigned short pend_len;
+
     /* Rule locators (per-kind cache for hot loops) */
     const struct gc_rule *r_no_space_before = NULL;
     const struct gc_rule *r_space_after = NULL;
@@ -833,6 +863,12 @@ int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *
     need_cap = prev_terminated ? 1 : 0;
     bdepth = 0;
     n_out = 0;
+    prev_lower[0] = '\0';
+    q_depth = 0;
+    word_q = 0;
+    pend_pair = NULL;
+    pend_off = 0;
+    pend_len = 0;
 
     while (off < line_len)
     {
@@ -866,13 +902,40 @@ int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *
                 lower[0] = '\0';
             }
 
-            /* PAIR (whole word confusion) */
+            /* PAIR (word confusions, with optional context) */
             if (r_pair && rule_enabled(g, r_pair) && g->pairs && g->n_pairs > 0 && wlen > 0 && lower[0])
             {
-                const struct gc_pair *hit = gc_find_pair(g, lower, strlen(lower));
+                const struct gc_pair *pp = NULL;
 
-                if (hit)
-                    n_out = gc_emit(out, n_out, cap, (unsigned short)word_start, (unsigned short)wlen, id_pair, hit->severity, r_pair->category);
+                /* A deferred hit resolves against this word as its NEXT token */
+                if (pend_pair)
+                {
+                    if (gc_ctx_list_has(pend_pair->next, lower, strlen(lower)))
+                        n_out = gc_emit(out, n_out, cap, pend_off, pend_len, id_pair, pend_pair->severity, r_pair->category);
+
+                    pend_pair = NULL;
+                }
+
+                pp = gc_find_pair_first(g, lower, strlen(lower));
+
+                while (pp && pp < g->pairs + g->n_pairs && pp->src && strcmp(pp->src, lower) == 0)
+                {
+                    n_out = gc_pair_try(pp, prev_lower, word_q, (unsigned short)word_start, (unsigned short)wlen, id_pair, r_pair->category, out, n_out, cap, &pend_pair, &pend_off, &pend_len);
+                    pp++;
+                }
+
+                /* Two-word sources match against "previous current" */
+                if (prev_lower[0] && strlen(prev_lower) + 1 + wlen < sizeof(combo))
+                {
+                    sprintf(combo, "%s %s", prev_lower, lower);
+                    pp = gc_find_pair_first(g, combo, strlen(combo));
+
+                    while (pp && pp < g->pairs + g->n_pairs && pp->src && strcmp(pp->src, combo) == 0)
+                    {
+                        n_out = gc_pair_try(pp, "", 1, (unsigned short)prev_word_start, (unsigned short)(word_end - prev_word_start), id_pair, r_pair->category, out, n_out, cap, &pend_pair, &pend_off, &pend_len);
+                        pp++;
+                    }
+                }
             }
 
             /* WORD_CAP: this word should start with uppercase (proper nouns, days, months, ...). Match on lowercased form */
@@ -971,6 +1034,13 @@ int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *
 
             prev_word_start = word_start;
             prev_word_end = word_end;
+
+            /* Keep the lower-cased form for PAIR context checks */
+            if (wlen > 0 && wlen < sizeof(prev_lower))
+                memcpy(prev_lower, lower, wlen + 1);
+            else
+                prev_lower[0] = '\0';
+
             in_word = 0;
 
             /* Sentence-scope word counter (for SENTENCE_TOO_LONG etc.) */
@@ -994,11 +1064,35 @@ int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *
             }
         }
 
+        /* Question span tracking and pending PAIRCTX punctuation resolution */
+        if (!gc_is_letter_cp(cp) && !(cp >= '0' && cp <= '9'))
+        {
+            if (cp == 0xBF)
+                q_depth++;
+            else if (cp == '?' && q_depth > 0)
+                q_depth--;
+
+            if (pend_pair && r_pair && cp != ' ' && cp != '\t')
+            {
+                int is_end = (cp == '.' || cp == '!' || cp == '?' || cp == 0x2026);
+                char pt[2];
+
+                pt[0] = cp < 128 ? (char)cp : '\0';
+                pt[1] = '\0';
+
+                if ((is_end && gc_ctx_list_has(pend_pair->next, "$", 1)) || (pt[0] && gc_ctx_list_has(pend_pair->next, pt, 1)))
+                    n_out = gc_emit(out, n_out, cap, pend_off, pend_len, id_pair, pend_pair->severity, r_pair->category);
+
+                pend_pair = NULL;
+            }
+        }
+
         /* Start-of-word transition */
         if (!in_word && (gc_is_letter_cp(cp) || (cp >= '0' && cp <= '9')))
         {
             in_word = 1;
             word_start = this_off;
+            word_q = q_depth > 0;
 
             /* CAPITALIZE_SENTENCE — check first letter of the token */
             if (r_capitalize && rule_enabled(g, r_capitalize) && need_cap && gc_is_letter_cp(cp))
@@ -1267,17 +1361,42 @@ int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *
             if (wlen > 0 && wlen < sizeof(lower))
             {
                 char tmp[128];
-                const struct gc_pair *hit = NULL;
+                const struct gc_pair *pp = NULL;
 
                 memcpy(tmp, line + word_start, wlen);
                 tmp[wlen] = '\0';
 
                 gc_utf8_lower(tmp, lower, sizeof(lower));
 
-                hit = gc_find_pair(g, lower, strlen(lower));
+                /* A deferred hit resolves against this word as its NEXT token */
+                if (pend_pair)
+                {
+                    if (gc_ctx_list_has(pend_pair->next, lower, strlen(lower)))
+                        n_out = gc_emit(out, n_out, cap, pend_off, pend_len, id_pair, pend_pair->severity, r_pair->category);
 
-                if (hit)
-                    n_out = gc_emit(out, n_out, cap, (unsigned short)word_start, (unsigned short)wlen, id_pair, hit->severity, r_pair->category);
+                    pend_pair = NULL;
+                }
+
+                pp = gc_find_pair_first(g, lower, strlen(lower));
+
+                while (pp && pp < g->pairs + g->n_pairs && pp->src && strcmp(pp->src, lower) == 0)
+                {
+                    n_out = gc_pair_try(pp, prev_lower, word_q, (unsigned short)word_start, (unsigned short)wlen, id_pair, r_pair->category, out, n_out, cap, &pend_pair, &pend_off, &pend_len);
+                    pp++;
+                }
+
+                /* Two-word sources match against "previous current" */
+                if (prev_lower[0] && strlen(prev_lower) + 1 + wlen < sizeof(combo))
+                {
+                    sprintf(combo, "%s %s", prev_lower, lower);
+                    pp = gc_find_pair_first(g, combo, strlen(combo));
+
+                    while (pp && pp < g->pairs + g->n_pairs && pp->src && strcmp(pp->src, combo) == 0)
+                    {
+                        n_out = gc_pair_try(pp, "", 1, (unsigned short)prev_word_start, (unsigned short)(word_end - prev_word_start), id_pair, r_pair->category, out, n_out, cap, &pend_pair, &pend_off, &pend_len);
+                        pp++;
+                    }
+                }
             }
         }
 
@@ -1401,6 +1520,15 @@ int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *
 
         if (punct_run > maxrun)
             n_out = gc_emit(out, n_out, cap, (unsigned short)punct_run_start, (unsigned short)(line_len - punct_run_start), id_excess, r_excess->severity, r_excess->category);
+    }
+
+    /* End of line counts as sentence end for a deferred PAIRCTX */
+    if (pend_pair && r_pair)
+    {
+        if (gc_ctx_list_has(pend_pair->next, "$", 1))
+            n_out = gc_emit(out, n_out, cap, pend_off, pend_len, id_pair, pend_pair->severity, r_pair->category);
+
+        pend_pair = NULL;
     }
 
     /* Word-sequence pass (spell / word_lower / agreement / density / subjunctive / tense). Shares one tokenization for all of them */

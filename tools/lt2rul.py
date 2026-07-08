@@ -431,6 +431,12 @@ def extract_simple_pair(rule) -> tuple[str, str, str] | None:
     if pattern is None or message is None:
         return None
 
+    # Rules with <marker> replace only the marked span, so pairing the whole
+    # pattern with the suggestion produces corrupt entries -- skip them
+    for child in pattern:
+        if get_local(child.tag) == "marker":
+            return None
+
     tokens = list(iter_children(pattern, "token"))
 
     if len(tokens) < 1 or len(tokens) > 2:
@@ -754,13 +760,11 @@ def emit(id_hits, pairs, wordlists, lang: str, out):
     print(f"# {len(pairs)} PAIR entries", file=out)
 
     for src, dst, msg in sorted(pairs, key=lambda x: x[0].lower()):
-        # dst may contain spaces -> quote it
-        if " " in dst:
-            dst_out = f'"{dst}"'
-        else:
-            dst_out = dst
+        # src and dst may contain spaces -> quote them
+        src_out = f'"{src.lower()}"' if " " in src else src.lower()
+        dst_out = f'"{dst}"' if " " in dst else dst
 
-        line = f"PAIR  {src.lower():<20s} {dst_out}"
+        line = f"PAIR  {src_out:<20s} {dst_out}"
 
         if msg:
             line += f"  info  # {msg}"

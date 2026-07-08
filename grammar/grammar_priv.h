@@ -94,15 +94,20 @@ struct gc_rule
     short param2;
 };
 
+/* Context flag bits for gc_pair */
+#define GC_PAIRF_QMARK 0x01 /* only inside an inverted-question span */
+
 /* Word-pair table entry. Kept separate from rules for locality */
 struct gc_pair
 {
-    const char *src; /* interned, UTF-8, lower-cased */
-    const char *dst; /* interned, UTF-8, suggested spelling */
-    const char *msg; /* optional, may be NULL */
+    const char *src;  /* interned, UTF-8, lower-cased, may hold two words */
+    const char *dst;  /* interned, UTF-8, suggested spelling */
+    const char *msg;  /* optional, may be NULL */
+    const char *prev; /* "|w|w|" list: previous word must match, NULL = any */
+    const char *next; /* "|w|$|" list: next token must match, NULL = any */
     unsigned short len_src;
     unsigned char severity;
-    unsigned char reserved;
+    unsigned char flags;
 };
 
 /* LRU line-cache entry. Same layout idea as spell/check_cache but keyed by a 32-bit hash pair. Value is a small array of issues */
@@ -261,8 +266,11 @@ void gc_cache_store(GramCheck *g, unsigned long h1, unsigned long h2, int prev_t
 
 int gc_load_rules(GramCheck *g, const char *path);
 int gc_add_pair(GramCheck *g, const char *src, const char *dst, int severity, const char *msg);
+int gc_add_pair_ctx(GramCheck *g, const char *src, const char *dst, int severity, const char *msg, const char *prev, const char *next, unsigned char flags);
 void gc_sort_pairs(GramCheck *g);
 const struct gc_pair *gc_find_pair(GramCheck *g, const char *lower_word, size_t len);
+const struct gc_pair *gc_find_pair_first(GramCheck *g, const char *lower_word, size_t len);
+int gc_ctx_list_has(const char *list, const char *lower_tok, size_t len);
 
 /* Add a lower-cased word to a wordlist (WORD_CAP / WORD_UPPER) */
 int gc_wl_add(GramCheck *g, struct gc_wordlist *wl, const char *word);

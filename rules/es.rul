@@ -32,94 +32,113 @@ CAPITALIZE_SENTENCE
 DOUBLE_DASH
 REPEAT_WORD
 
-# 90 PAIR entries
-PAIR  a abajo              abajo  info  # Para indicar posición, se escribe abajo.
-PAIR  a bajo               abajo  info  # Para indicar posición, se escribe abajo.
-PAIR  a ber                haber  info  # ¿Quería decir haber?
-PAIR  a caba               acaba  info  # ¿Quería decir acaba?
-PAIR  a parte              aparte  info  # En la mayoría de los casos se escribe aparte. Solo se escribe separado si equ...
-PAIR  a tu                 vez  info  # ¿Quería decir vez?
-PAIR  ace                  hace  info  # ¿Quería decir hace (del verbo 'hacer')? "Ace" es un término inglés usado en t...
+# --- Word confusions (typos and joins, safe without context) ---
+PAIR  "a ber"              haber  info  # ¿Quería decir haber?
+PAIR  "a caba"             acaba  info  # ¿Quería decir acaba?
+PAIR  "a parte"            aparte  info  # En la mayoría de los casos se escribe aparte
+PAIR  ace                  hace  info  # ¿Quería decir hace (del verbo hacer)?
 PAIR  ademas               además
 PAIR  agusto               "a gusto"  info  # ¿Quería decir a gusto?
-PAIR  al finales           "a finales"  info  # ¿Quería decir a finales?
-PAIR  al fines             "a fines"  info  # ¿Quería decir a fines?
-PAIR  ala vez              "a la vez"  info  # ¿Quería decir a la vez?
+PAIR  "al finales"         "a finales"  info  # ¿Quería decir a finales?
+PAIR  "al fines"           "a fines"  info  # ¿Quería decir a fines?
+PAIR  "ala vez"            "a la vez"  info  # ¿Quería decir a la vez?
 PAIR  aleman               alemán
 PAIR  anos                 años
-PAIR  arriba a             abajo  info  # Para indicar posición, se escribe abajo.
-PAIR  aveces               "a veces"  info  # ¿Quería decir a veces? "Aveces" es una forma correcta del v. 'avezar'.
+PAIR  aveces               "a veces"  info  # ¿Quería decir a veces?
 PAIR  aver                 "a ver"  info  # ¿Quería decir a ver o haber?
 PAIR  aya                  haya
-PAIR  boca bajo            bocabajo  info  # Como adverbio, se escribe bocabajo o boca abajo.
-PAIR  borís johnson        "Boris Johnson"  info  # ¿Quiso decir Boris Johnson (político británico)?
-PAIR  con sin              o  info  # ¿Quería decir o?
-PAIR  contra más           "cuanto más"  info  # La forma correcta es cuanto más excepto en el contexto de litigar o luchar y ...
-PAIR  de                   repuesto  info  # ¿Quería decir repuesto?
-PAIR  debido que           "debido a que"  info  # ¿Quería decir debido a que?
-PAIR  decir                hola  info  # ¿Quería decir hola (saludo)?
-PAIR  del                  ay  info  # Si es una interjección, se escribe ay. Correcto si es el v. 'haber'.
-PAIR  del la               "de la"  info  # Posible confusión. ¿Quería decir de la? Puede ser correcto si se refieren a l...
-PAIR  des de               desde  info  # ¿Quería decir desde?
-PAIR  des del              "desde el"  info  # ¿Quería decir desde el?
+PAIR  "boca bajo"          bocabajo  info  # Como adverbio, se escribe bocabajo o boca abajo
+PAIR  "contra más"         "cuanto más"  info  # Lo correcto es cuanto más
+PAIR  "debido que"         "debido a que"  info  # ¿Quería decir debido a que?
+PAIR  "del la"             "de la"  info  # ¿Quería decir de la?
+PAIR  "des de"             desde  info  # ¿Quería decir desde?
+PAIR  "des del"            "desde el"  info  # ¿Quería decir desde el?
 PAIR  dijistes             dijiste
-PAIR  disponible           esté  info  # Si es del verbo estar, se escribe esté.
-PAIR  durante a            "durante la"  info  # ¿Quería decir durante la?
-PAIR  durante al           "durante la"  info  # ¿Quería decir durante la?
-PAIR  echo                 hecho
-PAIR  el                   él
-PAIR  enserio              "en serio"  info  # ¿Quería decir en serio (locución adverbial)? "Enserio" es una forma del verbo...
-PAIR  eramos               éramos  info  # ¿Quería decir éramos (v. 'ser') o erramos (v. 'errar')? "Eramos" del v. 'erar...
-PAIR  erase                érase  info  # ¿Quería decir érase? 'Erar' es un verbo poco usual.
-PAIR  ere                  ERE  info  # ¿Quería decir ERE (expediente de regulación de empleo) o eres v. 'ser'?
+PAIR  enserio              "en serio"  info  # ¿Quería decir en serio?
+PAIR  eramos               éramos  info
+PAIR  erase                érase  info
 PAIR  espanol              español
-PAIR  esta                 está
-PAIR  estar                "de más"  info  # ¿Quería decir de más (de sobra, en demasía)? Es correcto si significa "el res...
 PAIR  frances              francés
-PAIR  google doc           "Google Docs"  info  # ¿Quería decir Google Docs?
-PAIR  haber                deshecho  info  # Si es del v. 'deshacer', se escribe deshecho.
-PAIR  haber                me  info  # ¿Quería decir me?
-PAIR  haber                "a ver"
 PAIR  haiga                haya
-PAIR  halla                haya
 PAIR  hechar               echar
-PAIR  hico                 hizo  info  # ¿Quería decir hizo (v. 'hacer')? Más raramente, es correcto con el sentido de...
+PAIR  hico                 hizo  info
 PAIR  ingles               inglés
-PAIR  jamas                jamás  info  # ¿Quería decir jamás (nunca)? "Jamas" puede ser una forma del v. 'jamar' (colo...
-PAIR  jean austen          "Jane Austen"  info  # ¿Quería decir Jane Austen (novelista inglesa)?
-PAIR  jean fonda           "Jane Fonda"  info  # ¿Quería decir Jane Fonda (actriz estadounidense)?
-PAIR  laque                "la que"  info  # ¿Quería decir la que? "Laque" es correcto si es del v. 'lacar'.
-PAIR  lo                   largo  info  # ¿Quería decir largo?
-PAIR  mas                  más
-PAIR  mismo                consigo  info  # ¿Quería decir consigo?
-PAIR  más aya              "más allá"  info  # ¿Quería decir más allá? "Aya" existe como sustantivo poco usual.
+PAIR  jamas                jamás  info
+PAIR  laque                "la que"  info  # ¿Quería decir la que?
+PAIR  "más aya"            "más allá"  info  # ¿Quería decir más allá?
 PAIR  nesecito             necesito
 PAIR  ninos                niños
-PAIR  no                   hay  info  # Si es del verbo 'haber', se escribe hay.
-PAIR  no                   sino  info  # Probablemente hay que usar la conjunción adversativa sino.
-PAIR  numeral              año  info  # ¿Quería decir año (período de doce meses)?
-PAIR  ojala                ojalá  info  # ¿Quería decir ojalá (interjección)? "Ojala" es una forma del v. ojalar.
+PAIR  ojala                ojalá  info
 PAIR  osea                 "o sea"
-PAIR  para que             haya  info  # Probablemente hay que escribir haya (v. haber). Correcto si es del v. 'hallar...
-PAIR  porque               "por qué"
-PAIR  porqué               "por qué"  info  # ¿Quería decir por qué ('por qué motivo') o porque ('por razón de que')?
-PAIR  que                  año  info  # ¿Quería decir año (período de doce meses)?
-PAIR  respuesto            respondido  info  # ¿Quería decir respondido (participio) o respuesta (sustantivo femenino)?
-PAIR  sao paulo            "São Paulo"  info  # ¿Quería decir São Paulo?
-PAIR  se                   vuelva  info  # ¿Quería decir vuelva?
-PAIR  se                   sé
-PAIR  si                   "a ver"  info  # ¿Quería decir a ver?
-PAIR  si                   sí
-PAIR  sino                 "si no"
+PAIR  porqué               "por qué"  info  # El sustantivo porqué lleva artículo: el porqué
+PAIR  respuesto            respondido  info
 PAIR  tambien              también
-PAIR  te                   té
-PAIR  tu                   tú
-PAIR  tubo                 tuvo
-PAIR  tuvo                 tubo
-PAIR  u no                 uno  info  # ¿Quería decir uno?
-PAIR  valla                vaya
-PAIR  vaya                 valla
+PAIR  tubo                 tuvo  info  # Tubo es un cilindro; del verbo tener es tuvo
+PAIR  "u no"               uno  info  # ¿Quería decir uno?
 PAIR  vinistes             viniste
-PAIR  vividamente          vívidamente  info  # ¿Quería decir vívidamente (derivado de 'vívido')?
-PAIR  whatsapps            WhatsApp  info  # Escribimos WhatsApp (aplicación) o wasaps (mensajes enviados con esta aplicac...
-PAIR  ó                    o  info  # La conjunción o se escribe siempre sin tilde, incluso entre cifras.
+PAIR  vividamente          vívidamente  info
+PAIR  whatsapps            WhatsApp  info
+PAIR  ó                    o  info  # La conjunción o ya no se acentúa ni entre cifras
+PAIR  "sao paulo"          "São Paulo"  info
+PAIR  "borís johnson"      "Boris Johnson"  info
+PAIR  "jean austen"        "Jane Austen"  info
+PAIR  "jean fonda"         "Jane Fonda"  info
+PAIR  "google doc"         "Google Docs"  info
+
+# --- Tildes diacríticas y confusiones que exigen contexto (PAIRCTX) ---
+# Interrogativos y exclamativos dentro de ¿...? llevan tilde
+PAIRCTX  que     qué     QMARK  info  # En interrogativas lleva tilde: qué
+PAIRCTX  como    cómo    QMARK  info  # En interrogativas lleva tilde: cómo
+PAIRCTX  cuando  cuándo  QMARK  info  # En interrogativas lleva tilde: cuándo
+PAIRCTX  donde   dónde   QMARK  info  # En interrogativas lleva tilde: dónde
+PAIRCTX  quien   quién   QMARK  info  # En interrogativas lleva tilde: quién
+PAIRCTX  cuanto  cuánto  QMARK  info  # En interrogativas lleva tilde: cuánto
+PAIRCTX  cuanta  cuánta  QMARK  info  # En interrogativas lleva tilde: cuánta
+PAIRCTX  porque  "por qué"  QMARK  info  # En preguntas se escribe por qué
+
+# tu (posesivo) vs tú (pronombre): delante de verbo en segunda persona
+PAIRCTX  tu  tú  NEXT=eres,estás,estas,tienes,puedes,quieres,sabes,vas,has,haces,dices,vienes,crees,piensas,debes,mismo,misma,solo,sola,también,tambien  info  # Delante de verbo es el pronombre tú
+
+# el (artículo) vs él (pronombre): delante de verbo en tercera persona
+PAIRCTX  el  él  NEXT=es,está,esta,tiene,puede,quiere,sabe,va,ha,hace,dice,viene,cree,piensa,debe,fue,era,dijo,vino,hizo,quiso,supo,pudo,estuvo,tuvo  info  # Delante de verbo es el pronombre él
+
+# esta (demostrativo) vs está (verbo estar)
+PAIRCTX  esta  está  NEXT=bien,mal,aquí,aqui,ahí,ahi,allí,alli,claro,listo,lista,hecho,hecha,roto,rota,muy,tan,siendo,siempre,en,de,a,con,sin,por,para  info  # ¿Quería decir está (verbo estar)?
+PAIRCTX  esta  está  PREV=no,ya,se,me,te,nos,aún,aun,todavía,todavia,siempre,nunca,dónde,donde  info  # ¿Quería decir está (verbo estar)?
+
+# te (pronombre) vs té (infusión): tras determinante o verbo de tomar
+PAIRCTX  te  té  PREV=un,el,este,ese,aquel,mi,tu,su,tomar,tomo,tomas,toma,tomamos,tomáis,toman,beber,bebo,bebes,bebe,preparo,preparas,prepara,sirvo,sirves,sirve  info  # ¿Quería decir té (infusión)?
+
+# se (pronombre) vs sé (verbo saber/ser)
+PAIRCTX  se  sé  PREV=yo  info  # Tras yo es el verbo: yo sé
+PAIRCTX  se  sé  PREV=no NEXT=$,si,cómo,como,qué,que,nada  info  # ¿Quería decir no sé?
+
+# si (condicional) vs sí (afirmación)
+PAIRCTX  si  sí  NEXT=$,.,;,! PREV=que,dijo,digo,dije,claro,pues  info  # Como afirmación lleva tilde: sí
+PAIRCTX  si  sí  PREV=eso,esto,ella,él,el,yo NEXT=$  info  # Como afirmación lleva tilde: sí
+
+# mas (conjunción arcaica) vs más (cantidad)
+PAIRCTX  mas  más  NEXT=de,que,o,y,grande,pequeño,alto,bajo,tarde,temprano,rápido,rapido,lento,cerca,lejos,aún,aun,todavía,todavia  info  # Como adverbio de cantidad lleva tilde: más
+PAIRCTX  mas  más  PREV=el,la,lo,los,las,mucho,poco,nada,algo,vez,cada,es,son,era,eran  info  # Como adverbio de cantidad lleva tilde: más
+
+# aun vs aún (equivale a todavía)
+PAIRCTX  aun  aún  NEXT=no,más,mas,queda,quedan,falta,faltan,hay,sigue,siguen,estoy,estás,está,estamos,están  info  # Si equivale a todavía lleva tilde: aún
+PAIRCTX  aun  aún  PREV=pero,y,que  NEXT=no  info  # Si equivale a todavía lleva tilde: aún
+
+# de vs dé (verbo dar)
+PAIRCTX  de  dé  PREV=me,te,le,nos,os,les  NEXT=el,la,los,las,un,una,algo,cuenta,tiempo,dinero,igual,lo  info  # ¿Quería decir dé (verbo dar)?
+
+# haber vs "a ver": delante de pausa o al mirar algo
+PAIRCTX  haber  "a ver"  NEXT=si,qué,que,cómo,como,cuándo,cuando,quién,quien,$  info  # ¿Quería decir a ver?
+
+# echo (verbo echar) vs hecho (participio de hacer)
+PAIRCTX  echo   hecho   PREV=ha,has,han,he,hemos,habéis,habeis,había,habia,habías,habias,habían,habian,haber,haya,hayas,hayan  info  # Participio de hacer: hecho
+# vaya (verbo ir) vs valla (cerca)
+PAIRCTX  vaya   valla   PREV=la,una,esa,esta,aquella  info  # La cerca es una valla
+PAIRCTX  valla  vaya    PREV=que,ojalá,ojala  info  # Del verbo ir: vaya
+PAIRCTX  valla  vaya    NEXT=a,usted,con,bien  info  # Del verbo ir: vaya
+# tubo (cilindro) vs tuvo (verbo tener)
+PAIRCTX  tubo   tuvo    NEXT=que,lugar,éxito,exito,miedo,suerte,razón,razon,tiempo,hijos  info  # Del verbo tener: tuvo
+PAIRCTX  tuvo   tubo    PREV=un,este,ese,del  info  # El cilindro es un tubo
+# sino (conjunción) vs si no (condicional)
+PAIRCTX  sino   "si no"  NEXT=puedes,quieres,vienes,haces,sabes,tienes,vas,estás,estas,lo,te,me,nos,hay,fuera,fuese  info  # Condicional negativo: si no
