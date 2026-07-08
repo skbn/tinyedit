@@ -794,14 +794,11 @@ char *translate_text(TranslateHandle *h, const char *from_lang, const char *to_l
         int idx = cache_acquire(h);
         TransCacheEntry *e = &h->cache[idx];
 
-        strncpy(e->key, key, sizeof(e->key) - 1);
-        e->key[sizeof(e->key) - 1] = '\0';
+        snprintf(e->key, sizeof(e->key), "%s", key);
 
         memcpy(e->val, result, vl + 1);
 
-        strncpy(e->detected_from, detected[0] ? detected : from, sizeof(e->detected_from) - 1);
-
-        e->detected_from[sizeof(e->detected_from) - 1] = '\0';
+        snprintf(e->detected_from, sizeof(e->detected_from), "%s", detected[0] ? detected : from);
 
         cache_push_front(h, idx);
     }

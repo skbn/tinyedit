@@ -2674,15 +2674,12 @@ void ed_set_word_move_mode(Ed *ed, int mode)
 int ed_insert_char(Ed *ed, wchar_t ch)
 {
     EdLine *ln = NULL;
-    int was_snapshot_mode = 0;
 
     if (!ed || ch == 0)
         return -1;
 
     if (ed->hard_wrap)
     {
-        was_snapshot_mode = ed->undo_snapshot_mode;
-
         if (!ed->undo_snapshot_mode)
             ed_auto_rewrap_capture_pre_snapshot(ed);
 
@@ -2776,15 +2773,12 @@ int ed_backspace(Ed *ed)
     EdLine *ln = NULL;
     EdLine *prev = NULL;
     wchar_t deleted_ch = 0;
-    int was_snapshot_mode = 0;
 
     if (!ed)
         return -1;
 
     if (ed->hard_wrap)
     {
-        was_snapshot_mode = ed->undo_snapshot_mode;
-
         if (!ed->undo_snapshot_mode)
             ed_auto_rewrap_capture_pre_snapshot(ed);
 
@@ -2847,15 +2841,12 @@ int ed_delete(Ed *ed)
     EdLine *ln = NULL;
     EdLine *nxt = NULL;
     wchar_t deleted_ch = 0;
-    int was_snapshot_mode = 0;
 
     if (!ed)
         return -1;
 
     if (ed->hard_wrap)
     {
-        was_snapshot_mode = ed->undo_snapshot_mode;
-
         if (!ed->undo_snapshot_mode)
             ed_auto_rewrap_capture_pre_snapshot(ed);
 
@@ -3666,7 +3657,6 @@ int ed_block_cut(Ed *ed)
         int from;
         int upto;
         int k;
-        int j;
 
         /* Record deletion of middle lines */
         for (i = r1 + 1; i < r2; i++)

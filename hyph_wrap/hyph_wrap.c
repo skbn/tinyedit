@@ -10,6 +10,8 @@
  */
 
 #include "hyph_wrap.h"
+#include "../core/utf8.h"
+#include "../core/charset.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +37,7 @@ struct HyphDict
 {
 #ifdef HAVE_HYPHEN
     HyphenDict *dict;
+    char dict_enc[24]; /* canonical charset when the .dic is not UTF-8, else "" */
 #endif
 
     short head;
@@ -177,6 +180,8 @@ HyphDict *hyph_new(const char *dict_path)
 {
 #ifdef HAVE_HYPHEN
     HyphDict *h = NULL;
+    FILE *fp = NULL;
+    char enc[32];
 
     if (!dict_path)
         return NULL;
@@ -192,6 +197,29 @@ HyphDict *hyph_new(const char *dict_path)
     {
         free(h);
         return NULL;
+    }
+
+    /* Line 1 of the .dic declares the charset. Words arrive as UTF-8 */
+    h->dict_enc[0] = '\0';
+    fp = fopen(dict_path, "rb");
+
+    if (fp)
+    {
+        if (fgets(enc, (int)sizeof(enc), fp))
+        {
+            const char *canon = NULL;
+
+            enc[strcspn(enc, "\r\n")] = '\0';
+            canon = charset_resolve(enc);
+
+            if (strcasecmp(canon, "UTF-8") != 0)
+            {
+                strncpy(h->dict_enc, canon, sizeof(h->dict_enc) - 1);
+                h->dict_enc[sizeof(h->dict_enc) - 1] = '\0';
+            }
+        }
+
+        fclose(fp);
     }
 
     hcache_init(h);
@@ -223,17 +251,61 @@ static int hyph_compute(HyphDict *h, const char *word, int word_len, unsigned ch
     /* Buffer sizes: hyphens (word+5), hyphword (5*word+5) */
     char hyphens[HYPH_CACHE_KEY_MAX + 5];
     char hyphword[5 * HYPH_CACHE_KEY_MAX + 5];
+    char lat[HYPH_CACHE_KEY_MAX + 5];
+    unsigned char cpos[HYPH_CACHE_KEY_MAX + 5];
     char **rep = NULL;
     int *pos = NULL;
     int *cut = NULL;
+    const char *hw = word;
+    int hw_len = word_len;
     int i, n;
+    int nchars = 0;
+    int q_lat = 0;
+    int q_src = 0;
 
     *out_count = 0;
 
     if (word_len < 4 || word_len >= HYPH_CACHE_KEY_MAX)
         return 0; /* too short to hyphenate, or too long for buffers */
 
-    if (hnj_hyphen_hyphenate2(h->dict, word, word_len, hyphens, hyphword, &rep, &pos, &cut) != 0)
+    if (h->dict_enc[0])
+    {
+        nchars = 0;
+
+        for (i = 0; i < word_len; i++)
+        {
+            if (((unsigned char)word[i] & 0xC0) != 0x80)
+                nchars++;
+
+            cpos[nchars] = (unsigned char)(i + 1);
+        }
+
+        n = utf8_to_charset(h->dict_enc, word, word_len, lat, (int)sizeof(lat));
+
+        /* One byte per character; a '?' the word did not have means lossy */
+        if (n != nchars)
+            return 0;
+
+        for (i = 0; i < n; i++)
+        {
+            if (lat[i] == '?')
+                q_lat++;
+        }
+
+        for (i = 0; i < word_len; i++)
+        {
+            if (word[i] == '?')
+                q_src++;
+        }
+
+        if (q_lat != q_src)
+            return 0;
+
+        hw = lat;
+        hw_len = n;
+    }
+
+    if (hnj_hyphen_hyphenate2(h->dict, hw, hw_len, hyphens, hyphword, &rep, &pos, &cut) != 0)
     {
         /* On error, free rep/pos/cut */
         *out_count = 0;
@@ -243,19 +315,34 @@ static int hyph_compute(HyphDict *h, const char *word, int word_len, unsigned ch
         /* Odd values in hyphens[] mark break points */
         n = 0;
 
-        for (i = 0; i < word_len; i++)
+        for (i = 0; i < hw_len; i++)
         {
-            if ((hyphens[i] & 1) && n < HYPH_MAX_BREAKS)
+            if (!(hyphens[i] & 1) || n >= HYPH_MAX_BREAKS)
+                continue;
+
+            if (h->dict_enc[0])
+            {
+                /* Map converted char index back to a UTF-8 byte offset */
+                if (i + 1 <= nchars)
+                    out_pos[n++] = cpos[i + 1];
+            }
+            else
+            {
+                /* Never break inside a UTF-8 sequence */
+                if (i + 1 < word_len && ((unsigned char)word[i + 1] & 0xC0) == 0x80)
+                    continue;
+
                 out_pos[n++] = (unsigned char)(i + 1);
+            }
         }
 
         *out_count = n;
     }
 
-    /* Free rep/pos/cut (allocated by libhyphen) */
+    /* Free rep/pos/cut (allocated by libhyphen, sized by the word we passed) */
     if (rep)
     {
-        for (i = 0; i < word_len; i++)
+        for (i = 0; i < hw_len; i++)
         {
             if (rep[i])
                 free(rep[i]);

@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #endif
 
+#ifdef PLATFORM_UNIX
 /* Simple base64 encoder */
 static char *base64_encode(const char *src)
 {
@@ -76,7 +77,6 @@ static char *base64_encode(const char *src)
 static int clipboard_copy_osc52(const char *utf8)
 {
     char *b64 = NULL;
-    int i;
 
     if (!utf8 || !utf8[0])
         return -1;
@@ -93,11 +93,13 @@ static int clipboard_copy_osc52(const char *utf8)
 
     return 0;
 }
+#endif /* PLATFORM_UNIX */
 
 static char *normalise_newlines(char *s)
 {
     /* Convert CRLF / CR to LF in place, strip trailing NULs */
-    char *r, *w;
+    char *r = NULL;
+    char *w = NULL;
 
     if (!s)
         return NULL;

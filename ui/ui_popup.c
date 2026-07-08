@@ -1300,10 +1300,17 @@ int ui_popup_replace(const wchar_t *search_in, const wchar_t *replace_in, wchar_
 int ui_popup_search_results_popup(TeApp *app, const wchar_t *search, int *rows, int *cols, int match_count)
 {
     int i;
-    const char **ctxs = (const char **)malloc((size_t)match_count * sizeof(char *));
-    char **ctxbufs = (char **)malloc((size_t)match_count * sizeof(char *));
-    int *lnums = (int *)malloc((size_t)match_count * sizeof(int));
+    const char **ctxs = NULL;
+    char **ctxbufs = NULL;
+    int *lnums = NULL;
     int choice;
+
+    if (match_count <= 0)
+        return -1;
+
+    ctxs = (const char **)malloc((size_t)match_count * sizeof(char *));
+    ctxbufs = (char **)malloc((size_t)match_count * sizeof(char *));
+    lnums = (int *)calloc((size_t)match_count, sizeof(int));
 
     if (!ctxs || !ctxbufs || !lnums)
     {

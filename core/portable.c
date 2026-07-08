@@ -509,6 +509,7 @@ long pf_get_file_mtime(const char *path)
     wchar_t *wpath = NULL;
     FILETIME ft;
     ULARGE_INTEGER ull;
+    ULONGLONG epoch;
 
     if (!path || !path[0])
         return 0;
@@ -530,7 +531,10 @@ long pf_get_file_mtime(const char *path)
     ull.LowPart = ft.dwLowDateTime;
     ull.HighPart = ft.dwHighDateTime;
 
-    return (long)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+    /* FILETIME epoch offset built without long long literals for C89 */
+    epoch = (ULONGLONG)116444736UL * 1000000000UL;
+
+    return (long)((ull.QuadPart - epoch) / 10000000UL);
 
 #elif defined(PLATFORM_AMIGA)
     BPTR lock;

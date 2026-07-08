@@ -301,11 +301,6 @@ int ui_syntax_color_pair(SyntaxClass cls)
     }
 }
 
-static int is_dec_digit(wchar_t ch)
-{
-    return ch >= L'0' && ch <= L'9';
-}
-
 static int is_hex_digit(wchar_t ch)
 {
     return (ch >= L'0' && ch <= L'9') || (ch >= L'a' && ch <= L'f') || (ch >= L'A' && ch <= L'F');

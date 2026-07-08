@@ -184,6 +184,10 @@ static const char *HELP_LINES[] =
 /* Soft-wrap viewport: anchored by top line/sub-row */
 static int s_soft_top_line = 0;
 static int s_soft_top_sub = 0;
+
+/* Whitespace marker glyphs (hex escapes keep this C89-valid) */
+static const wchar_t s_ws_arrow[2] = {0x2192, 0}; /* rightwards arrow */
+static const wchar_t s_ws_dot[2] = {0xB7, 0};     /* middle dot */
 static int s_soft_desired_vcol = -1;
 static int s_soft_last_width = -1;
 static int s_tab_width = 4; /* visual tab stop width, copied from config */
@@ -578,11 +582,6 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
     int len;
     int j;
     int acc_w;
-    int n_sub;
-    int sub_left_in_line;
-    int target_sub;
-    int seg_start;
-    int seg_end;
     int cw;
 
     if (!app || !out_line || !out_col)
@@ -994,9 +993,10 @@ char *wrap_paste_text(TeApp *app, const char *utf8, int col)
     int out_cap, out_len = 0;
     wchar_t *out = NULL;
     char *result = NULL;
-    int use_hyphen = 0;
 
 #ifdef HAVE_HYPHEN
+    int use_hyphen = 0;
+
     use_hyphen = app && app->hyph_wrap_enabled && app->hyph_handle;
 #endif
 
@@ -1195,7 +1195,7 @@ char *wrap_paste_text(TeApp *app, const char *utf8, int col)
 }
 
 /* Effective wrap column. Clamp to visible body width; 0=disabled */
-int editor_eff_wrap(const TeApp *app)
+int editor_eff_wrap(TeApp *app)
 {
     int cfgw = app->wrap_col;
     int ln_offset = 0;
@@ -1923,17 +1923,17 @@ static void draw_body(TeApp *app)
                                 /* Mark every tab with an arrow */
 #ifdef PLATFORM_AMIGA
                                 if (app->cfg.ttf_enabled)
-                                    mvaddnwstr(offset_y + sr, col_x, L"\u2192", 1);
+                                    mvaddnwstr(offset_y + sr, col_x, s_ws_arrow, 1);
                                 else
                                     mvaddch(offset_y + sr, col_x, '>');
 #else
-                                mvaddnwstr(offset_y + sr, col_x, L"\u2192", 1);
+                                mvaddnwstr(offset_y + sr, col_x, s_ws_arrow, 1);
 #endif
                             }
                             else if (ch == L' ' && (seg_start + k) >= trail_start)
                             {
                                 /* Trailing space: middle dot */
-                                mvaddnwstr(offset_y + sr, col_x, L"\u00b7", 1);
+                                mvaddnwstr(offset_y + sr, col_x, s_ws_dot, 1);
                             }
                         }
 
@@ -2389,15 +2389,15 @@ static void draw_body(TeApp *app)
                     {
 #ifdef PLATFORM_AMIGA
                         if (app->cfg.ttf_enabled)
-                            mvaddnwstr(offset_y + i, col_x, L"\u2192", 1);
+                            mvaddnwstr(offset_y + i, col_x, s_ws_arrow, 1);
                         else
                             mvaddch(offset_y + i, col_x, '>');
 #else
-                        mvaddnwstr(offset_y + i, col_x, L"\u2192", 1);
+                        mvaddnwstr(offset_y + i, col_x, s_ws_arrow, 1);
 #endif
                     }
                     else if (ch == L' ' && k >= trail_start)
-                        mvaddnwstr(offset_y + i, col_x, L"\u00b7", 1);
+                        mvaddnwstr(offset_y + i, col_x, s_ws_dot, 1);
                 }
 
                 attroff(COLOR_PAIR(COL_BORDER));
@@ -2651,7 +2651,7 @@ static int parse_sgr_mouse(int *out_type, int *out_x, int *out_y)
     char end_char;
     int parsed;
 
-    while (i < sizeof(buf) - 1)
+    while (i < (int)sizeof(buf) - 1)
     {
         wrc = wrapper_read_key(&wch);
 
@@ -3108,14 +3108,11 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         {
             char tmp[16];
 
-            strncpy(tmp, app->cfg.translate_from_lang, sizeof(tmp) - 1);
-            tmp[sizeof(tmp) - 1] = '\0';
+            snprintf(tmp, sizeof(tmp), "%s", app->cfg.translate_from_lang);
 
-            strncpy(app->cfg.translate_from_lang, app->cfg.translate_to_lang, sizeof(app->cfg.translate_from_lang) - 1);
-            app->cfg.translate_from_lang[sizeof(app->cfg.translate_from_lang) - 1] = '\0';
+            snprintf(app->cfg.translate_from_lang, sizeof(app->cfg.translate_from_lang), "%s", app->cfg.translate_to_lang);
 
-            strncpy(app->cfg.translate_to_lang, tmp, sizeof(app->cfg.translate_to_lang) - 1);
-            app->cfg.translate_to_lang[sizeof(app->cfg.translate_to_lang) - 1] = '\0';
+            snprintf(app->cfg.translate_to_lang, sizeof(app->cfg.translate_to_lang), "%s", tmp);
 
             te_status(app, "Swapped: %s <-> %s", app->cfg.translate_from_lang, app->cfg.translate_to_lang);
             return 1;
@@ -4240,7 +4237,7 @@ static int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int wid
                 }
             }
 
-            /* Auto-close block comment opener /* -> /*|*\/ */
+            /* Auto-close a block comment opener with its matching closer */
             if (app->cfg.autoclose && wch == L'*')
             {
                 wchar_t slash = L'\0';
@@ -4405,7 +4402,6 @@ void ui_editor_run(TeApp *app)
         wint_t wch;
         int wrc, ch, is_key, preserve_desired;
         TeWindow *win = NULL;
-        EdInfo info;
 
         /* Get editor window for dimensions */
         win = wm_get_window_by_type(app->wm, WIN_EDITOR);

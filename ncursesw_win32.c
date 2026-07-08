@@ -95,11 +95,6 @@ static int s_cursor_color = COLOR_WHITE;
 /* Active fg/bg color indices */
 static int s_cur_fg_idx = COLOR_WHITE, s_cur_bg_idx = COLOR_BLACK;
 
-/* Cached pattern brushes for shaded block glyphs in ANSI mode */
-static HBRUSH s_brush_25 = NULL;
-static HBRUSH s_brush_50 = NULL;
-static HBRUSH s_brush_75 = NULL;
-
 /* Key input buffer */
 static int s_key_buf[16];
 static int s_key_count = 0;
@@ -848,7 +843,6 @@ static void render_cell(int row, int col, Cell *cell)
 {
     RECT rect;
     HBRUSH hBrush;
-    wchar_t buf[2];
     int pair;
     int cell_w = fw; /* width of the area to repaint -- fw or 2*fw */
     unsigned int draw_cp;
@@ -1750,10 +1744,7 @@ int win32_reinit_window(void)
 
     /* Save added font-file paths so initscr() can recreate the TTE context */
     for (i = 0; i < s_added_font_count; i++)
-    {
-        strncpy(saved_fonts[i], s_added_fonts[i], MAX_PATH - 1);
-        saved_fonts[i][MAX_PATH - 1] = '\0';
-    }
+        snprintf(saved_fonts[i], MAX_PATH, "%s", s_added_fonts[i]);
 
     saved_count = s_added_font_count;
 

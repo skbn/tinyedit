@@ -27,11 +27,14 @@ void clear_search_highlights(TeApp *app);
 /* Functions from ui_editor.c needed by ui_editor_helper.c */
 void soft_reset_desired(void);
 void soft_reset_viewport_to_cursor(TeApp *app, int width);
-int editor_eff_wrap(const TeApp *app);
+int editor_eff_wrap(TeApp *app);
 char *wrap_paste_text(TeApp *app, const char *utf8, int col);
 
+/* Trigger paragraph reflow after an edit in hard-wrap mode */
+void ed_auto_rewrap_after_edit(TeApp *app);
+
 /* Left margin for editor body with line numbers */
-int editor_body_offset(const TeApp *app, int line_count);
+int editor_body_offset(TeApp *app, int line_count);
 
 /* Autosave swap helpers */
 void ui_editor_swp_remove(const char *path);
@@ -43,6 +46,10 @@ void ui_editor_recent_load(void);
 void ui_editor_recent_add(const char *path);
 void ui_editor_recent_free(void);
 int ui_editor_recent_open(TeApp *app);
+void ui_editor_recent_save(void);
+
+/* Quote current message as an FTN reply */
+int ftn_reply(TeApp *app);
 void ui_editor_session_save(TeApp *app);
 void ui_editor_session_restore(TeApp *app);
 

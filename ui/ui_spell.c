@@ -100,9 +100,8 @@ static char *truncate_utf8_cols(const char *s, int max_cols)
 void ui_spell_draw_panel(TeApp *app)
 {
     TeWindow *win = NULL;
-    int x, y;
+    int x;
     int row;
-    int i;
 
     if (!app)
         return;
@@ -419,8 +418,8 @@ int spell_load_from_config(TeApp *app)
 {
     char dict_path[512];
     char dict_name[128];
-    char aff_path[512];
-    char dic_path[512];
+    char aff_path[512 + 140];
+    char dic_path[512 + 140];
 
     if (!app)
         return 0;

@@ -300,7 +300,7 @@ int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width)
 }
 
 /* Left margin for editor body with line numbers */
-int editor_body_offset(const TeApp *app, int line_count)
+int editor_body_offset(TeApp *app, int line_count)
 {
     int margin = 1;
     int tab_width;
@@ -877,7 +877,6 @@ int paste(TeApp *app)
         {
             char *wrapped = NULL;
             const char *to_insert = clip;
-            int pasted = 0;
 
             /* Pre-wrap pasted text in hard-wrap mode; soft-wrap inserts verbatim */
             if (app->hard_wrap)

@@ -550,6 +550,7 @@ static int do_request(const char *method, const char *url, const char *body, int
     SSL *ssl = NULL;
     char request[4096];
     char *response_buf = NULL;
+    char *grown = NULL;
     int response_len;
     int response_cap;
     int n;
@@ -781,10 +782,13 @@ static int do_request(const char *method, const char *url, const char *body, int
                     return HTTP_ERR_TOO_LARGE;
                 }
 
-                response_buf = (char *)realloc(response_buf, response_cap);
+                grown = (char *)realloc(response_buf, response_cap);
 
-                if (!response_buf)
+                if (!grown)
                 {
+                    /* Keep old buffer valid so it can be freed */
+                    free(response_buf);
+
                     if (ssl)
                         SSL_free(ssl);
 
@@ -794,6 +798,8 @@ static int do_request(const char *method, const char *url, const char *body, int
                     CloseSocket(sock);
                     return HTTP_ERR_OOM;
                 }
+
+                response_buf = grown;
             }
 
             if (use_tls)

@@ -1180,7 +1180,6 @@ int gc_run_checks(GramCheck *g, const char *line, int prev_terminated, GcIssue *
             int used_bp;
             unsigned long open_c;
             unsigned long close_c;
-            int i2 = 0;
 
             while (*bp)
             {

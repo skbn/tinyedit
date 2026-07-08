@@ -113,7 +113,10 @@ int main(int argc, char **argv)
     TeConfig cfg;
     static char cfg_path_buf[512];
     const char *cfg_path = NULL;
+
+#if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
     FILE *tty = NULL;
+#endif
     char cfg_dir[512];
     int detected;
 

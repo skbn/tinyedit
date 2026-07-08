@@ -132,7 +132,7 @@ void ui_tabs_draw_panel(TeApp *app)
         if (name[0] == '\0')
             name = "[No Name]";
 
-        snprintf(buf, sizeof(buf), "%s%s", t->modified ? "[+]" : "", name);
+        snprintf(buf, sizeof(buf), "%s%.120s", t->modified ? "[+]" : "", name);
 
         if (app->tabs_panel_active)
         {

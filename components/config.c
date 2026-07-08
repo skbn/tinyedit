@@ -809,9 +809,8 @@ int te_cfg_load(TeConfig *cfg, const char *path)
 
                     copy_rest(rest, tmp, sizeof(tmp));
                     strip_quotes(tmp);
-                    strncpy(cfg->ttf_fallback[idx], tmp, sizeof(cfg->ttf_fallback[idx]) - 1);
 
-                    cfg->ttf_fallback[idx][sizeof(cfg->ttf_fallback[idx]) - 1] = '\0';
+                    snprintf(cfg->ttf_fallback[idx], sizeof(cfg->ttf_fallback[idx]), "%s", tmp);
                 }
             }
         }
@@ -1299,6 +1298,10 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     char line[1024];
     int fi;
 
+#ifdef HAVE_TRANSLATE
+    const char *backend_name = "MYMEMORY";
+#endif
+
     /* Create temporary file */
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
 
@@ -1526,8 +1529,6 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 #endif
 
 #ifdef HAVE_TRANSLATE
-    const char *backend_name = "MYMEMORY";
-
     /* Translator settings */
     fprintf(out, "TRANSLATE_ENABLED %s\n", cfg->translate_enabled ? "YES" : "NO");
 

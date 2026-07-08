@@ -42,7 +42,11 @@
 
 /* opaque: internal structure in spell.c */
 struct spell;
+
+#ifndef THES_SPELLCHECKER_TYPEDEF
+#define THES_SPELLCHECKER_TYPEDEF
 typedef struct spell SpellChecker;
+#endif
 
 /* open .aff + .dic, returns NULL on error */
 struct spell *spell_new(const char *aff_path, const char *dic_path);

@@ -16,6 +16,7 @@
 #include <wchar.h>
 #include "te.h"
 #include "ui_dict_picker.h"
+#include "ui_editor_helper.h"
 #include "../core/utf8.h"
 #include "../components/editor.h"
 #include "../spellchecker/spell.h"

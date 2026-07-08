@@ -354,7 +354,7 @@ LONG TE_FontAdd(struct TERenderContext *dc, const char *fontPath, LONG pointSize
     dc->numFonts++;
     dc->metrics_valid = 0;
 
-    TE_DEBUG_INFO("TE_FontAdd: loaded '%s' size=%d height=%d", fontPath, pointSize, fnt->height);
+    TE_DEBUG_INFO("TE_FontAdd: loaded '%s' size=%ld height=%d", fontPath, (long)pointSize, fnt->height);
 
     return 1;
 }
@@ -1084,7 +1084,7 @@ static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
     }
 
     if (cp > 0xFFFF)
-        fprintf(stderr, "[te_get_glyph] cp=U+%04lX font=%s gi=%u w=%d h=%d format=%d\n", (unsigned long)cp, fnt->path ? fnt->path : "?", (unsigned int)gi, g->width, g->height, g->format);
+        fprintf(stderr, "[te_get_glyph] cp=U+%04lX font=%s gi=%u w=%d h=%d format=%d\n", (unsigned long)cp, fnt->path[0] ? fnt->path : "?", (unsigned int)gi, g->width, g->height, g->format);
 
     g->next = dc->buckets[h];
     dc->buckets[h] = g;

@@ -377,11 +377,13 @@ static const SetupField st_fields[] =
 
 #define ST_FIELD_COUNT ((int)(sizeof(st_fields) / sizeof(st_fields[0])))
 
+#ifdef HAVE_HUNSPELL
 /* Get tinyedit base directory (platform-specific) */
 static void get_tinyedit_base_dir(char *buf, size_t bufsz)
 {
     port_get_config_dir(buf, bufsz);
 }
+#endif
 
 /* Format a field value into buf for display */
 static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf, int bufsz)
@@ -1330,7 +1332,7 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
         if (selected == 0)
         {
             /* Select existing */
-            char dicts_dir[TE_CFG_STR_MAX];
+            char dicts_dir[TE_CFG_STR_MAX + 16];
             char parent_dir[TE_CFG_STR_MAX];
             char selected_file[TE_CFG_STR_MAX];
 
@@ -1365,10 +1367,10 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
         else if (selected == 1)
         {
             /* Create new */
-            char dicts_dir[TE_CFG_STR_MAX];
+            char dicts_dir[TE_CFG_STR_MAX + 16];
             char parent_dir[TE_CFG_STR_MAX];
             wchar_t dict_name[TE_CFG_STR_MAX];
-            char dict_path[TE_CFG_STR_MAX];
+            char dict_path[TE_CFG_STR_MAX + 300];
 
             /* Get custom dicts directory */
             get_tinyedit_base_dir(parent_dir, sizeof(parent_dir));

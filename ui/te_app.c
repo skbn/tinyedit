@@ -634,7 +634,7 @@ void te_draw_titlebar(TeApp *app)
 #endif
 #ifdef HAVE_TRANSLATE
         if (app->translate_active && app->translate_handle)
-            snprintf(tr_buf, sizeof(tr_buf), "TR [%s]->[%s] ", app->cfg.translate_from_lang, app->cfg.translate_to_lang);
+            snprintf(tr_buf, sizeof(tr_buf), "TR [%.7s]->[%.7s] ", app->cfg.translate_from_lang, app->cfg.translate_to_lang);
 #endif
         snprintf(right, sizeof(right), "Ln %d/%d  Col %d  %s %s%s%s%s%s", info.row + 1, info.line_count, info.col + 1, app->hard_wrap ? "HARD" : "SOFT", syntax_buf, sp_buf, hy_buf, tr_buf, info.insert_mode ? "INS" : "OVR");
     }
@@ -663,7 +663,7 @@ void te_draw_statusbar(TeApp *app)
     int x, y;
     int msg_len, rzone_len, rzone_start, max_left;
     char hint[64];
-    char charset_info[128];
+    char charset_info[192];
     TeTab *tab = NULL;
 
     y = LINES - 1;
@@ -720,7 +720,7 @@ void te_draw_statusbar(TeApp *app)
 
                     fn = last_slash ? last_slash + 1 : tab->filename;
 
-                    snprintf(charset_info, sizeof(charset_info), "%s  View: %s  Save: %s%s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
+                    snprintf(charset_info, sizeof(charset_info), "%.80s  View: %.15s  Save: %.15s%.10s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
                 }
                 else
                 {

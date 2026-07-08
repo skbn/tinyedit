@@ -135,6 +135,7 @@ static int prev_line_terminated(TeApp *app, int line_idx)
 static void gg_join(char *out, size_t outsz, const char *dir, const char *name)
 {
     size_t dl;
+    int n;
 
     if (!out || outsz == 0)
         return;
@@ -143,16 +144,23 @@ static void gg_join(char *out, size_t outsz, const char *dir, const char *name)
 
     if (!dir || !*dir)
     {
-        snprintf(out, outsz, "%s.rul", name ? name : "");
+        n = snprintf(out, outsz, "%s.rul", name ? name : "");
+
+        if (n < 0 || (size_t)n >= outsz)
+            out[0] = '\0'; /* refuse truncated path */
+
         return;
     }
 
     dl = strlen(dir);
 
     if (dl && (dir[dl - 1] == '/' || dir[dl - 1] == '\\' || dir[dl - 1] == ':'))
-        snprintf(out, outsz, "%s%s.rul", dir, name);
+        n = snprintf(out, outsz, "%s%s.rul", dir, name);
     else
-        snprintf(out, outsz, "%s%c%s.rul", dir, PATH_SEP, name);
+        n = snprintf(out, outsz, "%s%c%s.rul", dir, PATH_SEP, name);
+
+    if (n < 0 || (size_t)n >= outsz)
+        out[0] = '\0'; /* refuse truncated path */
 }
 
 int ui_grammar_load_from_config(TeApp *app)

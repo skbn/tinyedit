@@ -25,6 +25,7 @@
 #endif
 
 #include "../core/utf8.h"
+#include "../core/charset.h"
 
 static int mh_readline(FILE *fp, char *buf, size_t sz)
 {
@@ -236,10 +237,14 @@ struct hyph *hyph_new(const char *path)
     struct hyph *h = NULL;
     FILE *fp = NULL;
     char line[1024];
+    char conv[1024];
     int cap = 8192;
     int n = 0;
     int i;
     int first_byte;
+    int conv_pats = 0;
+    const char *pat = NULL;
+    const char *canon_enc = NULL;
 
     if (!path)
         return NULL;
@@ -268,8 +273,13 @@ struct hyph *hyph_new(const char *path)
         return NULL;
     }
 
+    mh_rstrip(line);
+
     strncpy(h->enc, line, sizeof(h->enc) - 1);
     h->enc[sizeof(h->enc) - 1] = '\0';
+
+    canon_enc = charset_resolve(h->enc);
+    conv_pats = (strcasecmp(canon_enc, "UTF-8") != 0);
 
     h->pats = (struct hyph_pattern *)malloc((size_t)cap * sizeof(*h->pats));
 
@@ -307,10 +317,7 @@ struct hyph *hyph_new(const char *path)
             continue;
 
         if (strncmp(line, "NEXTLEVEL ", 10) == 0)
-        {
-            /* OOo extension: stop parsing here */
             break;
-        }
 
         /* It's a pattern */
         if (n == cap)
@@ -329,7 +336,18 @@ struct hyph *hyph_new(const char *path)
             cap = new_cap;
         }
 
-        if (parse_pattern(line, &h->pats[n]) == 0)
+        pat = line;
+
+        if (conv_pats)
+        {
+            /* Convert dictionary encoding to UTF-8 so patterns match the word bytes */
+            if (charset_to_utf8(canon_enc, line, (int)strlen(line), conv, (int)sizeof(conv)) <= 0)
+                continue;
+
+            pat = conv;
+        }
+
+        if (parse_pattern(pat, &h->pats[n]) == 0)
         {
             n++;
 
@@ -471,6 +489,7 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
     int cache_idx;
     int char_index; /* character index (not byte) */
     int total_chars;
+    int truncated = 0;
 
     if (!h || !word || !out || outsz < 2)
         return -1;
@@ -548,7 +567,10 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
             if (char_index > 0 && lev[i] & 1 && char_index >= h->lhmin && (total_chars - char_index) >= h->rhmin)
             {
                 if ((size_t)(written + 1) >= outsz)
+                {
+                    truncated = 1;
                     break;
+                }
 
                 out[written++] = '=';
             }
@@ -557,12 +579,19 @@ int hyph_hyphenate(struct hyph *h, const char *word, char *out, size_t outsz)
         }
 
         if ((size_t)(written + 1) >= outsz)
+        {
+            truncated = 1;
             break;
+        }
 
         out[written++] = (char)c;
     }
 
     out[written] = '\0';
+
+    /* Truncated results must not poison the cache for this word */
+    if (truncated)
+        return written;
 
     /* Store in cache */
     cache_idx = cache_acquire(h);

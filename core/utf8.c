@@ -733,6 +733,8 @@ int utf8_tolower(char *str)
     int len;
     int i;
     char *lower = NULL;
+    size_t cap;
+    size_t n;
 
     if (!str)
         return -1;
@@ -755,7 +757,22 @@ int utf8_tolower(char *str)
 
     if (lower)
     {
-        strcpy(str, lower);
+        /* Case folding may grow byte length; never write past caller buffer */
+        cap = strlen(str);
+        n = strlen(lower);
+
+        if (n > cap)
+        {
+            n = cap;
+
+            /* Back off to a UTF-8 character boundary */
+            while (n > 0 && ((unsigned char)lower[n] & 0xC0) == 0x80)
+                n--;
+        }
+
+        memcpy(str, lower, n);
+        str[n] = '\0';
+
         free(lower);
     }
 
@@ -810,26 +827,29 @@ int wcswidth(const wchar_t *wcs, size_t n)
 
     for (i = 0; i < n && wcs[i] != L'\0'; i++)
     {
+        /* 32-bit copy keeps the >BMP checks valid with 16-bit wchar_t */
+        unsigned long cp = (unsigned long)wcs[i];
+
         /* East Asian Width: wide/full-width/emoji = 2 columns, others = 1 */
-        if ((wcs[i] >= 0x1100 && wcs[i] <= 0x115F) ||   /* Hangul Jamo */
-            (wcs[i] >= 0x2190 && wcs[i] <= 0x21FF) ||   /* Arrows */
-            (wcs[i] >= 0x2600 && wcs[i] <= 0x26FF) ||   /* Miscellaneous Symbols */
-            (wcs[i] >= 0x2700 && wcs[i] <= 0x27BF) ||   /* Dingbats */
-            (wcs[i] >= 0x2B00 && wcs[i] <= 0x2BFF) ||   /* Misc Symbols and Arrows */
-            (wcs[i] >= 0x2E80 && wcs[i] <= 0xA4CF) ||   /* CJK...Yi */
-            (wcs[i] >= 0xAC00 && wcs[i] <= 0xD7A3) ||   /* Hangul Syllables */
-            (wcs[i] >= 0xF900 && wcs[i] <= 0xFAFF) ||   /* CJK Compatibility */
-            (wcs[i] >= 0xFE30 && wcs[i] <= 0xFE6F) ||   /* CJK Compatibility Forms */
-            (wcs[i] >= 0xFF00 && wcs[i] <= 0xFF60) ||   /* Fullwidth Forms */
-            (wcs[i] >= 0x1F300 && wcs[i] <= 0x1F5FF) || /* Misc Symbols & Pictographs */
-            (wcs[i] >= 0x1F600 && wcs[i] <= 0x1F64F) || /* Emoticons */
-            (wcs[i] >= 0x1F680 && wcs[i] <= 0x1F6FF) || /* Transport & Map */
-            (wcs[i] >= 0x1F700 && wcs[i] <= 0x1F77F) || /* Alchemical Symbols */
-            (wcs[i] >= 0x1F780 && wcs[i] <= 0x1F7FF) || /* Geometric Shapes Extended */
-            (wcs[i] >= 0x1F800 && wcs[i] <= 0x1F8FF) || /* Supplemental Arrows-C */
-            (wcs[i] >= 0x1F900 && wcs[i] <= 0x1F9FF) || /* Supplemental Symbols */
-            (wcs[i] >= 0x20000 && wcs[i] <= 0x2FFFD) || /* Supplementary Planes */
-            (wcs[i] >= 0x30000 && wcs[i] <= 0x3FFFD))   /* Supplementary Ideographic */
+        if ((cp >= 0x1100 && cp <= 0x115F) ||   /* Hangul Jamo */
+            (cp >= 0x2190 && cp <= 0x21FF) ||   /* Arrows */
+            (cp >= 0x2600 && cp <= 0x26FF) ||   /* Miscellaneous Symbols */
+            (cp >= 0x2700 && cp <= 0x27BF) ||   /* Dingbats */
+            (cp >= 0x2B00 && cp <= 0x2BFF) ||   /* Misc Symbols and Arrows */
+            (cp >= 0x2E80 && cp <= 0xA4CF) ||   /* CJK...Yi */
+            (cp >= 0xAC00 && cp <= 0xD7A3) ||   /* Hangul Syllables */
+            (cp >= 0xF900 && cp <= 0xFAFF) ||   /* CJK Compatibility */
+            (cp >= 0xFE30 && cp <= 0xFE6F) ||   /* CJK Compatibility Forms */
+            (cp >= 0xFF00 && cp <= 0xFF60) ||   /* Fullwidth Forms */
+            (cp >= 0x1F300 && cp <= 0x1F5FF) || /* Misc Symbols & Pictographs */
+            (cp >= 0x1F600 && cp <= 0x1F64F) || /* Emoticons */
+            (cp >= 0x1F680 && cp <= 0x1F6FF) || /* Transport & Map */
+            (cp >= 0x1F700 && cp <= 0x1F77F) || /* Alchemical Symbols */
+            (cp >= 0x1F780 && cp <= 0x1F7FF) || /* Geometric Shapes Extended */
+            (cp >= 0x1F800 && cp <= 0x1F8FF) || /* Supplemental Arrows-C */
+            (cp >= 0x1F900 && cp <= 0x1F9FF) || /* Supplemental Symbols */
+            (cp >= 0x20000 && cp <= 0x2FFFD) || /* Supplementary Planes */
+            (cp >= 0x30000 && cp <= 0x3FFFD))   /* Supplementary Ideographic */
             width += 2;
         else
             width += 1;
