@@ -53,6 +53,12 @@ typedef struct
     int wrap_cache_width; /* Width for which wrap_count_cache is valid */
     int emb;              /* Byte size of the text area allocated inline with the struct */
 
+    /* Inline attribute runs (see ed_attr.h); plain malloc, freed by line_free */
+    struct EdAttrRunStruct *attrs;
+    int n_attrs;
+    int cap_attrs;
+    unsigned char para_align; /* EA_ALIGN_* paragraph alignment */
+
 #if defined(PLATFORM_AMIGA)
     void *mem_pool; /* Owning Ed's memory pool, NULL => plain malloc */
 #endif

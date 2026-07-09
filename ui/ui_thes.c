@@ -474,7 +474,9 @@ int ui_thes_lookup_word(UI_APP_T *app)
 
                     ed_auto_rewrap_capture_pre_snapshot(ed);
                     ed_save_undo(ed);
-                    ed->undo_snapshot_mode = 1;
+
+                    if (ed->hard_wrap)
+                        ed->undo_snapshot_mode = 1;
 
                     /* Remove first half (including the hyphen) on the first row */
                     ed_set_pos(ed, hs.first_row, hs.first_start);
@@ -493,7 +495,10 @@ int ui_thes_lookup_word(UI_APP_T *app)
                     for (i = 0; i < del_count; i++)
                         ed_delete(ed);
 
-                    ed->undo_snapshot_mode = 0;
+                    if (ed->hard_wrap)
+                        ed->undo_snapshot_mode = 0;
+
+                    ed_save_undo(ed);
                     ed_auto_rewrap_after_edit(app);
                 }
                 else
@@ -501,7 +506,10 @@ int ui_thes_lookup_word(UI_APP_T *app)
                     ed_auto_rewrap_capture_pre_snapshot(ed);
 
                     ed_save_undo(ed);
-                    ed->undo_snapshot_mode = 1;
+
+                    if (ed->hard_wrap)
+                        ed->undo_snapshot_mode = 1;
+
                     ed_set_pos(ed, info.row, ws);
 
                     for (i = 0; i < (we - ws); i++)
@@ -510,7 +518,10 @@ int ui_thes_lookup_word(UI_APP_T *app)
                     for (i = 0; i < wlen; i++)
                         ed_insert_char(ed, wsyn[i]);
 
-                    ed->undo_snapshot_mode = 0;
+                    if (ed->hard_wrap)
+                        ed->undo_snapshot_mode = 0;
+
+                    ed_save_undo(ed);
                     ed_auto_rewrap_after_edit(app);
                 }
 

@@ -15,6 +15,7 @@
 #include <string.h>
 #include "te.h"
 #include "ui_files.h"
+#include "../components/fmt_rtf.h"
 #include "ui_editor_helper.h"
 #include "../core/keys.h"
 #include "../core/portable.h"
@@ -1419,6 +1420,19 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
     return rc;
 }
 
+/* Case-insensitive .rtf extension check */
+int ui_files_is_rtf(const char *path)
+{
+    size_t n;
+
+    if (!path)
+        return 0;
+
+    n = strlen(path);
+
+    return n > 4 && strcasecmp(path + n - 4, ".rtf") == 0;
+}
+
 int ui_files_open_path(TeApp *app, const char *path)
 {
     FILE *fp = NULL;
@@ -1446,6 +1460,44 @@ int ui_files_open_path(TeApp *app, const char *path)
 
     if (recovered < 0)
         return -1;
+
+    /* RTF files go through the RTF importer, not the text loaders */
+    if (ui_files_is_rtf(path))
+    {
+        char err[128];
+        char warn[128];
+        int rc;
+
+        fp = fopen(path, "rb");
+
+        if (!fp)
+        {
+            te_status(app, "Cannot open: %s", path);
+            return -1;
+        }
+
+        ed_clear_undo_redo(te_app_get_editor(app));
+
+        rc = rtf_import(te_app_get_editor(app), fp, err, sizeof(err), warn, sizeof(warn));
+
+        fclose(fp);
+
+        if (rc != 0)
+        {
+            te_status(app, "RTF error: %s", err);
+            return -1;
+        }
+
+        te_app_set_filename(app, path);
+        ui_editor_recent_add(path);
+
+        if (warn[0])
+            te_status(app, "Loaded: %s (%s)", path, warn);
+        else
+            te_status(app, "Loaded: %s", path);
+
+        return 0;
+    }
 
     /* Read file */
     fp = fopen(path, "rb");

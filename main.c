@@ -41,6 +41,8 @@ extern int amiga_add_ttf_fallback(const char *path, int size);
 #endif
 
 #include "ui/te.h"
+#include "ui/ui_files.h"
+#include "components/fmt_rtf.h"
 #include "ui/ui_editor_helper.h"
 #include "core/charset.h"
 #include "components/config.h"
@@ -501,7 +503,30 @@ int main(int argc, char **argv)
             }
             else if (recovered == 0)
             {
-                if (is_utf8)
+                if (ui_files_is_rtf(argv[1]))
+                {
+                    FILE *fp = fopen(argv[1], "rb");
+                    char rerr[128];
+                    char rwarn[128];
+                    int rc;
+
+                    if (fp)
+                    {
+                        ed_clear_undo_redo(tab->editor);
+                        rc = rtf_import(tab->editor, fp, rerr, sizeof(rerr), rwarn, sizeof(rwarn));
+                        fclose(fp);
+
+                        if (rc != 0)
+                            te_status(app, "RTF error: %s", rerr);
+                        else if (rwarn[0])
+                            te_status(app, "Loaded: %s (%s)", argv[1], rwarn);
+                    }
+                    else
+                    {
+                        te_status(app, "Cannot read: %s", argv[1]);
+                    }
+                }
+                else if (is_utf8)
                 {
                     FILE *fp = fopen(argv[1], "rb");
                     int rc;

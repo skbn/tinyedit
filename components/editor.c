@@ -18,6 +18,7 @@
 #include <wchar.h>
 #include <wctype.h>
 #include "editor.h"
+#include "ed_attr.h"
 #include "../core/utf8.h"
 #include "../core/charset.h"
 #include "../core/portable.h"
@@ -421,6 +422,10 @@ static EdLine *line_build(Ed *ed, const wchar_t *src, int len, int cap)
     ln->has_wrap_hyphen = 0;
     ln->wrap_count_cache = -1;
     ln->wrap_cache_width = 0;
+    ln->attrs = NULL;
+    ln->n_attrs = 0;
+    ln->cap_attrs = 0;
+    ln->para_align = 0;
 
     return ln;
 }
@@ -463,6 +468,8 @@ static void line_free(EdLine *ln)
 {
     if (!ln)
         return;
+
+    ed_attr_line_free(ln);
 
 #if defined(PLATFORM_AMIGA)
     if (ln->mem_pool)
@@ -507,6 +514,7 @@ static int line_insert(Ed *ed, EdLine *ln, int pos, wchar_t ch)
     ln->len++;
     ln->wrap_count_cache = -1;
 
+    ed_attr_on_insert(ln, pos, 1);
     ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
@@ -533,6 +541,8 @@ static int line_delete(Ed *ed, EdLine *ln, int pos)
     line_move(ln, pos, pos + 1, ln->len - pos);
     ln->len--;
     ln->wrap_count_cache = -1;
+
+    ed_attr_on_delete(ln, pos, 1);
     ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
@@ -560,6 +570,7 @@ static int line_delete_range(Ed *ed, EdLine *ln, int pos, int n)
     ln->len -= n;
     ln->wrap_count_cache = -1;
 
+    ed_attr_on_delete(ln, pos, n);
     ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
@@ -587,6 +598,7 @@ static void line_truncate(Ed *ed, EdLine *ln, int pos)
 
     ln->wrap_count_cache = -1;
 
+    ed_attr_on_truncate(ln, pos);
     ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
@@ -620,6 +632,13 @@ static EdLine *line_from_slice(Ed *ed, EdLine *ln, int start, int count)
 
     free(tmp);
 
+    if (out)
+    {
+        /* Sliced text keeps its style, rebased to the new line */
+        ed_attr_copy_slice(ln, start, count, out);
+        out->para_align = ln->para_align;
+    }
+
     return out;
 }
 
@@ -646,6 +665,9 @@ static int line_append_line(Ed *ed, EdLine *dst, const EdLine *src, int start, i
 
     if (line_need(dst, dst->len + count, w) != 0)
         return -1;
+
+    /* Appended text keeps its style, rebased onto the old tail */
+    ed_attr_append_slice(dst, dst->len, src, start, count);
 
     for (i = 0; i < count; i++)
         line_put_raw(dst, dst->len + i, ed_line_char(src, start + i));

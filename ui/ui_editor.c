@@ -26,6 +26,7 @@
 #include "../components/editor.h"
 #include "te.h"
 #include "ui_files.h"
+#include "../components/fmt_rtf.h"
 #include "ui_editor_helper.h"
 #include "ui_setup.h"
 
@@ -2945,7 +2946,25 @@ static int do_save(TeApp *app)
 
     te_app_set_filename(app, filename_buf);
 
-    if (ed_save_to_file(te_app_get_editor(app), te_app_get_filename(app), app->charset_out) != 0)
+    /* RTF filenames save through the RTF exporter, keeping the styles */
+    if (ui_files_is_rtf(te_app_get_filename(app)))
+    {
+        FILE *fp = fopen(te_app_get_filename(app), "wb");
+        int rc = -1;
+
+        if (fp)
+        {
+            rc = rtf_export(te_app_get_editor(app), fp);
+            fclose(fp);
+        }
+
+        if (rc != 0)
+        {
+            te_status(app, "Cannot write: %s", te_app_get_filename(app));
+            return -1;
+        }
+    }
+    else if (ed_save_to_file(te_app_get_editor(app), te_app_get_filename(app), app->charset_out) != 0)
     {
         te_status(app, "Cannot write: %s", te_app_get_filename(app));
         return -1;

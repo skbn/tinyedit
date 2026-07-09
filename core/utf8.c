@@ -294,7 +294,7 @@ int latin1_to_utf8(const char *src, int srclen, char *dst, int dstmax)
 
     if (!src || !dst || dstmax <= 0)
     {
-        if (dst)
+        if (dst && dstmax > 0)
             dst[0] = '\0';
 
         return 0;
@@ -316,7 +316,7 @@ int utf8_to_latin1(const char *src, int srclen, char *dst, int dstmax)
 
     if (!src || !dst || dstmax <= 0)
     {
-        if (dst)
+        if (dst && dstmax > 0)
             dst[0] = '\0';
 
         return 0;
@@ -352,8 +352,7 @@ uint32_t cp1252_to_unicode(unsigned char c) { return c < 128 ? (uint32_t)c : (ui
 
 uint32_t latin2_to_unicode(unsigned char c) { return c < 128 ? (uint32_t)c : (uint32_t)latin2_map[c - 128]; }
 
-/* Charset-name-aware single-byte -> Unicode. See utf8.h doc comment
- * Order of strcasecmp checks mirrors charset_to_utf8 for consistency */
+/* Charset-name-aware single-byte -> Unicode. See utf8.h doc comment. Order of strcasecmp checks mirrors charset_to_utf8 for consistency */
 uint32_t charset_byte_to_unicode(const char *cs, unsigned char b)
 {
     if (b < 0x80)
@@ -380,8 +379,7 @@ uint32_t charset_byte_to_unicode(const char *cs, unsigned char b)
     if (strcasecmp(cs, "LATIN-2") == 0 || strcasecmp(cs, "ISO-8859-2") == 0)
         return latin2_to_unicode(b);
 
-    /* LATIN-1, ISO-8859-1, or unknown: identity mapping (high bytes
-     * 0xA0-0xFF are already valid Unicode code points) */
+    /* LATIN-1, ISO-8859-1, or unknown: identity mapping (high bytes 0xA0-0xFF are already valid Unicode code points) */
     return (uint32_t)b;
 }
 
@@ -488,7 +486,7 @@ static int cp_to_utf8(const uint16_t *map, const char *src, int sl, char *dst, i
 
     if (!src || !dst || dm <= 0)
     {
-        if (dst)
+        if (dst && dm > 0)
             dst[0] = '\0';
 
         return 0;
@@ -515,7 +513,7 @@ static int utf8_to_cp(const uint16_t *map, const char *src, int sl, char *dst, i
 
     if (!src || !dst || dm <= 0)
     {
-        if (dst)
+        if (dst && dm > 0)
             dst[0] = '\0';
 
         return 0;
@@ -559,7 +557,7 @@ int charset_to_utf8(const char *cs, const char *src, int sl, char *dst, int dm)
 {
     if (!cs || !src || dm <= 0)
     {
-        if (dst)
+        if (dst && dm > 0)
             dst[0] = '\0';
 
         return 0;
@@ -600,7 +598,7 @@ int utf8_to_charset(const char *cs, const char *src, int sl, char *dst, int dm)
 {
     if (!cs || !src || dm <= 0)
     {
-        if (dst)
+        if (dst && dm > 0)
             dst[0] = '\0';
 
         return 0;

@@ -61,7 +61,7 @@ int port_mkdir_one(const char *p)
 
     return -1;
 #elif defined(PLATFORM_WIN32)
-    return mkdir(p);
+    return _mkdir(p);
 #else
     return mkdir(p, 0755);
 #endif
@@ -658,6 +658,14 @@ char *port_sanitize_filename(const char *utf8_name)
                 *out++ = 'N';
                 i++;
                 break; /* Ñ */
+            case 0xFC:
+                *out++ = 'u';
+                i++;
+                break; /* ü */
+            case 0xDC:
+                *out++ = 'U';
+                i++;
+                break; /* Ü */
             default:
                 *out++ = '_';
                 i++;
