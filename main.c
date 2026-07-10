@@ -519,7 +519,15 @@ int main(int argc, char **argv)
 
                         if (rc != 0)
                             te_status(app, "RTF error: %s", rerr);
-                        else if (rwarn[0])
+                        else
+                        {
+                            app->rich_mode = 1;
+
+                            if (te_app_get_active_tab(app))
+                                te_app_get_active_tab(app)->rich_mode = 1;
+                        }
+
+                        if (rc == 0 && rwarn[0])
                             te_status(app, "Loaded: %s (%s)", argv[1], rwarn);
                     }
                     else
