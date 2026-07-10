@@ -26,6 +26,7 @@ typedef struct
     int modified;
     int show_line_numbers;
     int syntax_lang;
+    int rich_mode;
 } TeTab;
 
 TeTab *te_tab_new(void);

@@ -37,6 +37,7 @@ TeTab *te_tab_new(void)
     tab->filename[0] = '\0';
     tab->charset_in[0] = '\0';
     tab->charset_out[0] = '\0';
+    tab->rich_mode = 0;
 
     return tab;
 }

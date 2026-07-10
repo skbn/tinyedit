@@ -71,7 +71,7 @@ void wm_destroy_all_ncurses(TeWindowManager *wm);
 void wm_focus_next(TeWindowManager *wm);
 void wm_focus_prev(TeWindowManager *wm);
 void wm_focus_by_index(TeWindowManager *wm, int index);
-void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int show_tabs, int spell_panel_mode);
+void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int show_tabs, int spell_panel_mode, int rich_mode);
 TeWindow *wm_get_window_by_type(TeWindowManager *wm, WinType type);
 
 #endif

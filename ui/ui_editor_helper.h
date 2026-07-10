@@ -75,6 +75,10 @@ int ui_editor_goto_end(TeApp *app);
 int ui_editor_export(TeApp *app);
 int rewrap(TeApp *app);
 
+/* Rich-text attribute toggle and alignment */
+int ui_rich_attr_toggle(TeApp *app, unsigned short bit);
+int ui_rich_align_set(TeApp *app, unsigned char align);
+
 /* On Amiga: declare wcswidth (Markus Kuhn's tables) for use without pulling in full implementation */
 #if defined(PLATFORM_AMIGA) && !defined(wcswidth)
 int wcswidth(const wchar_t *wcs, size_t n);
@@ -88,6 +92,9 @@ int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width);
 
 /* Draw wide string with tab expansion */
 void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_width);
+
+/* Repaint bold/underline runs over an already-drawn segment */
+void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int seg_start, int seg_end, int seg_start_vcol, int tab_width);
 
 /* Draw wide string with tab expansion and per-character syntax colors */
 void ui_draw_wcs_line_with_tabs_and_colors(int y, int x, const wchar_t *s, int n, int tab_width, const SyntaxClass *classes, int start_col);

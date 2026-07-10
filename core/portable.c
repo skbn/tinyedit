@@ -1255,7 +1255,6 @@ PfLockFile *pf_lock_create(const char *path)
     PfLockFile *lk = NULL;
     char buf[32];
     int n;
-    ssize_t w;
 
     if (!path)
         return NULL;
@@ -1278,8 +1277,16 @@ PfLockFile *pf_lock_create(const char *path)
 
     n = snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
 
+    /* Best-effort PID stamp. A short write does not fail the lock */
     if (n > 0)
-        w = write(lk->fd, buf, (size_t)n);
+    {
+        ssize_t w = write(lk->fd, buf, (size_t)n);
+
+        if (w < 0)
+            w = 0;
+
+        (void)w;
+    }
 
     return lk;
 }

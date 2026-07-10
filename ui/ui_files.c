@@ -16,6 +16,7 @@
 #include "te.h"
 #include "ui_files.h"
 #include "../components/fmt_rtf.h"
+#include "../components/fmt_wp4.h"
 #include "ui_editor_helper.h"
 #include "../core/keys.h"
 #include "../core/portable.h"
@@ -1433,6 +1434,22 @@ int ui_files_is_rtf(const char *path)
     return n > 4 && strcasecmp(path + n - 4, ".rtf") == 0;
 }
 
+/* Case-insensitive .wp / .wp4 extension check */
+int ui_files_is_wp4(const char *path)
+{
+    size_t n;
+
+    if (!path)
+        return 0;
+
+    n = strlen(path);
+
+    if (n > 4 && strcasecmp(path + n - 4, ".wp4") == 0)
+        return 1;
+
+    return n > 3 && strcasecmp(path + n - 3, ".wp") == 0;
+}
+
 int ui_files_open_path(TeApp *app, const char *path)
 {
     FILE *fp = NULL;
@@ -1488,6 +1505,53 @@ int ui_files_open_path(TeApp *app, const char *path)
             return -1;
         }
 
+        app->rich_mode = 1;
+
+        if (te_app_get_active_tab(app))
+            te_app_get_active_tab(app)->rich_mode = 1;
+
+        te_app_set_filename(app, path);
+        ui_editor_recent_add(path);
+
+        if (warn[0])
+            te_status(app, "Loaded: %s (%s)", path, warn);
+        else
+            te_status(app, "Loaded: %s", path);
+
+        return 0;
+    }
+
+    /* WP 4.2 files go through the WP importer */
+    if (ui_files_is_wp4(path))
+    {
+        char err[128];
+        char warn[128];
+        int rc;
+
+        fp = fopen(path, "rb");
+
+        if (!fp)
+        {
+            te_status(app, "Cannot open: %s", path);
+            return -1;
+        }
+
+        ed_clear_undo_redo(te_app_get_editor(app));
+
+        rc = wp4_import(te_app_get_editor(app), fp, app->charset_in, err, sizeof(err), warn, sizeof(warn));
+        fclose(fp);
+
+        if (rc != 0)
+        {
+            te_status(app, "WP error: %s", err);
+            return -1;
+        }
+
+        app->rich_mode = 1;
+
+        if (te_app_get_active_tab(app))
+            te_app_get_active_tab(app)->rich_mode = 1;
+
         te_app_set_filename(app, path);
         ui_editor_recent_add(path);
 
@@ -1539,6 +1603,11 @@ int ui_files_open_path(TeApp *app, const char *path)
             return -1;
         }
 
+        app->rich_mode = 0;
+
+        if (te_app_get_active_tab(app))
+            te_app_get_active_tab(app)->rich_mode = 0;
+
         te_app_set_filename(app, path);
 
         detected = ui_editor_detect_wrap_hyphens(app);
@@ -1564,6 +1633,11 @@ int ui_files_open_path(TeApp *app, const char *path)
     }
 
     fclose(fp);
+
+    app->rich_mode = 0;
+
+    if (te_app_get_active_tab(app))
+        te_app_get_active_tab(app)->rich_mode = 0;
 
     /* Update filename */
     te_app_set_filename(app, path);

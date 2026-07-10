@@ -22,6 +22,7 @@
 #include "../core/utf8.h"
 #include "../components/config.h"
 #include "../components/editor.h"
+#include "../components/ed_attr.h"
 #include "ui_editor_helper.h"
 #include "ui_spell.h"
 #include "ui_grammar.h"
@@ -122,6 +123,7 @@ TeApp *te_app_new(void)
     app->bracket_match_col = -1;
     app->hard_wrap = 0;
     app->wrap_col = 75;
+    app->rich_mode = 0;
 
     app->search.rows = NULL;
     app->search.cols = NULL;
@@ -342,6 +344,9 @@ void te_app_switch_tab(TeApp *app, int index)
         return;
 
     app->active_tab = index;
+
+    if (app->tabs[index])
+        app->rich_mode = app->tabs[index]->rich_mode;
 }
 
 /* Return the index of the first tab with unsaved changes, or -1 if none */
@@ -655,6 +660,71 @@ void te_draw_titlebar(TeApp *app)
     }
 
     attroff(COLOR_PAIR(COL_TITLEBAR));
+}
+
+/* Draw rich-text bar below the titlebar with bold/italic/underline/alignment state */
+void te_draw_richbar(TeApp *app)
+{
+    int x;
+    char buf[128];
+    const char *align_name;
+    unsigned short mask = 0;
+    unsigned char align = EA_ALIGN_LEFT;
+    TeTab *tab = NULL;
+    Ed *ed = NULL;
+    EdInfo info;
+
+    if (!app || !app->rich_mode)
+        return;
+
+    tab = te_app_get_active_tab(app);
+    if (tab && tab->editor)
+    {
+        ed = tab->editor;
+        ed_get_info(ed, &info);
+
+        if (info.row >= 0 && info.row < ed->count)
+        {
+            EdLine *ln = ed->lines[info.row];
+
+            align = ln->para_align;
+
+            if (info.col >= 0 && info.col < ln->len)
+                mask = ed_attr_mask_at(ln, info.col, NULL, NULL) | ed->input_mask;
+            else
+                mask = ed->input_mask;
+        }
+    }
+
+    switch (align)
+    {
+    case EA_ALIGN_CENTER:
+        align_name = "Center";
+        break;
+    case EA_ALIGN_RIGHT:
+        align_name = "Right";
+        break;
+    case EA_ALIGN_JUST:
+        align_name = "Justify";
+        break;
+    default:
+        align_name = "Left";
+        break;
+    }
+
+    snprintf(buf, sizeof(buf), " [B]old %s  [I]talic %s  [U]nderline %s  Align: %s ", (mask & EA_BOLD) ? "ON " : "off", (mask & EA_ITALIC) ? "ON " : "off", (mask & EA_UNDERLINE) ? "ON " : "off", align_name);
+
+    standend();
+    attron(COLOR_PAIR(COL_STATUS));
+
+    move(1, 0);
+
+    for (x = 0; x < COLS; x++)
+        addch(' ');
+
+    mvaddnstr(1, 0, buf, COLS);
+
+    attroff(COLOR_PAIR(COL_STATUS));
 }
 
 /* Draw status bar with hints and charset info */

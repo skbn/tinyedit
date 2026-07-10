@@ -515,6 +515,10 @@ static int line_insert(Ed *ed, EdLine *ln, int pos, wchar_t ch)
     ln->wrap_count_cache = -1;
 
     ed_attr_on_insert(ln, pos, 1);
+
+    if (ed->input_mask)
+        ed_attr_line_apply(ln, pos, pos + 1, ed->input_mask, 0, -1, 0);
+
     ed_wcs_view_reset(ed);
 
     if (ed->word_count_initialized)
@@ -1435,6 +1439,7 @@ Ed *ed_new(void)
     ed->undo_snapshot_mode = 0;
     ed->hard_wrap = 0;
     ed->word_move_mode = 0;
+    ed->input_mask = 0;
 
 #if defined(PLATFORM_AMIGA)
     /* Create per-document pool before allocation. Fallback to malloc on failure */

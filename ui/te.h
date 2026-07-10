@@ -172,6 +172,8 @@ typedef struct
     int assist_smart_quotes; /* '  -> ‘/’ ; "  -> “/” */
     int assist_repeat_check; /* warn/highlight on "the the" etc */
     int assist_auto_cap;     /* capitalize after ". ", "? ", "! " */
+
+    int rich_mode; /* rich-text mode: bold/italic/underline/alignment keys active */
 } TeApp;
 
 /* CTRL(x) */
@@ -342,6 +344,7 @@ void input_move_cursor(InputState *state, int y, int x, int width);
 void te_status(TeApp *app, const char *fmt, ...);
 void te_draw_statusbar(TeApp *app);
 void te_draw_titlebar(TeApp *app);
+void te_draw_richbar(TeApp *app);
 void ui_box(int y, int x, int h, int w);
 void te_hline(int y, int x, int len);
 const char *te_wcs2u8(const wchar_t *wcs);

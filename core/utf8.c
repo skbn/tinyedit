@@ -287,6 +287,25 @@ int utf8_encode(uint32_t cp, char *buf)
     return 1; /* out of Unicode range */
 }
 
+static unsigned char quote_ascii_fallback(uint32_t cp)
+{
+    switch (cp)
+    {
+    case 0x201C:
+    case 0x201D:
+    case 0x201E:
+    case 0x201F:
+        return 0x22;
+    case 0x2018:
+    case 0x2019:
+    case 0x201A:
+    case 0x201B:
+        return 0x27;
+    default:
+        return 0;
+    }
+}
+
 int latin1_to_utf8(const char *src, int srclen, char *dst, int dstmax)
 {
     const unsigned char *s = (const unsigned char *)src;
@@ -327,12 +346,27 @@ int utf8_to_latin1(const char *src, int srclen, char *dst, int dstmax)
 
     while (p < end && di < dstmax - 1)
     {
-        uint32_t cp = utf8_next(&p);
+        uint32_t cp;
+        unsigned char ch;
+
+        cp = utf8_next(&p);
 
         if (cp == 0)
             break;
 
-        dst[di++] = (cp <= 0xFF) ? (char)cp : '?';
+        if (cp <= 0xFF)
+        {
+            ch = (unsigned char)cp;
+        }
+        else
+        {
+            ch = quote_ascii_fallback(cp);
+
+            if (ch == 0)
+                ch = '?';
+        }
+
+        dst[di++] = (char)ch;
     }
 
     dst[di] = '\0';
@@ -524,7 +558,10 @@ static int utf8_to_cp(const uint16_t *map, const char *src, int sl, char *dst, i
 
     while (p < end && di < dm - 1)
     {
-        uint32_t cp = utf8_next(&p);
+        uint32_t cp;
+        unsigned char ch;
+
+        cp = utf8_next(&p);
 
         if (!cp)
             break;
@@ -545,7 +582,10 @@ static int utf8_to_cp(const uint16_t *map, const char *src, int sl, char *dst, i
         }
 
         if (i == 128)
-            dst[di++] = '?';
+        {
+            ch = quote_ascii_fallback(cp);
+            dst[di++] = (ch != 0) ? (char)ch : '?';
+        }
     }
 
     dst[di] = '\0';

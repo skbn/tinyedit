@@ -24,9 +24,11 @@
 #include "../core/clipboard.h"
 #include "../core/portable.h"
 #include "../components/editor.h"
+#include "../components/ed_attr.h"
 #include "te.h"
 #include "ui_files.h"
 #include "../components/fmt_rtf.h"
+#include "../components/fmt_wp4.h"
 #include "ui_editor_helper.h"
 #include "ui_setup.h"
 
@@ -105,7 +107,7 @@ static const char *HELP_LINES[] =
         "  Files:",
         "    F7 / Alt+O       Insert file at cursor",
         "    Ctrl+L           Open file (new tab)",
-        "    Ctrl+Alt+R       Open recent file",
+        "    Ctrl+Alt+Y       Open recent file",
         "    Ctrl+N           New file (new tab)",
         "    F2 / Ctrl+S      Save",
         "    ESC / F10        Quit (confirm if modified)",
@@ -146,18 +148,37 @@ static const char *HELP_LINES[] =
         "",
         "  Text-to-speech:",
 #ifdef PLATFORM_AMIGA
-        "    Alt+Shift+L     Speak selection / paragraph",
+        "    Alt+Shift+X     Speak selection / paragraph",
         "    Alt+Shift+K     Speak entire document",
         "    Alt+Shift+P     Pause / resume speech",
         "    Alt+Shift+O     Stop speech",
-        "    Alt+Shift+J     Voice settings popup",
+        "    Alt+Shift+V     Voice settings popup",
 #else
-        "    Ctrl+Alt+L      Speak selection / paragraph",
+        "    Ctrl+Alt+X      Speak selection / paragraph",
         "    Ctrl+Alt+K      Speak entire document",
         "    Ctrl+Alt+P      Pause / resume speech",
         "    Ctrl+Alt+O      Stop speech",
-        "    Ctrl+Alt+J      Voice settings popup",
+        "    Ctrl+Alt+V      Voice settings popup",
 #endif
+#endif
+        "",
+        "  Rich text (WP4/RTF mode):",
+#ifdef PLATFORM_AMIGA
+        "    Alt+Shift+B      Bold",
+        "    Alt+Shift+I      Italic",
+        "    Alt+Shift+U      Underline",
+        "    Alt+Shift+L      Align left",
+        "    Alt+Shift+E      Align center",
+        "    Alt+Shift+R      Align right",
+        "    Alt+Shift+J      Justify",
+#else
+        "    Ctrl+Alt+B       Bold",
+        "    Ctrl+Alt+I       Italic",
+        "    Ctrl+Alt+U       Underline",
+        "    Ctrl+Alt+L       Align left",
+        "    Ctrl+Alt+E       Align center",
+        "    Ctrl+Alt+R       Align right",
+        "    Ctrl+Alt+J       Justify",
 #endif
         "",
         "  Other:",
@@ -514,6 +535,34 @@ static int soft_cursor_vcol(Ed *ed, int width)
 
     /* start_col must be 0 for soft-wrap sub-row consistency */
     return wcs_vwidth_ex(&l[seg_start], n, 0, s_tab_width);
+}
+
+/* Alignment indent of the sub-row the cursor sits in (soft-wrap) */
+static int line_align_indent(unsigned char align, int text_vw, int avail);
+
+static int soft_cursor_align_indent(Ed *ed, int width)
+{
+    EdInfo info;
+    const wchar_t *l = NULL;
+    int len;
+    int sub;
+    int seg_start = 0, seg_end = 0;
+    int seg_vw;
+
+    ed_get_info(ed, &info);
+
+    l = ed_line_wcs(ed, info.row);
+    len = ed_line_len(ed, info.row);
+
+    if (!l || len <= 0)
+        return 0;
+
+    sub = line_subrow_of_col(l, len, width, info.col);
+    line_subrow_range(l, len, width, sub, &seg_start, &seg_end);
+
+    seg_vw = wcs_vwidth_ex(&l[seg_start], seg_end - seg_start, 0, s_tab_width);
+
+    return line_align_indent(ed->lines[info.row]->para_align, seg_vw, width);
 }
 
 /* Return visual rows between two positions. O(|b_line - a_line|) */
@@ -1555,12 +1604,30 @@ static SyntaxState compute_syntax_state_at(Ed *ed, int row, SyntaxLang lang)
     return state;
 }
 
+/* Alignment indent: center/right offset, left/justify return 0 */
+static int line_align_indent(unsigned char align, int text_vw, int avail)
+{
+    int slack = avail - text_vw;
+
+    if (slack <= 0)
+        return 0;
+
+    if (align == EA_ALIGN_CENTER)
+        return slack / 2;
+
+    if (align == EA_ALIGN_RIGHT)
+        return slack;
+
+    return 0;
+}
+
 /* Draw editor body */
 static void draw_body(TeApp *app)
 {
     EdInfo info;
     TeWindow *win = NULL;
-    int body_top = 1;
+    int rich_bar_h = app->rich_mode ? 1 : 0;
+    int body_top = 1 + rich_bar_h;
     int body_bot = LINES - 2;
     int body_rows;
     int width = COLS;
@@ -1874,8 +1941,15 @@ static void draw_body(TeApp *app)
                     /* Tab offset is 0 inside each sub-row */
                     int seg_start_vcol = 0;
 
+                    /* Alignment indent for this sub-row */
+                    int align_ind;
+                    int eff_ln_offset;
+
                     if (seg_len < 0)
                         seg_len = 0;
+
+                    align_ind = line_align_indent(l ? ed->lines[li]->para_align : 0, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width);
+                    eff_ln_offset = ln_offset + align_ind;
 
                     /* Line number on first painted sub-row */
                     if (show_lnum && first_seg)
@@ -1892,9 +1966,11 @@ static void draw_body(TeApp *app)
                     if (seg_len > 0)
                     {
                         if (line_classes)
-                            ui_draw_wcs_line_with_tabs_and_colors(offset_y + sr, offset_x + ln_offset, &l[seg_start], seg_len, s_tab_width, &line_classes[seg_start], seg_start_vcol);
+                            ui_draw_wcs_line_with_tabs_and_colors(offset_y + sr, offset_x + eff_ln_offset, &l[seg_start], seg_len, s_tab_width, &line_classes[seg_start], seg_start_vcol);
                         else
-                            ui_draw_wcs_line_with_tabs(offset_y + sr, offset_x + ln_offset, &l[seg_start], seg_len, s_tab_width);
+                            ui_draw_wcs_line_with_tabs(offset_y + sr, offset_x + eff_ln_offset, &l[seg_start], seg_len, s_tab_width);
+
+                        ui_draw_wcs_attr_runs(offset_y + sr, offset_x + eff_ln_offset, l, te_app_get_editor(app)->lines[li], seg_start, seg_end, seg_start_vcol, s_tab_width);
                     }
 
                     /* Paint tabs and trailing spaces as visible glyphs */
@@ -1917,7 +1993,7 @@ static void draw_body(TeApp *app)
                         for (k = 0; k < seg_len; k++)
                         {
                             wchar_t ch = l[seg_start + k];
-                            int col_x = offset_x + ln_offset + wcs_vwidth_ex(&l[seg_start], k, seg_start_vcol, s_tab_width);
+                            int col_x = offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], k, seg_start_vcol, s_tab_width);
 
                             if (ch == L'\t')
                             {
@@ -1946,7 +2022,7 @@ static void draw_body(TeApp *app)
                     if (app->cfg.show_brackets && seg_len > 0 && app->bracket_match_row == li && app->bracket_match_col >= seg_start && app->bracket_match_col < seg_end)
                     {
                         int tc = app->bracket_match_col;
-                        int col_x = offset_x + ln_offset + wcs_vwidth_ex(&l[seg_start], tc - seg_start, seg_start_vcol, s_tab_width);
+                        int col_x = offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], tc - seg_start, seg_start_vcol, s_tab_width);
 
                         attron(COLOR_PAIR(COL_BRACKET_MATCH) | A_BOLD);
                         mvaddnwstr(offset_y + sr, col_x, &l[tc], 1);
@@ -1971,21 +2047,21 @@ static void draw_body(TeApp *app)
                                 if (match_col >= seg_start && match_end <= seg_end)
                                 {
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth_ex(&l[seg_start], match_col - seg_start, seg_start_vcol, s_tab_width), &l[match_col], match_len);
+                                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], match_col - seg_start, seg_start_vcol, s_tab_width), &l[match_col], match_len);
                                     attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                                 }
                                 else if (match_col >= seg_start && match_col < seg_end)
                                 {
                                     int partial_len = seg_end - match_col;
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth_ex(&l[seg_start], match_col - seg_start, seg_start_vcol, s_tab_width), &l[match_col], partial_len);
+                                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], match_col - seg_start, seg_start_vcol, s_tab_width), &l[match_col], partial_len);
                                     attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                                 }
                                 else if (match_end > seg_start && match_end <= seg_end)
                                 {
                                     int partial_len = match_end - seg_start;
                                     attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset, &l[seg_start], partial_len);
+                                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset, &l[seg_start], partial_len);
                                     attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                                 }
                             }
@@ -2027,7 +2103,7 @@ static void draw_body(TeApp *app)
                                 if (spell_on && word_len > 1 && spell_word_incorrect(app, li, l, len, word_start, word_end))
                                 {
                                     attron(COLOR_PAIR(COL_SPELL_CURRENT));
-                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth_ex(&l[seg_start], word_start - seg_start, seg_start_vcol, s_tab_width), &l[word_start], word_len);
+                                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], word_start - seg_start, seg_start_vcol, s_tab_width), &l[word_start], word_len);
                                     attroff(COLOR_PAIR(COL_SPELL_CURRENT));
 
                                     marked = 1;
@@ -2037,7 +2113,7 @@ static void draw_body(TeApp *app)
                                 if (!marked && app->cfg.assist_repeat_check && ui_assist_check_repeat(app, li, word_start, word_len))
                                 {
                                     attron(A_REVERSE);
-                                    mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth_ex(&l[seg_start], word_start - seg_start, seg_start_vcol, s_tab_width), &l[word_start], word_len);
+                                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], word_start - seg_start, seg_start_vcol, s_tab_width), &l[word_start], word_len);
                                     attroff(A_REVERSE);
                                 }
                             }
@@ -2050,7 +2126,7 @@ static void draw_body(TeApp *app)
 #ifdef HAVE_GRAMMAR
                     /* Grammar overlay for this sub-row segment, runs once per logical line (LRU cache absorbs subsequent sub-rows) */
                     if (app->grammar_active && app->grammar_handle && l && len > 0 && seg_start < seg_end)
-                        ui_grammar_draw_row_segment(app, offset_y + sr, offset_x + ln_offset, s_tab_width, l, len, seg_start, seg_end, seg_start_vcol, li);
+                        ui_grammar_draw_row_segment(app, offset_y + sr, offset_x + eff_ln_offset, s_tab_width, l, len, seg_start, seg_end, seg_start_vcol, li);
 
 #endif
 
@@ -2071,13 +2147,13 @@ static void draw_body(TeApp *app)
                         if (hs < he)
                         {
                             attron(A_REVERSE);
-                            mvaddnwstr(offset_y + sr, offset_x + ln_offset + wcs_vwidth_ex(&l[seg_start], hs - seg_start, seg_start_vcol, s_tab_width), &l[hs], he - hs);
+                            mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], hs - seg_start, seg_start_vcol, s_tab_width), &l[hs], he - hs);
                             attroff(A_REVERSE);
                         }
                         else if (hs == seg_start && he == seg_start)
                         {
                             attron(A_REVERSE);
-                            mvaddch(offset_y + sr, offset_x + ln_offset, ' ');
+                            mvaddch(offset_y + sr, offset_x + eff_ln_offset, ' ');
                             attroff(A_REVERSE);
                         }
                     }
@@ -2210,6 +2286,7 @@ static void draw_body(TeApp *app)
             int line_vw;
             int x_text_end;
             int x_screen_end;
+            int eff_ln_offset = ln_offset;
             SyntaxClass *line_classes = NULL;
 
             move(offset_y + i, offset_x);
@@ -2231,6 +2308,9 @@ static void draw_body(TeApp *app)
             /* mvaddnwstr: n is in wide chars */
             wl = ed_line_wcs(te_app_get_editor(app), line_idx);
             line_len = ed_line_len(te_app_get_editor(app), line_idx);
+
+            /* Alignment indent for the whole line */
+            eff_ln_offset = ln_offset + line_align_indent(ed->lines[line_idx]->para_align, (wl && line_len > 0) ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0, width);
 
             if (lang > SYNTAX_LANG_NONE && wl && line_len > 0)
             {
@@ -2262,16 +2342,18 @@ static void draw_body(TeApp *app)
                     line_len = max_chars;
 
                 if (line_classes)
-                    ui_draw_wcs_line_with_tabs_and_colors(offset_y + i, offset_x + ln_offset, wl, line_len, s_tab_width, line_classes, 0);
+                    ui_draw_wcs_line_with_tabs_and_colors(offset_y + i, offset_x + eff_ln_offset, wl, line_len, s_tab_width, line_classes, 0);
                 else
-                    ui_draw_wcs_line_with_tabs(offset_y + i, offset_x + ln_offset, wl, line_len, s_tab_width);
+                    ui_draw_wcs_line_with_tabs(offset_y + i, offset_x + eff_ln_offset, wl, line_len, s_tab_width);
+
+                ui_draw_wcs_attr_runs(offset_y + i, offset_x + eff_ln_offset, wl, te_app_get_editor(app)->lines[line_idx], 0, line_len, 0, s_tab_width);
             }
 
             /* Highlight matched bracket partner only */
             if (app->cfg.show_brackets && app->bracket_match_row == line_idx && app->bracket_match_col >= 0 && app->bracket_match_col < line_len && wl)
             {
                 int tc = app->bracket_match_col;
-                int col_x = offset_x + ln_offset + wcs_vwidth_ex(wl, tc, 0, s_tab_width);
+                int col_x = offset_x + eff_ln_offset + wcs_vwidth_ex(wl, tc, 0, s_tab_width);
 
                 attron(COLOR_PAIR(COL_BRACKET_MATCH) | A_BOLD);
                 mvaddnwstr(offset_y + i, col_x, &wl[tc], 1);
@@ -2295,7 +2377,7 @@ static void draw_body(TeApp *app)
                         if (match_col >= 0 && match_col + match_len <= line_len)
                         {
                             attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                            mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth_ex(wl, match_col, 0, s_tab_width), &wl[match_col], match_len);
+                            mvaddnwstr(offset_y + i, offset_x + eff_ln_offset + wcs_vwidth_ex(wl, match_col, 0, s_tab_width), &wl[match_col], match_len);
                             attroff(COLOR_PAIR(COL_SEARCH_MATCH));
                         }
                     }
@@ -2337,7 +2419,7 @@ static void draw_body(TeApp *app)
                         if (spell_on && word_len > 1 && spell_word_incorrect(app, line_idx, wl, line_len, word_start, word_end))
                         {
                             attron(COLOR_PAIR(COL_SPELL_CURRENT));
-                            mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth_ex(wl, word_start, 0, s_tab_width), &wl[word_start], word_len);
+                            mvaddnwstr(offset_y + i, offset_x + eff_ln_offset + wcs_vwidth_ex(wl, word_start, 0, s_tab_width), &wl[word_start], word_len);
                             attroff(COLOR_PAIR(COL_SPELL_CURRENT));
 
                             marked = 1;
@@ -2347,7 +2429,7 @@ static void draw_body(TeApp *app)
                         if (!marked && app->cfg.assist_repeat_check && ui_assist_check_repeat(app, line_idx, word_start, word_len))
                         {
                             attron(A_REVERSE);
-                            mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth_ex(wl, word_start, 0, s_tab_width), &wl[word_start], word_len);
+                            mvaddnwstr(offset_y + i, offset_x + eff_ln_offset + wcs_vwidth_ex(wl, word_start, 0, s_tab_width), &wl[word_start], word_len);
                             attroff(A_REVERSE);
                         }
                     }
@@ -2360,7 +2442,7 @@ static void draw_body(TeApp *app)
 #ifdef HAVE_GRAMMAR
             /* Grammar/punctuation overlay, viewport-scoped, LRU cache absorbs redraws, prewarm extends coverage for smooth scrolling */
             if (app->grammar_active && app->grammar_handle && wl && line_len > 0)
-                ui_grammar_draw_row(app, offset_y + i, offset_x + ln_offset, s_tab_width, wl, line_len, line_idx);
+                ui_grammar_draw_row(app, offset_y + i, offset_x + eff_ln_offset, s_tab_width, wl, line_len, line_idx);
 #endif
 
             standend();
@@ -2384,7 +2466,7 @@ static void draw_body(TeApp *app)
                 for (k = 0; k < display_len; k++)
                 {
                     wchar_t ch = wl[k];
-                    int col_x = offset_x + ln_offset + wcs_vwidth_ex(wl, k, 0, s_tab_width);
+                    int col_x = offset_x + eff_ln_offset + wcs_vwidth_ex(wl, k, 0, s_tab_width);
 
                     if (ch == L'\t')
                     {
@@ -2425,14 +2507,14 @@ static void draw_body(TeApp *app)
                 if (hs < he)
                 {
                     attron(A_REVERSE);
-                    mvaddnwstr(offset_y + i, offset_x + ln_offset + wcs_vwidth_ex(wl, hs, 0, s_tab_width), &wcs[hs], he - hs);
+                    mvaddnwstr(offset_y + i, offset_x + eff_ln_offset + wcs_vwidth_ex(wl, hs, 0, s_tab_width), &wcs[hs], he - hs);
                     attroff(A_REVERSE);
                 }
                 else if (hs == 0 && he == 0)
                 {
                     /* Cursor at col 0 or empty line: show reversed space */
                     attron(A_REVERSE);
-                    mvaddch(offset_y + i, offset_x + ln_offset, ' ');
+                    mvaddch(offset_y + i, offset_x + eff_ln_offset, ' ');
                     attroff(A_REVERSE);
                 }
             }
@@ -2441,7 +2523,7 @@ static void draw_body(TeApp *app)
 
             /* Visual overlays (hard-wrap path) */
             line_vw = wl ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0;
-            x_text_end = offset_x + ln_offset + line_vw;
+            x_text_end = offset_x + eff_ln_offset + line_vw;
             x_screen_end = offset_x + width;
 
             /* Highlight current line: empty area only */
@@ -2520,7 +2602,8 @@ static void position_cursor(TeApp *app)
 {
     EdInfo info;
     TeWindow *win = NULL;
-    int body_rows = LINES - 2;
+    int rich_bar_h = app->rich_mode ? 1 : 0;
+    int body_rows = LINES - 2 - rich_bar_h;
     int width = COLS;
     int offset_x = 0;
     int offset_y = 0;
@@ -2567,7 +2650,7 @@ static void position_cursor(TeApp *app)
         vcol = soft_cursor_vcol(te_app_get_editor(app), width);
 
         cy = offset_y + screen_row;
-        cx = offset_x + ln_offset + vcol;
+        cx = offset_x + ln_offset + vcol + soft_cursor_align_indent(te_app_get_editor(app), width);
 
         /* Clamp to body region */
         max_y = offset_y + body_rows - 1;
@@ -2605,6 +2688,11 @@ static void position_cursor(TeApp *app)
             wchar_col = 0;
 
         cx = offset_x + ln_offset + (wl ? wcs_vwidth_ex(wl, wchar_col, 0, s_tab_width) : wchar_col);
+
+        /* Follow paragraph alignment so the cursor sits with the text */
+        cx += line_align_indent(te_app_get_editor(app)->lines[info.row]->para_align,
+                                (wl && line_len > 0) ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0,
+                                width);
 
         if (cy >= LINES - 1)
             cy = LINES - 2;
@@ -2963,6 +3051,41 @@ static int do_save(TeApp *app)
             te_status(app, "Cannot write: %s", te_app_get_filename(app));
             return -1;
         }
+
+        app->rich_mode = 1;
+
+        if (te_app_get_active_tab(app))
+            te_app_get_active_tab(app)->rich_mode = 1;
+    }
+    else if (ui_files_is_wp4(te_app_get_filename(app)))
+    {
+        FILE *fp = fopen(te_app_get_filename(app), "wb");
+        char werr[128];
+        char wwarn[128];
+        int rc = -1;
+
+        werr[0] = '\0';
+        wwarn[0] = '\0';
+
+        if (fp)
+        {
+            rc = wp4_export(te_app_get_editor(app), fp, app->charset_out, werr, sizeof(werr), wwarn, sizeof(wwarn));
+            fclose(fp);
+        }
+
+        if (rc != 0)
+        {
+            te_status(app, "WP error: %s", werr[0] ? werr : "cannot write");
+            return -1;
+        }
+
+        app->rich_mode = 1;
+
+        if (te_app_get_active_tab(app))
+            te_app_get_active_tab(app)->rich_mode = 1;
+
+        if (wwarn[0])
+            te_status(app, "Saved: %s (%s)", te_app_get_filename(app), wwarn);
     }
     else if (ed_save_to_file(te_app_get_editor(app), te_app_get_filename(app), app->charset_out) != 0)
     {
@@ -3245,8 +3368,8 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 
-    /* Ctrl+Alt+R : open recent files */
-    if (is_key && ch == KEY_ALT_CTRL('R'))
+    /* Ctrl+Alt+Y : open recent files */
+    if (is_key && ch == KEY_ALT_CTRL('Y'))
     {
         ui_editor_recent_open(app);
 
@@ -3265,12 +3388,86 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 
-#ifdef HAVE_TTS
-    /* TTS shortcuts: Alt+Shift+L (Amiga) / Ctrl+Alt+L (rest) speak, Ctrl+Alt+P/O/J pause/stop/popup */
+    /* Rich-text: bold/italic/underline/alignment -- only in rich_mode */
+    if (app->rich_mode)
+    {
 #ifdef PLATFORM_AMIGA
-    if (is_key && ch == KEY_SHIFT('L'))
+        if (is_key && ch == KEY_SHIFT('B'))
 #else
-    if (is_key && ch == KEY_ALT_CTRL('L'))
+        if (is_key && ch == KEY_ALT_CTRL('B'))
+#endif
+        {
+            ui_rich_attr_toggle(app, EA_BOLD);
+            return 1;
+        }
+
+#ifdef PLATFORM_AMIGA
+        if (is_key && ch == KEY_SHIFT('I'))
+#else
+        if (is_key && ch == KEY_ALT_CTRL('I'))
+#endif
+        {
+            ui_rich_attr_toggle(app, EA_ITALIC);
+            return 1;
+        }
+
+#ifdef PLATFORM_AMIGA
+        if (is_key && ch == KEY_SHIFT('U'))
+#else
+        if (is_key && ch == KEY_ALT_CTRL('U'))
+#endif
+        {
+            ui_rich_attr_toggle(app, EA_UNDERLINE);
+            return 1;
+        }
+
+#ifdef PLATFORM_AMIGA
+        if (is_key && ch == KEY_SHIFT('L'))
+#else
+        if (is_key && ch == KEY_ALT_CTRL('L'))
+#endif
+        {
+            ui_rich_align_set(app, EA_ALIGN_LEFT);
+            return 1;
+        }
+
+#ifdef PLATFORM_AMIGA
+        if (is_key && ch == KEY_SHIFT('E'))
+#else
+        if (is_key && ch == KEY_ALT_CTRL('E'))
+#endif
+        {
+            ui_rich_align_set(app, EA_ALIGN_CENTER);
+            return 1;
+        }
+
+#ifdef PLATFORM_AMIGA
+        if (is_key && ch == KEY_SHIFT('R'))
+#else
+        if (is_key && ch == KEY_ALT_CTRL('R'))
+#endif
+        {
+            ui_rich_align_set(app, EA_ALIGN_RIGHT);
+            return 1;
+        }
+
+#ifdef PLATFORM_AMIGA
+        if (is_key && ch == KEY_SHIFT('J'))
+#else
+        if (is_key && ch == KEY_ALT_CTRL('J'))
+#endif
+        {
+            ui_rich_align_set(app, EA_ALIGN_JUST);
+            return 1;
+        }
+    }
+
+#ifdef HAVE_TTS
+    /* TTS shortcuts: Alt+Shift+X (Amiga) / Ctrl+Alt+X (rest) speak, Ctrl+Alt+P/O/V pause/stop/popup */
+#ifdef PLATFORM_AMIGA
+    if (is_key && ch == KEY_SHIFT('X'))
+#else
+    if (is_key && ch == KEY_ALT_CTRL('X'))
 #endif
     {
         ui_tts_speak_action(app);
@@ -3309,9 +3506,9 @@ static int handle_function_keys(TeApp *app, int ch, int is_key)
     }
 
 #ifdef PLATFORM_AMIGA
-    if (is_key && ch == KEY_SHIFT('J'))
+    if (is_key && ch == KEY_SHIFT('V'))
 #else
-    if (is_key && ch == KEY_ALT_CTRL('J'))
+    if (is_key && ch == KEY_ALT_CTRL('V'))
 #endif
     {
         ui_tts_popup(app);
@@ -4306,9 +4503,11 @@ static void redraw_editor(TeApp *app)
     standend();
 
     /* Recalculate layout */
-    wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode);
+    wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode, app->rich_mode);
 
     te_draw_titlebar(app);
+
+    te_draw_richbar(app);
 
     ui_tabs_draw_panel(app);
 
@@ -4428,7 +4627,7 @@ void ui_editor_run(TeApp *app)
         if (!win || !win->visible)
         {
             width = COLS;
-            body_rows = LINES - 2;
+            body_rows = LINES - 2 - (app->rich_mode ? 1 : 0);
         }
         else
         {

@@ -242,11 +242,11 @@ static int compute_dirty_row(int r)
             ch = (ULONG)cc->ch;
 
             if (ch == TE_CELL_WIDE_TRAILING ||
-                (ch >= 0x2190 && ch <= 0x21FF) || /* Arrows         */
-                (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block    */
-                (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric      */
-                (ch >= 0x2600 && ch <= 0x26FF) || /* Misc symbols   */
-                (ch >= 0x2700 && ch <= 0x27BF) || /* Dingbats       */
+                (ch >= 0x2190 && ch <= 0x21FF) || /* Arrows */
+                (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block */
+                (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric */
+                (ch >= 0x2600 && ch <= 0x26FF) || /* Misc symbols */
+                (ch >= 0x2700 && ch <= 0x27BF) || /* Dingbats */
                 (ch >= 0x2B00 && ch <= 0x2BFF))   /* Misc symbols 2 */
             {
                 has_wide = 1;
@@ -344,9 +344,9 @@ static int is_block_glyph(uint32_t cp)
 static void draw_block_glyph(uint32_t cp, int x, int y, int cw, int ch_, UBYTE fg)
 {
     /* Standard Amiga area-fill patterns (16-pixel wide, 2-row repeating) */
-    static UWORD pat_25[2] = {0x8888, 0x2222}; /* ░ light shade  */
+    static UWORD pat_25[2] = {0x8888, 0x2222}; /* ░ light shade */
     static UWORD pat_50[2] = {0x5555, 0xAAAA}; /* ▒ medium shade (checker) */
-    static UWORD pat_75[2] = {0x7777, 0xDDDD}; /* ▓ dark shade   */
+    static UWORD pat_75[2] = {0x7777, 0xDDDD}; /* ▓ dark shade */
     UBYTE saved;
 
     int xm = x + cw / 2;  /* horizontal middle */
@@ -668,8 +668,8 @@ static void render_all()
 
                 p = (int)PAIR_NUMBER(cc->attrs);
 
-                /* Compare color pair and A_REVERSE/A_UNDERLINE specifically, ignore other attrs */
-                if (p != run_pair || ((cc->attrs ^ run_attrs) & (A_REVERSE | A_UNDERLINE)))
+                /* Compare color pair and style attrs; different style = new run */
+                if (p != run_pair || ((cc->attrs ^ run_attrs) & (A_REVERSE | A_UNDERLINE | A_BOLD | A_DIM)))
                     break;
 
                 /* TRAILING cell: skip run_buf but advance c for area/RectFill */
@@ -726,24 +726,44 @@ static void render_all()
 
             Move(ami_rp, x, y + fb);
 
+            if (!s_use_ttf)
+            {
+                ULONG soft = 0;
+
+                if (run_attrs & A_BOLD)
+                    soft |= FSF_BOLD;
+
+                if (run_attrs & A_DIM)
+                    soft |= FSF_ITALIC;
+
+                SetSoftStyle(ami_rp, soft, FSF_BOLD | FSF_ITALIC);
+            }
+
             if (s_use_ttf)
             {
                 /* Pre-scan: does this run contain any wide-glyph cells? */
                 int run_has_wide = 0;
+                int u2;
+                ULONG te_style = TE_STY_NORMAL;
+
+                for (u2 = 0; u2 < run_len; u2++)
                 {
-                    int u2;
+                    Cell *cc2 = CELL(stdscr, r, run_start + u2);
 
-                    for (u2 = 0; u2 < run_len; u2++)
+                    if (cc2->ch == TE_CELL_WIDE_TRAILING)
                     {
-                        Cell *cc2 = CELL(stdscr, r, run_start + u2);
-
-                        if (cc2->ch == TE_CELL_WIDE_TRAILING)
-                        {
-                            run_has_wide = 1;
-                            break;
-                        }
+                        run_has_wide = 1;
+                        break;
                     }
                 }
+
+                if (run_attrs & A_BOLD)
+                    te_style |= TE_STY_BOLD;
+
+                if (run_attrs & A_DIM)
+                    te_style |= TE_STY_ITALIC;
+
+                TE_SetStyle(ami_te_dc, te_style);
 
                 /* Per-cell render needed for proportional, ANSI mode, or wide glyphs */
                 if (s_ttf_proportional || s_ansi_mode || run_has_wide)
@@ -826,6 +846,11 @@ static void render_all()
             {
                 Text(ami_rp, (STRPTR)run_buf, run_len);
             }
+
+            if (s_use_ttf)
+                TE_SetStyle(ami_te_dc, TE_STY_NORMAL);
+            else
+                SetSoftStyle(ami_rp, 0, FSF_BOLD | FSF_ITALIC);
 
             /* Draw underline for the run if requested */
             if (run_attrs & A_UNDERLINE)

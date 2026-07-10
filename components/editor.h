@@ -167,6 +167,9 @@ struct Ed
     /* Reusable decode buffer for wrap counting */
     wchar_t *wrap_scratch;
     int wrap_scratch_cap;
+
+    /* Input attribute mask applied to newly inserted characters */
+    unsigned short input_mask;
 };
 
 #define INIT_ALLOC 1024

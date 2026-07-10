@@ -43,6 +43,7 @@ extern int amiga_add_ttf_fallback(const char *path, int size);
 #include "ui/te.h"
 #include "ui/ui_files.h"
 #include "components/fmt_rtf.h"
+#include "components/fmt_wp4.h"
 #include "ui/ui_editor_helper.h"
 #include "core/charset.h"
 #include "components/config.h"
@@ -520,6 +521,38 @@ int main(int argc, char **argv)
                             te_status(app, "RTF error: %s", rerr);
                         else if (rwarn[0])
                             te_status(app, "Loaded: %s (%s)", argv[1], rwarn);
+                    }
+                    else
+                    {
+                        te_status(app, "Cannot read: %s", argv[1]);
+                    }
+                }
+                else if (ui_files_is_wp4(argv[1]))
+                {
+                    FILE *fp = fopen(argv[1], "rb");
+                    char werr[128];
+                    char wwarn[128];
+                    int rc;
+
+                    if (fp)
+                    {
+                        ed_clear_undo_redo(tab->editor);
+
+                        rc = wp4_import(tab->editor, fp, app->charset_in, werr, sizeof(werr), wwarn, sizeof(wwarn));
+                        fclose(fp);
+
+                        if (rc != 0)
+                            te_status(app, "WP error: %s", werr);
+                        else
+                        {
+                            app->rich_mode = 1;
+
+                            if (te_app_get_active_tab(app))
+                                te_app_get_active_tab(app)->rich_mode = 1;
+                        }
+
+                        if (rc == 0 && wwarn[0])
+                            te_status(app, "Loaded: %s (%s)", argv[1], wwarn);
                     }
                     else
                     {

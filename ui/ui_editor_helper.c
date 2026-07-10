@@ -21,6 +21,7 @@
 #include "../core/portable.h"
 #include "ui_editor_helper.h"
 #include "../components/editor.h"
+#include "../components/ed_attr.h"
 #include "te.h"
 #include "ui_files.h"
 #include "ui_spell.h"
@@ -155,6 +156,67 @@ int wcs_vwidth(const wchar_t *s, int n)
         v += CHAR_VWIDTH(s[i]);
 
     return v;
+}
+
+/* Repaint bold/underline runs over an already-drawn segment [seg_start, seg_end) */
+void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int seg_start, int seg_end, int seg_start_vcol, int tab_width)
+{
+    const EdAttrRun *runs = NULL;
+    int n_runs;
+    int r;
+
+    if (!l || !ln || seg_end <= seg_start)
+        return;
+
+    n_runs = ed_attr_runs(ln, &runs);
+
+    if (n_runs <= 0 || !runs)
+        return;
+
+    for (r = 0; r < n_runs; r++)
+    {
+        int ri_start;
+        int ri_end;
+        int c;
+        int ncattr;
+
+        if (runs[r].end <= seg_start || runs[r].start >= seg_end || runs[r].mask == 0)
+            continue;
+
+        ri_start = runs[r].start < seg_start ? seg_start : runs[r].start;
+        ri_end = runs[r].end > seg_end ? seg_end : runs[r].end;
+
+        if (ri_start >= ri_end)
+            continue;
+
+        ncattr = COLOR_PAIR(COL_NORMAL);
+
+        if (runs[r].mask & EA_BOLD)
+            ncattr |= A_BOLD;
+
+        if (runs[r].mask & EA_ITALIC)
+            ncattr |= A_DIM;
+
+        if (runs[r].mask & EA_UNDERLINE)
+            ncattr |= A_UNDERLINE;
+
+        /* Paint each cell at its own visual column: variable-width glyphs and tabs would otherwise desync the run from the base layer */
+        attron(ncattr);
+
+        for (c = ri_start; c < ri_end; c++)
+        {
+            int col_x;
+
+            if (l[c] == L'\t')
+                continue;
+
+            col_x = x + wcs_vwidth_ex(l + seg_start, c - seg_start, seg_start_vcol, tab_width);
+            mvaddnwstr(y, col_x, l + c, 1);
+        }
+
+        attroff(ncattr);
+        attron(COLOR_PAIR(COL_NORMAL));
+    }
 }
 
 /* Draw wide string with tab expansion */
@@ -1253,21 +1315,29 @@ int charset_select(TeApp *app)
         /* If view charset changed and we have a file, reload from disk */
         if (view_changed && te_app_get_filename(app)[0])
         {
-            FILE *fp = NULL;
+            const char *fname = te_app_get_filename(app);
 
-            fp = fopen(te_app_get_filename(app), "rb");
-
-            if (fp)
+            /* Rich formats must reload through their importer, not as text */
+            if (ui_files_is_rtf(fname) || ui_files_is_wp4(fname))
             {
-                const char *cs = new_view;
+                ui_files_open_path(app, fname);
+            }
+            else
+            {
+                FILE *fp = fopen(fname, "rb");
 
-                /* An empty or UTF-8 view means the file is read as UTF-8 */
-                if (!cs[0] || strcasecmp(cs, "UTF-8") == 0 || strcasecmp(cs, "UTF8") == 0)
-                    cs = NULL;
+                if (fp)
+                {
+                    const char *cs = new_view;
 
-                ed_clear_undo_redo(te_app_get_editor(app));
-                ed_load_stream_charset(te_app_get_editor(app), fp, cs);
-                fclose(fp);
+                    /* An empty or UTF-8 view means the file is read as UTF-8 */
+                    if (!cs[0] || strcasecmp(cs, "UTF-8") == 0 || strcasecmp(cs, "UTF8") == 0)
+                        cs = NULL;
+
+                    ed_clear_undo_redo(te_app_get_editor(app));
+                    ed_load_stream_charset(te_app_get_editor(app), fp, cs);
+                    fclose(fp);
+                }
             }
         }
 
@@ -1924,4 +1994,108 @@ void ui_editor_session_restore(TeApp *app)
 
     if (opened > 0)
         te_app_switch_tab(app, active_idx);
+}
+
+/* Toggle an inline attribute (EA_BOLD/EA_ITALIC/EA_UNDERLINE) over the selection or input style */
+int ui_rich_attr_toggle(TeApp *app, unsigned short bit)
+{
+    Ed *ed = te_app_get_editor(app);
+    EdInfo info;
+    int r1, c1, r2, c2;
+    int row;
+    int all_set;
+
+    if (!ed)
+        return 0;
+
+    ed_get_info(ed, &info);
+
+    if (!info.block.active)
+    {
+        /* No selection: toggle the input style used for future typing */
+        ed->input_mask ^= bit;
+        return 1;
+    }
+
+    if (info.block.anchor_row < info.row || (info.block.anchor_row == info.row && info.block.anchor_col <= info.col))
+    {
+        r1 = info.block.anchor_row;
+        c1 = info.block.anchor_col;
+        r2 = info.row;
+        c2 = info.col;
+    }
+    else
+    {
+        r1 = info.row;
+        c1 = info.col;
+        r2 = info.block.anchor_row;
+        c2 = info.block.anchor_col;
+    }
+
+    /* Check if bit is set on every character in range. if yes, clear it */
+    all_set = 1;
+
+    for (row = r1; row <= r2 && all_set; row++)
+    {
+        int start = (row == r1) ? c1 : 0;
+        int end = (row == r2) ? c2 : ed->lines[row]->len;
+        int col;
+
+        for (col = start; col < end && all_set; col++)
+        {
+            unsigned short m = ed_attr_mask_at(ed->lines[row], col, NULL, NULL);
+
+            if (!(m & bit))
+                all_set = 0;
+        }
+    }
+
+    if (all_set)
+    {
+        ed_attr_apply_range(ed, r1, c1, r2, c2, 0, bit, -1, 0);
+        ed->input_mask &= (unsigned short)~bit;
+    }
+    else
+    {
+        ed_attr_apply_range(ed, r1, c1, r2, c2, bit, 0, -1, 0);
+        ed->input_mask |= bit;
+    }
+
+    return 1;
+}
+
+/* Set paragraph alignment on the current line or all lines in selection */
+int ui_rich_align_set(TeApp *app, unsigned char align)
+{
+    Ed *ed = te_app_get_editor(app);
+    EdInfo info;
+    int r1, r2, row;
+
+    if (!ed)
+        return 0;
+
+    ed_get_info(ed, &info);
+
+    if (info.block.active)
+    {
+        if (info.block.anchor_row < info.row)
+        {
+            r1 = info.block.anchor_row;
+            r2 = info.row;
+        }
+        else
+        {
+            r1 = info.row;
+            r2 = info.block.anchor_row;
+        }
+    }
+    else
+    {
+        r1 = r2 = info.row;
+    }
+
+    for (row = r1; row <= r2 && row < ed->count; row++)
+        ed->lines[row]->para_align = align;
+
+    return 1;
 }
