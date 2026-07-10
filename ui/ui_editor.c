@@ -214,6 +214,9 @@ static int s_soft_desired_vcol = -1;
 static int s_soft_last_width = -1;
 static int s_tab_width = 4; /* visual tab stop width, copied from config */
 
+/* Alignment indent of the sub-row the cursor sits in (soft-wrap) */
+static int line_align_indent(unsigned char align, int text_vw, int avail);
+
 /* Insert a full Unicode codepoint; on Win32 wchar_t is 16-bit, so split into a surrogate pair */
 static void editor_insert_cp(Ed *ed, unsigned long cp)
 {
@@ -536,9 +539,6 @@ static int soft_cursor_vcol(Ed *ed, int width)
     /* start_col must be 0 for soft-wrap sub-row consistency */
     return wcs_vwidth_ex(&l[seg_start], n, 0, s_tab_width);
 }
-
-/* Alignment indent of the sub-row the cursor sits in (soft-wrap) */
-static int line_align_indent(unsigned char align, int text_vw, int avail);
 
 static int soft_cursor_align_indent(Ed *ed, int width)
 {
@@ -1609,6 +1609,10 @@ static int line_align_indent(unsigned char align, int text_vw, int avail)
 {
     int slack = avail - text_vw;
 
+    /* Empty lines stay flush left to keep cursor/selection at margin */
+    if (text_vw <= 0)
+        return 0;
+
     if (slack <= 0)
         return 0;
 
@@ -1887,6 +1891,19 @@ static void draw_body(TeApp *app)
                         attron(COLOR_PAIR(COL_NORMAL));
                     }
 
+                    /* Current-line highlight across the empty row */
+                    if (app->cfg.highlight_line && li == info.row)
+                    {
+                        int x;
+
+                        attron(COLOR_PAIR(COL_CURRENT_LINE));
+
+                        for (x = offset_x + ln_offset; x < offset_x + ln_offset + width; x++)
+                            mvaddch(offset_y + sr, x, ' ');
+
+                        attroff(COLOR_PAIR(COL_CURRENT_LINE));
+                    }
+
                     /* Block-selection overlay for empty line */
                     if (b_r1 >= 0 && li >= b_r1 && li <= b_r2)
                     {
@@ -2162,16 +2179,20 @@ static void draw_body(TeApp *app)
 
                     /* Visual overlays using colour-pairs */
                     text_vw = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width);
-                    x_text_end = offset_x + ln_offset + text_vw;
+                    x_text_end = offset_x + eff_ln_offset + text_vw;
                     x_screen_end = offset_x + ln_offset + width;
                     has_more_subrows = (seg_end < len);
 
-                    /* Highlight current line background */
-                    if (app->cfg.highlight_line && li == info.row && x_text_end < x_screen_end)
+                    /* Highlight current line: full-width bar under text */
+                    if (app->cfg.highlight_line && li == info.row)
                     {
                         int x;
+                        int x_text_start = offset_x + eff_ln_offset;
 
                         attron(COLOR_PAIR(COL_CURRENT_LINE));
+
+                        for (x = offset_x + ln_offset; x < x_text_start; x++)
+                            mvaddch(offset_y + sr, x, ' ');
 
                         for (x = x_text_end; x < x_screen_end; x++)
                             mvaddch(offset_y + sr, x, ' ');
@@ -2526,12 +2547,16 @@ static void draw_body(TeApp *app)
             x_text_end = offset_x + eff_ln_offset + line_vw;
             x_screen_end = offset_x + width;
 
-            /* Highlight current line: empty area only */
-            if (app->cfg.highlight_line && line_idx == info.row && x_text_end < x_screen_end)
+            /* Highlight current line: full-width bar */
+            if (app->cfg.highlight_line && line_idx == info.row)
             {
                 int x;
+                int x_text_start = offset_x + eff_ln_offset;
 
                 attron(COLOR_PAIR(COL_CURRENT_LINE));
+
+                for (x = offset_x + ln_offset; x < x_text_start; x++)
+                    mvaddch(offset_y + i, x, ' ');
 
                 for (x = x_text_end; x < x_screen_end; x++)
                     mvaddch(offset_y + i, x, ' ');
@@ -2690,9 +2715,7 @@ static void position_cursor(TeApp *app)
         cx = offset_x + ln_offset + (wl ? wcs_vwidth_ex(wl, wchar_col, 0, s_tab_width) : wchar_col);
 
         /* Follow paragraph alignment so the cursor sits with the text */
-        cx += line_align_indent(te_app_get_editor(app)->lines[info.row]->para_align,
-                                (wl && line_len > 0) ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0,
-                                width);
+        cx += line_align_indent(te_app_get_editor(app)->lines[info.row]->para_align, (wl && line_len > 0) ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0, width);
 
         if (cy >= LINES - 1)
             cy = LINES - 2;
