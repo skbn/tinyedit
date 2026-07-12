@@ -633,6 +633,7 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
     int j;
     int acc_w;
     int cw;
+    int align_ind;
 
     if (!app || !out_line || !out_col)
         return -1;
@@ -687,6 +688,14 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
         l = ed_line_wcs(ed, line);
         len = ed_line_len(ed, line);
 
+        /* Paragraph alignment shifts the text right; subtract the indent before measuring */
+        align_ind = line_align_indent(ed->lines[line]->para_align, (l && len > 0) ? wcs_vwidth_ex(l, len, 0, s_tab_width) : 0, width);
+
+        screen_x -= align_ind;
+
+        if (screen_x < 0)
+            screen_x = 0;
+
         acc_w = 0;
 
         for (j = 0; j < len; j++)
@@ -722,6 +731,14 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
             int acc_w = 0;
 
             line_subrow_range(l ? l : L"", l ? ll : 0, width, target_sub, &seg_start, &seg_end);
+
+            /* Paragraph alignment shifts the sub-row text right; subtract the indent before measuring */
+            align_ind = line_align_indent(ed->lines[line]->para_align, (l && seg_end > seg_start) ? wcs_vwidth_ex(&l[seg_start], seg_end - seg_start, 0, s_tab_width) : 0, width);
+
+            screen_x -= align_ind;
+
+            if (screen_x < 0)
+                screen_x = 0;
 
             /* Walk char by char, summing visual width until we exceed screen_x */
             for (j = seg_start; j < seg_end; j++)
@@ -1276,6 +1293,31 @@ int editor_eff_wrap(TeApp *app)
     return cfgw;
 }
 
+/* Text width for soft-wrap and alignment. In rich mode, clamp to wrap_col */
+int editor_text_width(TeApp *app, int body_width)
+{
+    int cfgw;
+    int limit;
+
+    if (!app->rich_mode || body_width <= 0)
+        return body_width;
+
+    cfgw = app->wrap_col;
+
+    if (cfgw <= 0)
+        return body_width;
+
+    limit = body_width - 1;
+
+    if (limit < 1)
+        limit = 1;
+
+    if (cfgw > limit)
+        return limit;
+
+    return cfgw;
+}
+
 /* Hyphenation callback bridge for ed_rewrap_paragraph_ex() user_data is TeApp* */
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
 static int hwrap_hyph_cb(void *user_data, const wchar_t *word, int word_wlen, int col_limit)
@@ -1635,6 +1677,7 @@ static void draw_body(TeApp *app)
     int body_bot = LINES - 2;
     int body_rows;
     int width = COLS;
+    int body_width = COLS;
     int offset_x = 0;
     int offset_y = 0;
     int soft = !app->hard_wrap;
@@ -1667,6 +1710,7 @@ static void draw_body(TeApp *app)
         body_top = win->y;
         body_bot = win->y + win->h - 1;
         width = win->w;
+        body_width = win->w;
         offset_x = win->x;
         offset_y = win->y;
     }
@@ -1822,6 +1866,11 @@ static void draw_body(TeApp *app)
         ln_offset = editor_body_offset(app, info.line_count);
         width = win->w - ln_offset; /* reduce width for text */
     }
+
+    body_width = width;
+
+    /* In rich mode, wrap and align to the configured page width */
+    width = editor_text_width(app, width);
 
     /* Normalize block range */
     if (info.block.active)
@@ -2205,7 +2254,7 @@ static void draw_body(TeApp *app)
                     {
                         int rx = offset_x + ln_offset + app->cfg.ruler_col;
 
-                        if (rx > x_text_end && rx < x_screen_end)
+                        if (rx >= x_text_end && rx < offset_x + ln_offset + body_width)
                         {
                             attron(COLOR_PAIR(COL_GUIDE));
                             mvaddch(offset_y + sr, rx, '|');
@@ -2269,7 +2318,7 @@ static void draw_body(TeApp *app)
                             {
                                 int gx = offset_x + ln_offset + g - 1;
 
-                                if (gx >= offset_x + ln_offset && gx < offset_x + width)
+                                if (gx >= offset_x + ln_offset && gx < offset_x + ln_offset + width)
                                     mvaddch(offset_y + sr, gx, '|');
                             }
 
@@ -2545,7 +2594,7 @@ static void draw_body(TeApp *app)
             /* Visual overlays (hard-wrap path) */
             line_vw = wl ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0;
             x_text_end = offset_x + eff_ln_offset + line_vw;
-            x_screen_end = offset_x + width;
+            x_screen_end = offset_x + ln_offset + width;
 
             /* Highlight current line: full-width bar */
             if (app->cfg.highlight_line && line_idx == info.row)
@@ -2569,7 +2618,7 @@ static void draw_body(TeApp *app)
             {
                 int rx = offset_x + ln_offset + app->cfg.ruler_col;
 
-                if (rx > x_text_end && rx < x_screen_end)
+                if (rx >= x_text_end && rx < offset_x + ln_offset + body_width)
                 {
                     attron(COLOR_PAIR(COL_GUIDE));
                     mvaddch(offset_y + i, rx, '|');
@@ -2600,7 +2649,7 @@ static void draw_body(TeApp *app)
                     {
                         int gx = offset_x + ln_offset + g - 1;
 
-                        if (gx >= offset_x + ln_offset && gx < offset_x + width)
+                        if (gx >= offset_x + ln_offset && gx < offset_x + ln_offset + width)
                             mvaddch(offset_y + i, gx, '|');
                     }
 
@@ -2663,6 +2712,9 @@ static void position_cursor(TeApp *app)
         ln_offset = editor_body_offset(app, info.line_count);
         width = width - ln_offset;
     }
+
+    /* In rich mode, wrap and align to the configured page width */
+    width = editor_text_width(app, width);
 
     if (soft)
     {
@@ -4687,6 +4739,9 @@ void ui_editor_run(TeApp *app)
             else
                 width = COLS - editor_body_offset(app, info.line_count);
         }
+
+        /* In rich mode, wrap and align to the configured page width */
+        width = editor_text_width(app, width);
 
         if (body_rows < 1)
             body_rows = 1;

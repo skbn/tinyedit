@@ -194,8 +194,14 @@ void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int
         if (runs[r].mask & EA_BOLD)
             ncattr |= A_BOLD;
 
+        /* Unix ncursesw has a true italic attribute. The Amiga and Win32 wrappers map A_DIM to the renderer's italic style instead */
+#ifdef A_ITALIC
+        if (runs[r].mask & EA_ITALIC)
+            ncattr |= A_ITALIC;
+#else
         if (runs[r].mask & EA_ITALIC)
             ncattr |= A_DIM;
+#endif
 
         if (runs[r].mask & EA_UNDERLINE)
             ncattr |= A_UNDERLINE;
@@ -930,57 +936,93 @@ int toggle_spell_panel(TeApp *app)
 /* Control key implementations */
 int paste(TeApp *app)
 {
-    /* On Amiga/Windows, always use external clipboard. On Unix, use external only if not in SSH session */
+    Ed *ed = te_app_get_editor(app);
+    char *clip = NULL;
+    char *own = NULL;
+    int use_rich = 0;
+
+    /* On Amiga/Windows the external clipboard is always consulted. On Unix only outside SSH sessions */
     if (clipboard_use_external())
+        clip = clipboard_paste();
+
+    /* Prefer rich internal buffer when external text is empty or self-owned */
+    if (ed && ed->killbuf_lines && ed->killbuf_line_count > 0)
     {
-        char *clip = clipboard_paste();
-
-        if (clip && clip[0])
+        if (!clip || !clip[0])
         {
-            char *wrapped = NULL;
-            const char *to_insert = clip;
+            use_rich = 1;
+        }
+        else
+        {
+            own = ed_killbuf_get_utf8(ed);
 
-            /* Pre-wrap pasted text in hard-wrap mode; soft-wrap inserts verbatim */
-            if (app->hard_wrap)
-            {
-                int pw = editor_eff_wrap(app);
+            if (own && strcmp(own, clip) == 0)
+                use_rich = 1;
+        }
+    }
 
-                if (pw > 0)
-                {
-                    wrapped = wrap_paste_text(app, clip, pw);
+    if (use_rich)
+    {
+        ed_auto_rewrap_capture_pre_snapshot(ed);
 
-                    if (wrapped)
-                        to_insert = wrapped;
-                }
-            }
-
-            ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
-            ed_paste_text_with_undo(te_app_get_editor(app), to_insert);
-
+        if (ed_block_paste(ed) == 0)
+        {
             clear_search_highlights(app);
             soft_reset_desired();
 
             s_soft_vtop = 0;
-            te_status(app, "Pasted from clipboard");
+            te_status(app, "Pasted");
 
             ed_auto_rewrap_after_edit(app);
-            ed_ensure_visible(te_app_get_editor(app));
-
-            free(wrapped);
-            free(clip);
+            ed_ensure_visible(ed);
         }
         else
         {
-            te_status(app, "Clipboard: empty or no backend (install xclip/wl-clipboard, or check clipboard.device)");
-            free(clip);
+            free(ed->auto_rewrap_pre_snapshot);
+
+            ed->auto_rewrap_pre_snapshot = NULL;
+            te_status(app, "Paste failed");
         }
     }
-    else
+    else if (clip && clip[0])
     {
-        /* SSH/headless: use internal block only */
-        ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
+        char *wrapped = NULL;
+        const char *to_insert = clip;
 
-        if (ed_block_paste(te_app_get_editor(app)) == 0)
+        /* Pre-wrap pasted text in hard-wrap mode; soft-wrap inserts verbatim */
+        if (app->hard_wrap)
+        {
+            int pw = editor_eff_wrap(app);
+
+            if (pw > 0)
+            {
+                wrapped = wrap_paste_text(app, clip, pw);
+
+                if (wrapped)
+                    to_insert = wrapped;
+            }
+        }
+
+        ed_auto_rewrap_capture_pre_snapshot(ed);
+        ed_paste_text_with_undo(ed, to_insert);
+
+        clear_search_highlights(app);
+        soft_reset_desired();
+
+        s_soft_vtop = 0;
+        te_status(app, "Pasted from clipboard");
+
+        ed_auto_rewrap_after_edit(app);
+        ed_ensure_visible(ed);
+
+        free(wrapped);
+    }
+    else if (ed && ed->killbuf && ed->killlen > 0)
+    {
+        /* Plain internal fallback (no rich lines, external empty/failed) */
+        ed_auto_rewrap_capture_pre_snapshot(ed);
+
+        if (ed_block_paste(ed) == 0)
         {
             clear_search_highlights(app);
             soft_reset_desired();
@@ -989,18 +1031,23 @@ int paste(TeApp *app)
             te_status(app, "Pasted (internal block)");
 
             ed_auto_rewrap_after_edit(app);
-            ed_ensure_visible(te_app_get_editor(app));
+            ed_ensure_visible(ed);
         }
         else
         {
-            Ed *ed = te_app_get_editor(app);
-
             free(ed->auto_rewrap_pre_snapshot);
 
             ed->auto_rewrap_pre_snapshot = NULL;
-            te_status(app, "No internal block to paste (external clipboard unavailable in SSH)");
+            te_status(app, "Nothing to paste");
         }
     }
+    else
+    {
+        te_status(app, "Clipboard: empty or no backend (install xclip/wl-clipboard, or check clipboard.device)");
+    }
+
+    free(own);
+    free(clip);
 
     return 1;
 }
@@ -1051,23 +1098,13 @@ int copy(TeApp *app)
 
         if (ed_block_copy(ed) == 0)
         {
-            /* Copy to external clipboard if available */
+            /* Try external clipboard; keep internal rich buffer as fallback */
             if (clipboard_use_external() && utf8)
             {
                 if (clipboard_copy(utf8) == 0)
-                {
                     te_status(app, "Block copied to clipboard");
-                }
                 else
-                {
-                    /* External clipboard failed: free internal killbuf so the large block does not sit unused in memory until exit */
-                    free(ed->killbuf);
-
-                    ed->killbuf = NULL;
-                    ed->killlen = 0;
-
-                    te_status(app, "Clipboard copy failed; internal block freed");
-                }
+                    te_status(app, "Block copied (internal; external clipboard failed)");
             }
             else
             {
@@ -2004,6 +2041,14 @@ int ui_rich_attr_toggle(TeApp *app, unsigned short bit)
     int r1, c1, r2, c2;
     int row;
     int all_set;
+    char *snapshot_before = NULL;
+    char *snapshot_after = NULL;
+    EdLine **before_lines = NULL;
+    EdLine **after_lines = NULL;
+    int before_count = 0;
+    int after_count = 0;
+    int nrows = 0;
+    int undo_ok = 0;
 
     if (!ed)
         return 0;
@@ -2050,6 +2095,15 @@ int ui_rich_attr_toggle(TeApp *app, unsigned short bit)
         }
     }
 
+    /* Snapshot the affected lines so the style change is undoable */
+
+    nrows = r2 - r1 + 1;
+    snapshot_before = ed_range_to_string(ed, r1, r1 + nrows);
+    before_lines = ed_clone_line_range(ed, r1, r1 + nrows, &before_count);
+
+    if (snapshot_before && before_lines && ed_undo_open_group(ed) == 0)
+        undo_ok = 1;
+
     if (all_set)
     {
         ed_attr_apply_range(ed, r1, c1, r2, c2, 0, bit, -1, 0);
@@ -2061,6 +2115,31 @@ int ui_rich_attr_toggle(TeApp *app, unsigned short bit)
         ed->input_mask |= bit;
     }
 
+    if (undo_ok)
+    {
+        snapshot_after = ed_range_to_string(ed, r1, r1 + nrows);
+        after_lines = ed_clone_line_range(ed, r1, r1 + nrows, &after_count);
+
+        ed->undo_open = 0;
+
+        if (snapshot_after && after_lines)
+        {
+            /* Same line count before and after: pure style change */
+            undo_push_snapshot_range(ed, r1, 0, snapshot_before, snapshot_after, before_lines, before_count, after_lines, after_count, nrows, nrows, info.row, info.col, info.row, info.col);
+        }
+        else
+        {
+            ed_free_snapshot(snapshot_before, before_lines, before_count);
+            ed_free_snapshot(snapshot_after, after_lines, after_count);
+        }
+    }
+    else
+    {
+        ed_free_snapshot(snapshot_before, before_lines, before_count);
+    }
+
+    ed_set_modified(ed, 1);
+
     return 1;
 }
 
@@ -2070,6 +2149,15 @@ int ui_rich_align_set(TeApp *app, unsigned char align)
     Ed *ed = te_app_get_editor(app);
     EdInfo info;
     int r1, r2, row;
+    char *snapshot_before = NULL;
+    char *snapshot_after = NULL;
+    EdLine **before_lines = NULL;
+    EdLine **after_lines = NULL;
+    int before_count = 0;
+    int after_count = 0;
+    int nrows;
+    int undo_ok = 0;
+    int changed = 0;
 
     if (!ed)
         return 0;
@@ -2094,8 +2182,54 @@ int ui_rich_align_set(TeApp *app, unsigned char align)
         r1 = r2 = info.row;
     }
 
+    /* Snapshot the affected lines so the alignment change is undoable */
+
+    if (r2 >= ed->count)
+        r2 = ed->count - 1;
+
+    nrows = r2 - r1 + 1;
+
+    for (row = r1; row <= r2; row++)
+    {
+        if (ed->lines[row]->para_align != align)
+            changed = 1;
+    }
+
+    if (!changed)
+        return 1;
+
+    snapshot_before = ed_range_to_string(ed, r1, r1 + nrows);
+    before_lines = ed_clone_line_range(ed, r1, r1 + nrows, &before_count);
+
+    if (snapshot_before && before_lines && ed_undo_open_group(ed) == 0)
+        undo_ok = 1;
+
     for (row = r1; row <= r2 && row < ed->count; row++)
         ed->lines[row]->para_align = align;
+
+    if (undo_ok)
+    {
+        snapshot_after = ed_range_to_string(ed, r1, r1 + nrows);
+        after_lines = ed_clone_line_range(ed, r1, r1 + nrows, &after_count);
+
+        ed->undo_open = 0;
+
+        if (snapshot_after && after_lines)
+        {
+            undo_push_snapshot_range(ed, r1, 0, snapshot_before, snapshot_after, before_lines, before_count, after_lines, after_count, nrows, nrows, info.row, info.col, info.row, info.col);
+        }
+        else
+        {
+            ed_free_snapshot(snapshot_before, before_lines, before_count);
+            ed_free_snapshot(snapshot_after, after_lines, after_count);
+        }
+    }
+    else
+    {
+        ed_free_snapshot(snapshot_before, before_lines, before_count);
+    }
+
+    ed_set_modified(ed, 1);
 
     return 1;
 }

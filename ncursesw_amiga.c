@@ -1427,6 +1427,20 @@ int endwin()
 
     ami_font = NULL;
 
+    /* Release the render shadow buffer */
+    if (s_shadow)
+    {
+        free(s_shadow);
+
+        s_shadow = NULL;
+        s_shadow_w = 0;
+        s_shadow_h = 0;
+        s_shadow_dirty = 1;
+    }
+
+    /* Close cybergraphics.library if the TTF renderer opened it. Without this the library open count leaks on every run */
+    TE_GlobalCleanup();
+
     return OK;
 }
 
@@ -1694,6 +1708,7 @@ int move(int y, int x) { return wmove(stdscr, y, x); }
 int curs_set(int v)
 {
     int old = s_cursor_vis;
+
     s_cursor_vis = v;
     return old;
 }
@@ -1958,7 +1973,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
     for (i = 0; i < n && ws[i]; i++)
     {
         chtype ch;
-        Cell *cell;
+        Cell *cell = NULL;
         int cw;
 
         if (s_use_ttf)
@@ -1966,8 +1981,7 @@ int waddnwstr(WINDOW *w, const wchar_t *ws, int n)
         else
             ch = (ws[i] <= 0xFF) ? (chtype)ws[i] : (chtype)'?';
 
-        if (w->_cury < 0 || w->_cury >= w->_maxy ||
-            w->_curx < 0 || w->_curx >= w->_maxx)
+        if (w->_cury < 0 || w->_cury >= w->_maxy || w->_curx < 0 || w->_curx >= w->_maxx)
             continue;
 
         /* Tab expansion: skip when ANSI mode is active (preserves CP437 art) */
@@ -2131,7 +2145,6 @@ int mvwaddnwstr(WINDOW *w, int y, int x, const wchar_t *ws, int n)
 int mvwchgat(WINDOW *w, int y, int x, int n, attr_t attr, short color, const void *opts)
 {
     int i;
-    (void)opts;
 
     if (!w || y < 0 || y >= w->_maxy || x < 0 || x >= w->_maxx)
         return ERR;
@@ -2161,7 +2174,9 @@ int mvchgat(int y, int x, int n, attr_t attr, short color, const void *opts)
 int vw_printw(WINDOW *w, const char *fmt, va_list ap)
 {
     char buf[2048]; /* Increased from 512 to reduce truncation of long lines */
+
     vsnprintf(buf, sizeof(buf), fmt, ap);
+
     return waddstr(w, buf);
 }
 
@@ -2989,6 +3004,10 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
 int wgetch(WINDOW *w)
 {
     struct IntuiMessage *imsg = NULL;
+    WORD msg_mx = 0;
+    WORD msg_my = 0;
+    ULONG msg_secs = 0;
+    ULONG msg_micros = 0;
     ULONG cls;
     UWORD code, qual;
     APTR iaddr;
@@ -3042,6 +3061,12 @@ int wgetch(WINDOW *w)
         code = imsg->Code;
         qual = imsg->Qualifier;
         iaddr = imsg->IAddress;
+
+        /* Copy everything we need NOW: after ReplyMsg() the message belongs to Intuition again and reading it is a use-after-free */
+        msg_mx = imsg->MouseX;
+        msg_my = imsg->MouseY;
+        msg_secs = imsg->Seconds;
+        msg_micros = imsg->Micros;
 
         /* Translate raw key before ReplyMsg for dead-key data */
         if (cls == IDCMP_RAWKEY)
@@ -3116,8 +3141,8 @@ int wgetch(WINDOW *w)
         }
         case IDCMP_MOUSEBUTTONS:
         {
-            int mouse_x = (imsg->MouseX - ami_win->BorderLeft) / fw;
-            int mouse_y = (imsg->MouseY - ami_win->BorderTop) / fh;
+            int mouse_x = (msg_mx - ami_win->BorderLeft) / fw;
+            int mouse_y = (msg_my - ami_win->BorderTop) / fh;
 
             if (code == SELECTDOWN)
             {
@@ -3132,7 +3157,7 @@ int wgetch(WINDOW *w)
                 }
                 else
                 {
-                    ui_mouse_set_event_time_ms((unsigned long)imsg->Seconds * 1000UL + (unsigned long)imsg->Micros / 1000UL);
+                    ui_mouse_set_event_time_ms((unsigned long)msg_secs * 1000UL + (unsigned long)msg_micros / 1000UL);
                 }
 
                 s_mouse_event = pack_mouse(UI_MOUSE_PRESS_LEFT, mouse_x, mouse_y);
@@ -3157,8 +3182,8 @@ int wgetch(WINDOW *w)
         {
             if (s_left_button_held)
             {
-                int mouse_x = (imsg->MouseX - ami_win->BorderLeft) / fw;
-                int mouse_y = (imsg->MouseY - ami_win->BorderTop) / fh;
+                int mouse_x = (msg_mx - ami_win->BorderLeft) / fw;
+                int mouse_y = (msg_my - ami_win->BorderTop) / fh;
 
                 s_mouse_event = pack_mouse(UI_MOUSE_DRAG_LEFT, mouse_x, mouse_y);
 

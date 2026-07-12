@@ -90,6 +90,13 @@ typedef struct
     char *utf8_snapshot_new; /* Owned; used by OP_SNAPSHOT_RANGE for redo */
     int hard_wrap_mode;      /* Used by OP_SNAPSHOT: 0=soft-wrap, 1=hard-wrap */
     int end_row, end_col;    /* For OP_PASTE: block coordinates end position after paste */
+    EdLine **snapshot_lines; /* Owned; used by OP_PASTE/OP_SNAPSHOT_RANGE old state: deep line copies */
+    int snapshot_line_count;
+    EdLine **snapshot_lines_new; /* Owned; used by OP_SNAPSHOT_RANGE new state: deep line copies */
+    int snapshot_line_count_new;
+    unsigned short *attr_masks; /* Owned; used by OP_INSERT/OP_DELETE: per-char attribute masks */
+    int attr_mask_count;
+    unsigned char para_align; /* Used by OP_DELETE/OP_SNAPSHOT_RANGE: alignment of line/range */
 } UndoOp;
 
 /* Group of ops treated as one undo/redo step */
@@ -115,6 +122,8 @@ struct Ed
     EdBlock block;
     wchar_t *killbuf; /* Malloc'd wchar_t copy */
     int killlen;
+    EdLine **killbuf_lines; /* Rich internal clipboard: copied EdLine objects */
+    int killbuf_line_count;
 
     /* Undo stack of groups */
     UndoGroup *undo_stack;
@@ -223,7 +232,8 @@ int ed_block_copy(Ed *ed);
 int ed_block_cut(Ed *ed);
 int ed_block_delete(Ed *ed);
 int ed_block_paste(Ed *ed);
-char *ed_block_get_utf8(const Ed *ed); /* UTF-8 out (caller frees) */
+char *ed_block_get_utf8(const Ed *ed);   /* UTF-8 out (caller frees) */
+char *ed_killbuf_get_utf8(const Ed *ed); /* UTF-8 of internal clipboard mirror (caller frees) */
 
 /* Undo/redo */
 void ed_save_undo(Ed *ed);
@@ -305,7 +315,9 @@ void ed_clamp(Ed *ed);
 void ed_redo_clear(Ed *ed);
 void ed_clear_undo_redo(Ed *ed);
 int ed_undo_open_group(Ed *ed);
-int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col);
+int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, EdLine **snapshot_before_lines, int snapshot_before_count, EdLine **snapshot_after_lines, int snapshot_after_count, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col);
+EdLine **ed_clone_line_range(Ed *ed, int start, int end, int *out_count);
+void ed_free_snapshot(char *utf8, EdLine **lines, int count);
 int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text);
 
 /* Helper functions from editor_helper.c */

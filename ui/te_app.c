@@ -331,6 +331,19 @@ int te_app_close_tab(TeApp *app, int index)
     if (app->active_tab >= app->tab_count)
         app->active_tab = app->tab_count - 1;
 
+    if (app->active_tab >= 0 && app->active_tab < app->tab_count)
+    {
+        TeTab *active = app->tabs[app->active_tab];
+
+        if (active)
+        {
+            app->rich_mode = active->rich_mode;
+
+            if (active->editor)
+                app->hard_wrap = ed_get_hard_wrap(active->editor);
+        }
+    }
+
     return 0;
 }
 
@@ -346,7 +359,12 @@ void te_app_switch_tab(TeApp *app, int index)
     app->active_tab = index;
 
     if (app->tabs[index])
+    {
         app->rich_mode = app->tabs[index]->rich_mode;
+
+        if (app->tabs[index]->editor)
+            app->hard_wrap = ed_get_hard_wrap(app->tabs[index]->editor);
+    }
 }
 
 /* Return the index of the first tab with unsaved changes, or -1 if none */

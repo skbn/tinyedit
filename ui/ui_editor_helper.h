@@ -28,6 +28,7 @@ void clear_search_highlights(TeApp *app);
 void soft_reset_desired(void);
 void soft_reset_viewport_to_cursor(TeApp *app, int width);
 int editor_eff_wrap(TeApp *app);
+int editor_text_width(TeApp *app, int body_width);
 char *wrap_paste_text(TeApp *app, const char *utf8, int col);
 
 /* Trigger paragraph reflow after an edit in hard-wrap mode */

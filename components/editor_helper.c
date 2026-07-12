@@ -17,6 +17,7 @@
 #include <wchar.h>
 #include <wctype.h>
 #include "editor.h"
+#include "ed_attr.h"
 #include "../core/utf8.h"
 #include "../core/charset.h"
 
@@ -45,6 +46,9 @@ typedef struct
     int *wrap_flags;
     int flags_cap;
     int **out_wrap_flags;
+    const unsigned short *in_masks;
+    unsigned short *out_masks;
+    size_t masks_cap;
 } HwrapSplitCtx;
 
 /* Convert entire line to wchar_t string (caller frees) */
@@ -770,20 +774,35 @@ static wchar_t *ftn_split_reply_lines(const wchar_t *joined, size_t joined_len, 
     return outw;
 }
 
-/* Join a plain paragraph into one word stream and record cursor offset */
-static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int cursor_col, int *out_cursor_offset, size_t *out_len)
+/* Join a plain paragraph into one word stream and record cursor offset. If out_masks is non-NULL, it receives a parallel array of attribute masks (caller frees) */
+static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int cursor_col, int *out_cursor_offset, size_t *out_len, unsigned short **out_masks)
 {
     size_t cap = 256;
     size_t used = 0;
     wchar_t *joined = (wchar_t *)malloc(cap * sizeof(wchar_t));
+    unsigned short *masks = NULL;
     int logical_pos = 0; /* Logical chars before the current point (no wrap hyphens) */
     int cursor_offset = -1;
     int prev_had_break = 0; /* Previous line had a wrap hyphen we removed */
     int i;
     wchar_t *tmp = NULL;
+    unsigned short *mtmp = NULL;
 
     if (!joined)
         return NULL;
+
+    if (out_masks)
+    {
+        masks = (unsigned short *)malloc(cap * sizeof(unsigned short));
+
+        if (!masks)
+        {
+            free(joined);
+            return NULL;
+        }
+
+        *out_masks = NULL;
+    }
 
     for (i = first; i <= last; i++)
     {
@@ -799,6 +818,7 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
         if (!l)
         {
             free(joined);
+            free(masks);
             return NULL;
         }
 
@@ -844,17 +864,37 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
                         cap = (cap + 64) * 2;
                         tmp = (wchar_t *)realloc(joined, cap * sizeof(wchar_t));
 
+                        if (tmp && masks)
+                        {
+                            mtmp = (unsigned short *)realloc(masks, cap * sizeof(unsigned short));
+
+                            if (!mtmp)
+                            {
+                                free(tmp);
+                                tmp = NULL;
+                            }
+                        }
+
                         if (!tmp)
                         {
                             free(l);
                             free(joined);
+                            free(masks);
                             return NULL;
                         }
 
                         joined = tmp;
+
+                        if (masks)
+                            masks = mtmp;
                     }
 
-                    joined[used++] = L' ';
+                    joined[used] = L' ';
+
+                    if (masks)
+                        masks[used] = 0;
+
+                    used++;
                     logical_pos++; /* Joining space is a real logical char */
                 }
             }
@@ -894,17 +934,38 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
                 cap = (cap + 64) * 2;
                 tmp = (wchar_t *)realloc(joined, cap * sizeof(wchar_t));
 
+                if (tmp && masks)
+                {
+                    mtmp = (unsigned short *)realloc(masks, cap * sizeof(unsigned short));
+
+                    if (!mtmp)
+                    {
+                        free(tmp);
+                        tmp = NULL;
+                    }
+                }
+
                 if (!tmp)
                 {
                     free(l);
                     free(joined);
+                    free(masks);
+
                     return NULL;
                 }
 
                 joined = tmp;
+
+                if (masks)
+                    masks = mtmp;
             }
 
-            joined[used++] = l[j];
+            joined[used] = l[j];
+
+            if (masks)
+                masks[used] = ed_attr_mask_at(ed->lines[i], j, NULL, NULL);
+
+            used++;
         }
 
         logical_pos += logical_len;
@@ -919,6 +980,11 @@ static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int
     *out_len = used;
     *out_cursor_offset = cursor_offset;
 
+    if (out_masks)
+        *out_masks = masks;
+    else
+        free(masks);
+
     return joined;
 }
 
@@ -927,6 +993,7 @@ static int hwrap_grow_out(HwrapSplitCtx *ctx, size_t extra)
 {
     size_t new_cap;
     wchar_t *tmp = NULL;
+    unsigned short *mtmp = NULL;
 
     if (ctx->out_used + extra < ctx->out_cap)
         return 0;
@@ -938,6 +1005,17 @@ static int hwrap_grow_out(HwrapSplitCtx *ctx, size_t extra)
         return -1;
 
     ctx->outw = tmp;
+
+    if (ctx->out_masks)
+    {
+        mtmp = (unsigned short *)realloc(ctx->out_masks, new_cap * sizeof(unsigned short));
+
+        if (!mtmp)
+            return -1;
+
+        ctx->out_masks = mtmp;
+    }
+
     ctx->out_cap = new_cap;
     return 0;
 }
@@ -1035,10 +1113,28 @@ static int hwrap_try_hyphenation(HwrapSplitCtx *ctx)
         return -1;
 
     for (k = 0; k < emit; k++)
-        ctx->outw[ctx->out_used++] = ctx->joined[pos + k];
+    {
+        ctx->outw[ctx->out_used] = ctx->joined[pos + k];
 
-    ctx->outw[ctx->out_used++] = L'-';
-    ctx->outw[ctx->out_used++] = L'\n';
+        if (ctx->out_masks)
+            ctx->out_masks[ctx->out_used] = ctx->in_masks[pos + k];
+
+        ctx->out_used++;
+    }
+
+    ctx->outw[ctx->out_used] = L'-';
+
+    if (ctx->out_masks)
+        ctx->out_masks[ctx->out_used] = 0;
+
+    ctx->out_used++;
+
+    ctx->outw[ctx->out_used] = L'\n';
+
+    if (ctx->out_masks)
+        ctx->out_masks[ctx->out_used] = 0;
+
+    ctx->out_used++;
 
     if (ctx->out_wrap_flags)
         ctx->wrap_flags[ctx->lines_produced] = 1;
@@ -1079,13 +1175,25 @@ static int hwrap_try_space_break(HwrapSplitCtx *ctx)
         return -1;
 
     for (k = 0; k < break_at; k++)
-        ctx->outw[ctx->out_used++] = ctx->joined[pos + k];
+    {
+        ctx->outw[ctx->out_used] = ctx->joined[pos + k];
+
+        if (ctx->out_masks)
+            ctx->out_masks[ctx->out_used] = ctx->in_masks[pos + k];
+
+        ctx->out_used++;
+    }
 
     /* Trim trailing spaces */
     while (ctx->out_used > 0 && ctx->outw[ctx->out_used - 1] == L' ')
         ctx->out_used--;
 
-    ctx->outw[ctx->out_used++] = L'\n';
+    ctx->outw[ctx->out_used] = L'\n';
+
+    if (ctx->out_masks)
+        ctx->out_masks[ctx->out_used] = 0;
+
+    ctx->out_used++;
     ctx->pos = pos + (size_t)break_at + 1;
 
     while (ctx->pos < ctx->jlen && ctx->joined[ctx->pos] == L' ')
@@ -1126,9 +1234,21 @@ static int hwrap_try_hard_cut(HwrapSplitCtx *ctx)
                 return -1;
 
             for (k = 0; k < word_len; k++)
-                ctx->outw[ctx->out_used++] = ctx->joined[pos + k];
+            {
+                ctx->outw[ctx->out_used] = ctx->joined[pos + k];
 
-            ctx->outw[ctx->out_used++] = L'\n';
+                if (ctx->out_masks)
+                    ctx->out_masks[ctx->out_used] = ctx->in_masks[pos + k];
+
+                ctx->out_used++;
+            }
+
+            ctx->outw[ctx->out_used] = L'\n';
+
+            if (ctx->out_masks)
+                ctx->out_masks[ctx->out_used] = 0;
+
+            ctx->out_used++;
             ctx->pos = pos + (size_t)word_len;
 
             /* Skip trailing spaces */
@@ -1141,7 +1261,12 @@ static int hwrap_try_hard_cut(HwrapSplitCtx *ctx)
             if (hwrap_grow_out(ctx, 1) != 0)
                 return -1;
 
-            ctx->outw[ctx->out_used++] = L'\n';
+            ctx->outw[ctx->out_used] = L'\n';
+
+            if (ctx->out_masks)
+                ctx->out_masks[ctx->out_used] = 0;
+
+            ctx->out_used++;
             ctx->pos = pos + (size_t)word_len;
         }
     }
@@ -1152,9 +1277,21 @@ static int hwrap_try_hard_cut(HwrapSplitCtx *ctx)
             return -1;
 
         for (k = 0; k < avail && (int)pos + k < (int)ctx->jlen; k++)
-            ctx->outw[ctx->out_used++] = ctx->joined[pos + k];
+        {
+            ctx->outw[ctx->out_used] = ctx->joined[pos + k];
 
-        ctx->outw[ctx->out_used++] = L'\n';
+            if (ctx->out_masks)
+                ctx->out_masks[ctx->out_used] = ctx->in_masks[pos + k];
+
+            ctx->out_used++;
+        }
+
+        ctx->outw[ctx->out_used] = L'\n';
+
+        if (ctx->out_masks)
+            ctx->out_masks[ctx->out_used] = 0;
+
+        ctx->out_used++;
         ctx->pos = pos + (size_t)avail;
     }
 
@@ -1169,11 +1306,13 @@ static int hwrap_try_hard_cut(HwrapSplitCtx *ctx)
 static wchar_t *hwrap_split_fail(HwrapSplitCtx *ctx)
 {
     free(ctx->outw);
+    free(ctx->out_masks);
     free(ctx->wrap_flags);
+
     return NULL;
 }
 
-static wchar_t *hwrap_split(const wchar_t *joined, size_t jlen, int width, int (*hyph_cb)(void *, const wchar_t *, int, int), void *hyph_data, int *out_lines, int **out_wrap_flags)
+static wchar_t *hwrap_split(const wchar_t *joined, size_t jlen, int width, int (*hyph_cb)(void *, const wchar_t *, int, int), void *hyph_data, int *out_lines, int **out_wrap_flags, const unsigned short *in_masks, unsigned short **out_masks)
 {
     HwrapSplitCtx ctx;
     size_t n;
@@ -1192,12 +1331,26 @@ static wchar_t *hwrap_split(const wchar_t *joined, size_t jlen, int width, int (
     ctx.wrap_flags = NULL;
     ctx.flags_cap = 0;
     ctx.out_wrap_flags = out_wrap_flags;
+    ctx.in_masks = in_masks;
+    ctx.out_masks = NULL;
+    ctx.masks_cap = 0;
 
     if (!ctx.outw)
         return NULL;
 
     if (out_wrap_flags)
         *out_wrap_flags = NULL;
+
+    if (out_masks)
+        *out_masks = NULL;
+
+    if (in_masks && out_masks)
+    {
+        ctx.out_masks = (unsigned short *)malloc(ctx.out_cap * sizeof(unsigned short));
+
+        if (!ctx.out_masks)
+            return hwrap_split_fail(&ctx);
+    }
 
     while (ctx.pos < jlen)
     {
@@ -1219,7 +1372,14 @@ static wchar_t *hwrap_split(const wchar_t *joined, size_t jlen, int width, int (
             n = rem;
 
             for (k = 0; k < (int)n; k++)
-                ctx.outw[ctx.out_used++] = joined[ctx.pos + k];
+            {
+                ctx.outw[ctx.out_used] = joined[ctx.pos + k];
+
+                if (ctx.out_masks)
+                    ctx.out_masks[ctx.out_used] = in_masks[ctx.pos + k];
+
+                ctx.out_used++;
+            }
 
             if (out_wrap_flags)
                 ctx.wrap_flags[ctx.lines_produced] = 0;
@@ -1260,7 +1420,40 @@ static wchar_t *hwrap_split(const wchar_t *joined, size_t jlen, int width, int (
     else
         free(ctx.wrap_flags);
 
+    if (out_masks)
+        *out_masks = ctx.out_masks;
+    else
+        free(ctx.out_masks);
+
     return ctx.outw;
+}
+
+/* Apply an array of per-character attribute masks to an EdLine as EdAttrRun entries */
+static void hwrap_apply_line_masks(EdLine *ln, const unsigned short *masks, int len)
+{
+    int i;
+    int run_start = 0;
+    unsigned short run_mask = 0;
+
+    if (!ln || !masks || len <= 0)
+        return;
+
+    run_mask = masks[0];
+    run_start = 0;
+
+    for (i = 1; i <= len; i++)
+    {
+        unsigned short cur = (i < len) ? masks[i] : 0;
+
+        if (cur != run_mask)
+        {
+            if (run_mask != 0)
+                ed_attr_line_apply(ln, run_start, i, run_mask, 0, -1, 0);
+
+            run_mask = cur;
+            run_start = i;
+        }
+    }
 }
 
 /* Map cursor offset in the joined paragraph to the wrapped (row, col) */
@@ -1374,10 +1567,20 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar
     char *outu = NULL;
     char *snapshot_before = NULL;
     char *snapshot_after = NULL;
+    EdLine **snapshot_before_lines = NULL;
+    EdLine **snapshot_after_lines = NULL;
+    int snapshot_before_count = 0;
+    int snapshot_after_count = 0;
     int *wrap_flags = NULL;
     int out_lines = 0;
     size_t outw_len;
     int fi;
+    int pos;
+    unsigned char preserve_align = EA_ALIGN_LEFT;
+    unsigned short *joined_masks = NULL;
+    unsigned short *out_masks = NULL;
+    int line_idx;
+    int seg_start;
 
     if (!ed || width < 4 || ed->count <= 0)
         return -1;
@@ -1398,6 +1601,7 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar
         last++;
 
     replace_count = last - first + 1;
+    preserve_align = ed->lines[first]->para_align;
 
     cur_row_before = ed->row;
     cur_col_before = ed->col;
@@ -1435,17 +1639,25 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar
         if (!snapshot_before)
             return -1;
 
+        snapshot_before_lines = ed_clone_line_range(ed, first, last + 1, &snapshot_before_count);
+
+        if (!snapshot_before_lines)
+        {
+            free(snapshot_before);
+            return -1;
+        }
+
         old_count = last - first + 1;
         cur_row_before = ed->row;
         cur_col_before = ed->col;
     }
 
     /* Join the paragraph into one stream and remember the cursor offset */
-    joined = hwrap_join_para(ed, first, last, ed->row, ed->col, &cursor_offset, &joined_len);
+    joined = hwrap_join_para(ed, first, last, ed->row, ed->col, &cursor_offset, &joined_len, &joined_masks);
 
     if (!joined)
     {
-        free(snapshot_before);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         return -1;
     }
 
@@ -1456,15 +1668,18 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar
         ed->undo_snapshot_mode = 1;
 
     /* Re-split the joined stream into wrapped lines */
-    outw = hwrap_split(joined, joined_len, width, hyph_cb, hyph_data, &out_lines, &wrap_flags);
+    outw = hwrap_split(joined, joined_len, width, hyph_cb, hyph_data, &out_lines, &wrap_flags, joined_masks, &out_masks);
 
     free(joined);
+    free(joined_masks);
+
+    joined_masks = NULL;
 
     if (!outw)
     {
         ed->undo_snapshot_mode = 0;
 
-        free(snapshot_before);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         free(wrap_flags);
         return -1;
     }
@@ -1473,39 +1688,74 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar
     outw_len = wcslen(outw);
     outu = wcs_to_utf8(outw, (int)outw_len);
 
-    free(outw);
-
     if (!outu)
     {
         ed->undo_snapshot_mode = 0;
 
-        free(snapshot_before);
+        free(outw);
+        free(out_masks);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         free(wrap_flags);
+
         return -1;
     }
 
     inserted = ed_replace_range_from_utf8(ed, first, replace_count, outu);
 
     free(outu);
+    outu = NULL;
 
     if (inserted <= 0)
     {
         ed->undo_snapshot_mode = 0;
 
-        free(snapshot_before);
+        free(outw);
+        free(out_masks);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         free(wrap_flags);
+
         return -1;
     }
 
-    /* Mark wrap-hyphens on the newly inserted lines */
-    if (wrap_flags)
+    /* Restore paragraph alignment, wrap-hyphens and inline attributes on the newly inserted lines */
+    pos = 0;
+    line_idx = first;
+
+    for (fi = 0; fi < inserted && first + fi < ed->count; fi++)
     {
-        for (fi = 0; fi < inserted && fi < out_lines; fi++)
+        EdLine *ln = ed->lines[first + fi];
+        int seg_len = 0;
+
+        seg_start = pos;
+
+        while (pos < (int)outw_len && outw[pos] != L'\n')
         {
-            if (first + fi < ed->count)
-                ed->lines[first + fi]->has_wrap_hyphen = wrap_flags[fi];
+            pos++;
+            seg_len++;
         }
 
+        if (pos < (int)outw_len && outw[pos] == L'\n')
+            pos++;
+
+        ln->para_align = preserve_align;
+
+        if (wrap_flags && fi < out_lines)
+            ln->has_wrap_hyphen = wrap_flags[fi];
+
+        if (out_masks && seg_len > 0)
+            hwrap_apply_line_masks(ln, &out_masks[seg_start], seg_len);
+
+        line_idx++;
+    }
+
+    free(outw);
+    free(out_masks);
+
+    outw = NULL;
+    out_masks = NULL;
+
+    if (wrap_flags)
+    {
         free(wrap_flags);
         wrap_flags = NULL;
     }
@@ -1531,20 +1781,22 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar
 
     if (!snapshot_after)
     {
-        free(snapshot_before);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         return -1;
     }
+
+    snapshot_after_lines = ed_clone_line_range(ed, first, first + new_count, &snapshot_after_count);
 
     ed_redo_clear(ed);
 
     if (ed_undo_open_group(ed) != 0)
     {
-        free(snapshot_before);
-        free(snapshot_after);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
+        ed_free_snapshot(snapshot_after, snapshot_after_lines, snapshot_after_count);
         return -1;
     }
 
-    if (undo_push_snapshot_range(ed, first, cur_col_before, snapshot_before, snapshot_after, old_count, new_count, cur_row_before, cur_col_before, cur_row_after, cur_col_after) != 0)
+    if (undo_push_snapshot_range(ed, first, cur_col_before, snapshot_before, snapshot_after, snapshot_before_lines, snapshot_before_count, snapshot_after_lines, snapshot_after_count, old_count, new_count, cur_row_before, cur_col_before, cur_row_after, cur_col_after) != 0)
         return -1;
 
     ed->undo_open = 0;
@@ -1573,6 +1825,10 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     int last_line_len = 0;
     char *snapshot_before = NULL;
     char *snapshot_after = NULL;
+    EdLine **snapshot_before_lines = NULL;
+    EdLine **snapshot_after_lines = NULL;
+    int snapshot_before_count = 0;
+    int snapshot_after_count = 0;
     wchar_t *joined = NULL;
     size_t joined_len = 0;
     wchar_t *outw = NULL;
@@ -1609,6 +1865,14 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     if (!snapshot_before)
         return -1;
 
+    snapshot_before_lines = ed_clone_line_range(ed, first, last + 1, &snapshot_before_count);
+
+    if (!snapshot_before_lines)
+    {
+        free(snapshot_before);
+        return -1;
+    }
+
     ed->undo_snapshot_mode = 1;
 
     joined = ftn_join_reply_block(ed, first, last, prefix_len, &joined_len);
@@ -1617,7 +1881,7 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     {
         ed->undo_snapshot_mode = 0;
 
-        free(snapshot_before);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         return -1;
     }
 
@@ -1629,7 +1893,7 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     {
         ed->undo_snapshot_mode = 0;
 
-        free(snapshot_before);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         return -1;
     }
 
@@ -1640,7 +1904,7 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
 
         ed->undo_snapshot_mode = 0;
 
-        free(snapshot_before);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         return -1;
     }
 
@@ -1698,20 +1962,22 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
 
     if (!snapshot_after)
     {
-        free(snapshot_before);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         return -1;
     }
+
+    snapshot_after_lines = ed_clone_line_range(ed, first, first + new_count, &snapshot_after_count);
 
     ed_redo_clear(ed);
 
     if (ed_undo_open_group(ed) != 0)
     {
-        free(snapshot_before);
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         free(snapshot_after);
         return -1;
     }
 
-    if (undo_push_snapshot_range(ed, first, cursor_col_before, snapshot_before, snapshot_after, old_count, new_count, cursor_row_before, cursor_col_before, cursor_row_after, cursor_col_after) != 0)
+    if (undo_push_snapshot_range(ed, first, cursor_col_before, snapshot_before, snapshot_after, snapshot_before_lines, snapshot_before_count, snapshot_after_lines, snapshot_after_count, old_count, new_count, cursor_row_before, cursor_col_before, cursor_row_after, cursor_col_after) != 0)
         return -1;
 
     ed->undo_open = 0;

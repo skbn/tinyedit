@@ -252,6 +252,10 @@ static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
     Ed *ed = te_app_get_editor(app);
     char *snapshot_before = NULL;
     char *snapshot_after = NULL;
+    EdLine **snapshot_before_lines = NULL;
+    EdLine **snapshot_after_lines = NULL;
+    int snapshot_before_count = 0;
+    int snapshot_after_count = 0;
     int old_count;
     int new_count;
     int cursor_row_before;
@@ -285,14 +289,22 @@ static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
         return -1;
     }
 
+    snapshot_before_lines = ed_clone_line_range(ed, first, last + 1, &snapshot_before_count);
+
+    if (!snapshot_before_lines)
+    {
+        ed->undo_open = 0;
+        free(snapshot_before);
+        return -1;
+    }
+
     /* Replace the whole range in one operation */
     new_count = ed_replace_range_from_utf8(ed, first, old_count, new_utf8);
 
     if (new_count <= 0)
     {
-        free(snapshot_before);
-
         ed->undo_open = 0;
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         return -1;
     }
 
@@ -301,11 +313,12 @@ static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
 
     if (!snapshot_after)
     {
-        free(snapshot_before);
-
         ed->undo_open = 0;
+        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
         return -1;
     }
+
+    snapshot_after_lines = ed_clone_line_range(ed, first, first + new_count, &snapshot_after_count);
 
     /* Place cursor at end of inserted text, like ed_paste_text does */
     cursor_row_after = first + new_count - 1;
@@ -314,7 +327,7 @@ static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
     ed->undo_open = 0;
 
     /* Record one OP_SNAPSHOT_RANGE for the entire replacement */
-    if (undo_push_snapshot_range(ed, first, 0, snapshot_before, snapshot_after, old_count, new_count, cursor_row_before, cursor_col_before, cursor_row_after, cursor_col_after) != 0)
+    if (undo_push_snapshot_range(ed, first, 0, snapshot_before, snapshot_after, snapshot_before_lines, snapshot_before_count, snapshot_after_lines, snapshot_after_count, old_count, new_count, cursor_row_before, cursor_col_before, cursor_row_after, cursor_col_after) != 0)
         return -1;
 
     ed_set_modified(ed, 1);

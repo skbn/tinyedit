@@ -532,7 +532,13 @@ int main(int argc, char **argv)
                     }
                     else
                     {
-                        te_status(app, "Cannot read: %s", argv[1]);
+                        /* Enable rich mode for new files from the start */
+                        app->rich_mode = 1;
+
+                        if (te_app_get_active_tab(app))
+                            te_app_get_active_tab(app)->rich_mode = 1;
+
+                        te_status(app, "New file: %s", argv[1]);
                     }
                 }
                 else if (ui_files_is_wp4(argv[1]))
@@ -564,7 +570,13 @@ int main(int argc, char **argv)
                     }
                     else
                     {
-                        te_status(app, "Cannot read: %s", argv[1]);
+                        /* New WP document: enable rich mode from the start */
+                        app->rich_mode = 1;
+
+                        if (te_app_get_active_tab(app))
+                            te_app_get_active_tab(app)->rich_mode = 1;
+
+                        te_status(app, "New file: %s", argv[1]);
                     }
                 }
                 else if (is_utf8)

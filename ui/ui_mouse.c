@@ -122,6 +122,9 @@ static int compute_body_width(TeApp *app)
     if (width < 1)
         width = 1;
 
+    /* In rich mode, use the configured page width for mouse mapping */
+    width = editor_text_width(app, width);
+
     return width;
 }
 
