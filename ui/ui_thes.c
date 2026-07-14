@@ -39,7 +39,7 @@ typedef struct
 {
     int first_row;
     int first_start;
-    int first_end; /* column of '-' on first_row */
+    int first_end; /* Column of '-' on first_row */
     int second_row;
     int second_start;
     int second_end;
@@ -73,18 +73,11 @@ static int thes_hyphen_split_find(Ed *ed, EdInfo *info, const wchar_t *line, int
 
     memset(hs, 0, sizeof(*hs));
 
-    /* Case A: word at EOL followed by '-' and continuation on next line */
-    /* Cursor on the word itself; '-' is the next character at EOL */
-    if (we < line_len && line[we] == L'-' && we + 1 == line_len && info->row + 1 < info->line_count)
+    /* The word runs to the end of a line the layout broke inside a word: there is no hyphen in the text, the break kind is what says the word continues */
+    if (we == line_len && word_len > 0 && ed_line_break(ed, info->row) == LB_HYPHEN && info->row + 1 < info->line_count)
     {
         hyphen_col = we;
-        first_word_len = we - ws;
-    }
-    /* Cursor includes the trailing '-' (e.g. cursor is on the hyphen) */
-    else if (we == line_len && word_len > 0 && line[we - 1] == L'-' && info->row + 1 < info->line_count)
-    {
-        hyphen_col = we - 1;
-        first_word_len = word_len - 1;
+        first_word_len = word_len;
     }
 
     if (hyphen_col >= 0 && first_word_len > 0)
@@ -126,7 +119,7 @@ static int thes_hyphen_split_find(Ed *ed, EdInfo *info, const wchar_t *line, int
         return 0;
     }
 
-    /* Case B: word at column 0 preceded by "word-" on previous line */
+    /* Word at column 0 preceded by "word-" on previous line */
     if (ws == 0 && info->row > 0 && we > 0 && iswlower(line[0]))
     {
         const wchar_t *prev_line = ed_line_wcs(ed, info->row - 1);
@@ -135,9 +128,9 @@ static int thes_hyphen_split_find(Ed *ed, EdInfo *info, const wchar_t *line, int
         {
             int prev_len = ed_line_len(ed, info->row - 1);
 
-            if (prev_len >= 2 && prev_line[prev_len - 1] == L'-')
+            if (prev_len >= 1 && ed_line_break(ed, info->row - 1) == LB_HYPHEN)
             {
-                int prev_word_end = prev_len - 1;
+                int prev_word_end = prev_len;
                 int prev_word_start = prev_word_end;
 
                 while (prev_word_start > 0 && thes_is_word_char(prev_line[prev_word_start - 1]))
@@ -237,7 +230,7 @@ int ui_thes_lookup_word(UI_APP_T *app)
     ThesMeaning *meanings = NULL;
     int nmeanings, total_items, idx, sel;
     char **items = NULL;
-    int *item_to_syn = NULL; /* maps popup index -> (meaning, syn) pair */
+    int *item_to_syn = NULL; /* Maps popup index -> (meaning, syn) pair */
     int m, k;
     const char *thes_encoding = NULL;
     char utf8_buf[1024];

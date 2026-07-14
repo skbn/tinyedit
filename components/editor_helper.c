@@ -17,6 +17,7 @@
 #include <wchar.h>
 #include <wctype.h>
 #include "editor.h"
+#include "undo.h"
 #include "ed_attr.h"
 #include "../core/utf8.h"
 #include "../core/charset.h"
@@ -31,25 +32,14 @@
 
 #endif
 
+/* One char of the joined paragraph with the styling it carried */
 typedef struct
 {
-    const wchar_t *joined;
-    size_t jlen;
-    int width;
-    int (*hyph_cb)(void *, const wchar_t *, int, int);
-    void *hyph_data;
-    wchar_t *outw;
-    size_t out_cap;
-    size_t out_used;
-    size_t pos;
-    int lines_produced;
-    int *wrap_flags;
-    int flags_cap;
-    int **out_wrap_flags;
-    const unsigned short *in_masks;
-    unsigned short *out_masks;
-    size_t masks_cap;
-} HwrapSplitCtx;
+    wchar_t ch;
+    unsigned short mask;
+    short font;
+    short size;
+} ParaChar;
 
 /* Convert entire line to wchar_t string (caller frees) */
 wchar_t *line_to_wcs(EdLine *ln)
@@ -274,7 +264,7 @@ int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols)
 
     nlen = (int)wcslen(needle);
 
-    /* First pass: count matches */
+    /* Count matches */
     for (i = 0; i < ed->count; i++)
     {
         line = ed_line_wcs(ed, i);
@@ -334,8 +324,9 @@ int ed_search_all(Ed *ed, const wchar_t *needle, int **out_rows, int **out_cols)
         return 0;
     }
 
-    /* Second pass: fill arrays */
+    /* Fill arrays */
     count = 0;
+
     for (i = 0; i < ed->count; i++)
     {
         line = ed_line_wcs(ed, i);
@@ -398,7 +389,9 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
     {
         free(*out_rows);
         free(*out_cols);
-        *out_rows = *out_cols = NULL;
+
+        *out_rows = NULL;
+        *out_cols = NULL;
 
         return 0;
     }
@@ -442,9 +435,7 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
 
                     /* Require word boundaries on both sides */
                     if ((prev_char != 0 && !iswspace(prev_char) && !iswpunct(prev_char)) || (next_char != 0 && !iswspace(next_char) && !iswpunct(next_char)))
-                    {
                         match = 0;
-                    }
                 }
 
                 if (match)
@@ -774,1041 +765,10 @@ static wchar_t *ftn_split_reply_lines(const wchar_t *joined, size_t joined_len, 
     return outw;
 }
 
-/* Join a plain paragraph into one word stream and record cursor offset. If out_masks is non-NULL, it receives a parallel array of attribute masks (caller frees) */
-static wchar_t *hwrap_join_para(Ed *ed, int first, int last, int cursor_row, int cursor_col, int *out_cursor_offset, size_t *out_len, unsigned short **out_masks)
-{
-    size_t cap = 256;
-    size_t used = 0;
-    wchar_t *joined = (wchar_t *)malloc(cap * sizeof(wchar_t));
-    unsigned short *masks = NULL;
-    int logical_pos = 0; /* Logical chars before the current point (no wrap hyphens) */
-    int cursor_offset = -1;
-    int prev_had_break = 0; /* Previous line had a wrap hyphen we removed */
-    int i;
-    wchar_t *tmp = NULL;
-    unsigned short *mtmp = NULL;
-
-    if (!joined)
-        return NULL;
-
-    if (out_masks)
-    {
-        masks = (unsigned short *)malloc(cap * sizeof(unsigned short));
-
-        if (!masks)
-        {
-            free(joined);
-            return NULL;
-        }
-
-        *out_masks = NULL;
-    }
-
-    for (i = first; i <= last; i++)
-    {
-        wchar_t *l = line_to_wcs(ed->lines[i]);
-        int ll = ed->lines[i]->len;
-        int has_wrap = ed->lines[i]->has_wrap_hyphen;
-        int skip_hyphen = -1;
-        int skip_space = -1;
-        int logical_len;
-        int had_break = 0;
-        int j;
-
-        if (!l)
-        {
-            free(joined);
-            free(masks);
-            return NULL;
-        }
-
-        logical_len = ll;
-
-        /* Remove wrap hyphen and following space to rejoin word */
-        if (has_wrap)
-        {
-            for (j = ll - 1; j >= 0; j--)
-            {
-                if (l[j] == L'-')
-                {
-                    skip_hyphen = j;
-                    logical_len--;
-                    had_break = 1;
-
-                    if (j + 1 < ll && (l[j + 1] == L' ' || l[j + 1] == L'\t'))
-                    {
-                        skip_space = j + 1;
-                        logical_len--;
-                    }
-
-                    break;
-                }
-            }
-        }
-
-        if (i > first)
-        {
-            if (prev_had_break)
-            {
-                /* Remove the trailing '-' that was kept in the joined stream */
-                if (used > 0 && joined[used - 1] == L'-')
-                    used--;
-            }
-            else
-            {
-                /* Add a joining space if neither side already has one */
-                if (used > 0 && joined[used - 1] != L' ' && joined[used - 1] != L'\t' && l[0] != L' ' && l[0] != L'\t')
-                {
-                    if (used + 1 >= cap)
-                    {
-                        cap = (cap + 64) * 2;
-                        tmp = (wchar_t *)realloc(joined, cap * sizeof(wchar_t));
-
-                        if (tmp && masks)
-                        {
-                            mtmp = (unsigned short *)realloc(masks, cap * sizeof(unsigned short));
-
-                            if (!mtmp)
-                            {
-                                free(tmp);
-                                tmp = NULL;
-                            }
-                        }
-
-                        if (!tmp)
-                        {
-                            free(l);
-                            free(joined);
-                            free(masks);
-                            return NULL;
-                        }
-
-                        joined = tmp;
-
-                        if (masks)
-                            masks = mtmp;
-                    }
-
-                    joined[used] = L' ';
-
-                    if (masks)
-                        masks[used] = 0;
-
-                    used++;
-                    logical_pos++; /* Joining space is a real logical char */
-                }
-            }
-        }
-
-        /* Record logical cursor offset before the line's chars are copied */
-        if (i == cursor_row)
-        {
-            if (cursor_col <= 0)
-            {
-                cursor_offset = logical_pos;
-            }
-            else
-            {
-                int logical_up_to_col = 0;
-
-                for (j = 0; j < cursor_col && j < ll; j++)
-                {
-                    if (j == skip_hyphen || j == skip_space)
-                        continue;
-
-                    logical_up_to_col++;
-                }
-
-                cursor_offset = logical_pos + logical_up_to_col;
-            }
-        }
-
-        /* Copy the line, skipping the removed hyphen and its following space */
-        for (j = 0; j < ll; j++)
-        {
-            if (j == skip_hyphen || j == skip_space)
-                continue;
-
-            if (used + 1 >= cap)
-            {
-                cap = (cap + 64) * 2;
-                tmp = (wchar_t *)realloc(joined, cap * sizeof(wchar_t));
-
-                if (tmp && masks)
-                {
-                    mtmp = (unsigned short *)realloc(masks, cap * sizeof(unsigned short));
-
-                    if (!mtmp)
-                    {
-                        free(tmp);
-                        tmp = NULL;
-                    }
-                }
-
-                if (!tmp)
-                {
-                    free(l);
-                    free(joined);
-                    free(masks);
-
-                    return NULL;
-                }
-
-                joined = tmp;
-
-                if (masks)
-                    masks = mtmp;
-            }
-
-            joined[used] = l[j];
-
-            if (masks)
-                masks[used] = ed_attr_mask_at(ed->lines[i], j, NULL, NULL);
-
-            used++;
-        }
-
-        logical_pos += logical_len;
-
-        free(l);
-
-        prev_had_break = had_break;
-    }
-
-    joined[used] = L'\0';
-
-    *out_len = used;
-    *out_cursor_offset = cursor_offset;
-
-    if (out_masks)
-        *out_masks = masks;
-    else
-        free(masks);
-
-    return joined;
-}
-
-/* Split joined text into hard-wrapped lines and optionally return wrap flags */
-static int hwrap_grow_out(HwrapSplitCtx *ctx, size_t extra)
-{
-    size_t new_cap;
-    wchar_t *tmp = NULL;
-    unsigned short *mtmp = NULL;
-
-    if (ctx->out_used + extra < ctx->out_cap)
-        return 0;
-
-    new_cap = (ctx->out_cap + extra + 64) * 2;
-    tmp = (wchar_t *)realloc(ctx->outw, new_cap * sizeof(wchar_t));
-
-    if (!tmp)
-        return -1;
-
-    ctx->outw = tmp;
-
-    if (ctx->out_masks)
-    {
-        mtmp = (unsigned short *)realloc(ctx->out_masks, new_cap * sizeof(unsigned short));
-
-        if (!mtmp)
-            return -1;
-
-        ctx->out_masks = mtmp;
-    }
-
-    ctx->out_cap = new_cap;
-    return 0;
-}
-
-static int hwrap_grow_flags(HwrapSplitCtx *ctx)
-{
-    int new_cap;
-    int *tmp = NULL;
-
-    if (!ctx->out_wrap_flags || ctx->lines_produced < ctx->flags_cap)
-        return 0;
-
-    new_cap = ctx->flags_cap ? ctx->flags_cap * 2 : 8;
-    tmp = (int *)realloc(ctx->wrap_flags, (size_t)new_cap * sizeof(int));
-
-    if (!tmp)
-        return -1;
-
-    ctx->wrap_flags = tmp;
-    ctx->flags_cap = new_cap;
-    return 0;
-}
-
-static int hwrap_try_hyphenation(HwrapSplitCtx *ctx)
-{
-    size_t pos = ctx->pos;
-    int avail = ctx->width;
-    int word_start = avail - 1;
-    int word_end;
-    int wlen;
-    int core_len;
-    int col_limit;
-    int bp;
-    int emit;
-    int k;
-
-    if (!ctx->hyph_cb)
-        return 0;
-
-    /* Step back to find start of the overflowing word */
-    while (word_start > 0 && ctx->joined[pos + word_start - 1] != L' ')
-        word_start--;
-
-    /* Find end of that word */
-    word_end = word_start;
-
-    while ((int)pos + word_end < (int)ctx->jlen && ctx->joined[pos + word_end] != L' ')
-        word_end++;
-
-    wlen = word_end - word_start;
-
-    if (wlen < 4 || wlen >= 512)
-        return 0;
-
-    /* Hyphenate only if word is mid-line and trailing space does not fit */
-    if (word_start + wlen <= avail)
-    {
-        if (word_start == 0)
-            return 0;
-
-        if (word_end < (int)ctx->jlen && ctx->joined[pos + word_end] == L' ' && word_end + 1 <= avail)
-            return 0;
-    }
-
-    /* Strip trailing punctuation before hyphenation */
-    while (word_end > word_start)
-    {
-        wchar_t c = ctx->joined[pos + word_end - 1];
-
-        if (c == L'-' || !iswpunct(c))
-            break;
-
-        word_end--;
-    }
-
-    core_len = word_end - word_start;
-
-    if (core_len < 4)
-        return 0;
-
-    col_limit = avail - word_start - 1;
-
-    bp = ctx->hyph_cb(ctx->hyph_data, &ctx->joined[pos + word_start], core_len, col_limit);
-
-    /* Need 2+ chars before and after break */
-    if (bp < 2 || bp > core_len - 2)
-        return 0;
-
-    emit = word_start + bp;
-
-    if (hwrap_grow_out(ctx, (size_t)emit + 2) != 0)
-        return -1;
-
-    if (hwrap_grow_flags(ctx) != 0)
-        return -1;
-
-    for (k = 0; k < emit; k++)
-    {
-        ctx->outw[ctx->out_used] = ctx->joined[pos + k];
-
-        if (ctx->out_masks)
-            ctx->out_masks[ctx->out_used] = ctx->in_masks[pos + k];
-
-        ctx->out_used++;
-    }
-
-    ctx->outw[ctx->out_used] = L'-';
-
-    if (ctx->out_masks)
-        ctx->out_masks[ctx->out_used] = 0;
-
-    ctx->out_used++;
-
-    ctx->outw[ctx->out_used] = L'\n';
-
-    if (ctx->out_masks)
-        ctx->out_masks[ctx->out_used] = 0;
-
-    ctx->out_used++;
-
-    if (ctx->out_wrap_flags)
-        ctx->wrap_flags[ctx->lines_produced] = 1;
-
-    ctx->lines_produced++;
-    ctx->pos = pos + (size_t)emit;
-
-    /* Skip spaces at start of next line */
-    while (ctx->pos < ctx->jlen && ctx->joined[ctx->pos] == L' ')
-        ctx->pos++;
-
-    return 1;
-}
-
-static int hwrap_try_space_break(HwrapSplitCtx *ctx)
-{
-    size_t pos = ctx->pos;
-    int avail = ctx->width;
-    int break_at = -1;
-    int k;
-
-    for (k = avail; k > 0; k--)
-    {
-        if (ctx->joined[pos + k - 1] == L' ')
-        {
-            break_at = k - 1;
-            break;
-        }
-    }
-
-    if (break_at <= 0)
-        return 0;
-
-    if (hwrap_grow_out(ctx, (size_t)break_at + 1) != 0)
-        return -1;
-
-    if (hwrap_grow_flags(ctx) != 0)
-        return -1;
-
-    for (k = 0; k < break_at; k++)
-    {
-        ctx->outw[ctx->out_used] = ctx->joined[pos + k];
-
-        if (ctx->out_masks)
-            ctx->out_masks[ctx->out_used] = ctx->in_masks[pos + k];
-
-        ctx->out_used++;
-    }
-
-    /* Trim trailing spaces */
-    while (ctx->out_used > 0 && ctx->outw[ctx->out_used - 1] == L' ')
-        ctx->out_used--;
-
-    ctx->outw[ctx->out_used] = L'\n';
-
-    if (ctx->out_masks)
-        ctx->out_masks[ctx->out_used] = 0;
-
-    ctx->out_used++;
-    ctx->pos = pos + (size_t)break_at + 1;
-
-    while (ctx->pos < ctx->jlen && ctx->joined[ctx->pos] == L' ')
-        ctx->pos++;
-
-    if (ctx->out_wrap_flags)
-        ctx->wrap_flags[ctx->lines_produced] = 0;
-
-    ctx->lines_produced++;
-
-    return 1;
-}
-
-static int hwrap_try_hard_cut(HwrapSplitCtx *ctx)
-{
-    size_t pos = ctx->pos;
-    int avail = ctx->width;
-    int word_len = 0;
-    int k;
-
-    while (pos + word_len < ctx->jlen && ctx->joined[pos + word_len] != L' ')
-        word_len++;
-
-    if (hwrap_grow_flags(ctx) != 0)
-        return -1;
-
-    if (word_len > 0 && word_len <= ctx->width)
-    {
-        /* If we are at the very start of the output or of a fresh line, emit the word directly rather than creating an empty line */
-        int at_line_start = (ctx->out_used == 0 || ctx->outw[ctx->out_used - 1] == L'\n');
-
-        if (at_line_start)
-        {
-            /* Emit the word on this line, then newline */
-            int k;
-
-            if (hwrap_grow_out(ctx, (size_t)word_len + 1) != 0)
-                return -1;
-
-            for (k = 0; k < word_len; k++)
-            {
-                ctx->outw[ctx->out_used] = ctx->joined[pos + k];
-
-                if (ctx->out_masks)
-                    ctx->out_masks[ctx->out_used] = ctx->in_masks[pos + k];
-
-                ctx->out_used++;
-            }
-
-            ctx->outw[ctx->out_used] = L'\n';
-
-            if (ctx->out_masks)
-                ctx->out_masks[ctx->out_used] = 0;
-
-            ctx->out_used++;
-            ctx->pos = pos + (size_t)word_len;
-
-            /* Skip trailing spaces */
-            while (ctx->pos < ctx->jlen && ctx->joined[ctx->pos] == L' ')
-                ctx->pos++;
-        }
-        else
-        {
-            /* Move the whole word to the next line */
-            if (hwrap_grow_out(ctx, 1) != 0)
-                return -1;
-
-            ctx->outw[ctx->out_used] = L'\n';
-
-            if (ctx->out_masks)
-                ctx->out_masks[ctx->out_used] = 0;
-
-            ctx->out_used++;
-            ctx->pos = pos + (size_t)word_len;
-        }
-    }
-    else
-    {
-        /* Word is longer than line width: hard cut at avail */
-        if (hwrap_grow_out(ctx, (size_t)avail + 1) != 0)
-            return -1;
-
-        for (k = 0; k < avail && (int)pos + k < (int)ctx->jlen; k++)
-        {
-            ctx->outw[ctx->out_used] = ctx->joined[pos + k];
-
-            if (ctx->out_masks)
-                ctx->out_masks[ctx->out_used] = ctx->in_masks[pos + k];
-
-            ctx->out_used++;
-        }
-
-        ctx->outw[ctx->out_used] = L'\n';
-
-        if (ctx->out_masks)
-            ctx->out_masks[ctx->out_used] = 0;
-
-        ctx->out_used++;
-        ctx->pos = pos + (size_t)avail;
-    }
-
-    if (ctx->out_wrap_flags)
-        ctx->wrap_flags[ctx->lines_produced] = 0;
-
-    ctx->lines_produced++;
-
-    return 1;
-}
-
-static wchar_t *hwrap_split_fail(HwrapSplitCtx *ctx)
-{
-    free(ctx->outw);
-    free(ctx->out_masks);
-    free(ctx->wrap_flags);
-
-    return NULL;
-}
-
-static wchar_t *hwrap_split(const wchar_t *joined, size_t jlen, int width, int (*hyph_cb)(void *, const wchar_t *, int, int), void *hyph_data, int *out_lines, int **out_wrap_flags, const unsigned short *in_masks, unsigned short **out_masks)
-{
-    HwrapSplitCtx ctx;
-    size_t n;
-    int k;
-
-    ctx.joined = joined;
-    ctx.jlen = jlen;
-    ctx.width = width < 4 ? 4 : width;
-    ctx.hyph_cb = hyph_cb;
-    ctx.hyph_data = hyph_data;
-    ctx.out_cap = jlen * 2 + 64;
-    ctx.outw = (wchar_t *)malloc(ctx.out_cap * sizeof(wchar_t));
-    ctx.out_used = 0;
-    ctx.pos = 0;
-    ctx.lines_produced = 0;
-    ctx.wrap_flags = NULL;
-    ctx.flags_cap = 0;
-    ctx.out_wrap_flags = out_wrap_flags;
-    ctx.in_masks = in_masks;
-    ctx.out_masks = NULL;
-    ctx.masks_cap = 0;
-
-    if (!ctx.outw)
-        return NULL;
-
-    if (out_wrap_flags)
-        *out_wrap_flags = NULL;
-
-    if (out_masks)
-        *out_masks = NULL;
-
-    if (in_masks && out_masks)
-    {
-        ctx.out_masks = (unsigned short *)malloc(ctx.out_cap * sizeof(unsigned short));
-
-        if (!ctx.out_masks)
-            return hwrap_split_fail(&ctx);
-    }
-
-    while (ctx.pos < jlen)
-    {
-        size_t rem = jlen - ctx.pos;
-        int avail = ctx.width;
-        int rc;
-
-        /* Ensure output buffer has room for one full line + '\n' */
-        if (hwrap_grow_out(&ctx, (size_t)avail + 4) != 0)
-            return hwrap_split_fail(&ctx);
-
-        /* Ensure wrap_flags has room for one more line */
-        if (hwrap_grow_flags(&ctx) != 0)
-            return hwrap_split_fail(&ctx);
-
-        if ((int)rem <= avail)
-        {
-            /* Rest fits: copy everything and done */
-            n = rem;
-
-            for (k = 0; k < (int)n; k++)
-            {
-                ctx.outw[ctx.out_used] = joined[ctx.pos + k];
-
-                if (ctx.out_masks)
-                    ctx.out_masks[ctx.out_used] = in_masks[ctx.pos + k];
-
-                ctx.out_used++;
-            }
-
-            if (out_wrap_flags)
-                ctx.wrap_flags[ctx.lines_produced] = 0;
-
-            ctx.lines_produced++;
-            break;
-        }
-
-        rc = hwrap_try_hyphenation(&ctx);
-
-        if (rc < 0)
-            return hwrap_split_fail(&ctx);
-
-        if (rc > 0)
-            continue;
-
-        rc = hwrap_try_space_break(&ctx);
-
-        if (rc < 0)
-            return hwrap_split_fail(&ctx);
-
-        if (rc > 0)
-            continue;
-
-        if (hwrap_try_hard_cut(&ctx) < 0)
-            return hwrap_split_fail(&ctx);
-    }
-
-    if (ctx.out_used < ctx.out_cap)
-        ctx.outw[ctx.out_used] = L'\0';
-    else
-        ctx.outw[ctx.out_cap - 1] = L'\0';
-
-    *out_lines = ctx.lines_produced;
-
-    if (out_wrap_flags)
-        *out_wrap_flags = ctx.wrap_flags;
-    else
-        free(ctx.wrap_flags);
-
-    if (out_masks)
-        *out_masks = ctx.out_masks;
-    else
-        free(ctx.out_masks);
-
-    return ctx.outw;
-}
-
-/* Apply an array of per-character attribute masks to an EdLine as EdAttrRun entries */
-static void hwrap_apply_line_masks(EdLine *ln, const unsigned short *masks, int len)
-{
-    int i;
-    int run_start = 0;
-    unsigned short run_mask = 0;
-
-    if (!ln || !masks || len <= 0)
-        return;
-
-    run_mask = masks[0];
-    run_start = 0;
-
-    for (i = 1; i <= len; i++)
-    {
-        unsigned short cur = (i < len) ? masks[i] : 0;
-
-        if (cur != run_mask)
-        {
-            if (run_mask != 0)
-                ed_attr_line_apply(ln, run_start, i, run_mask, 0, -1, 0);
-
-            run_mask = cur;
-            run_start = i;
-        }
-    }
-}
-
-/* Map cursor offset in the joined paragraph to the wrapped (row, col) */
-static void hwrap_find_cursor(Ed *ed, int first, int inserted, int cursor_offset, int *out_row, int *out_col)
-{
-    int i;
-    int pos = 0;
-    int last_ins;
-
-    for (i = first; i < first + inserted && i < ed->count; i++)
-    {
-        wchar_t *l = line_to_wcs(ed->lines[i]);
-        int ll = ed->lines[i]->len;
-        int has_wrap = ed->lines[i]->has_wrap_hyphen;
-        int logical_len = ll;
-
-        if (!l)
-        {
-            *out_row = i;
-            *out_col = 0;
-            return;
-        }
-
-        /* The trailing wrap hyphen is not a logical character */
-        if (has_wrap && ll > 0 && l[ll - 1] == L'-')
-            logical_len--;
-
-        /* Cursor at the start of this line */
-        if (pos >= cursor_offset)
-        {
-            free(l);
-
-            *out_row = i;
-            *out_col = 0;
-            return;
-        }
-
-        if (i > first)
-        {
-            /* Add a joining space unless the previous line ended with a wrap hyphen or either side has whitespace at the boundary */
-            wchar_t *prev = line_to_wcs(ed->lines[i - 1]);
-            int prev_len = ed->lines[i - 1]->len;
-            int prev_has_wrap = ed->lines[i - 1]->has_wrap_hyphen;
-            int prev_last = 0;
-            int needs_space = 0;
-
-            if (prev && prev_len > 0)
-                prev_last = prev[prev_len - 1];
-
-            if (prev && pos > 0)
-            {
-                if (!(prev_has_wrap && prev_last == L'-') && prev_last != L' ' && prev_last != L'\t' && l[0] != L' ' && l[0] != L'\t')
-                    needs_space = 1;
-            }
-
-            free(prev);
-
-            if (needs_space)
-            {
-                pos++;
-
-                if (pos >= cursor_offset)
-                {
-                    free(l);
-
-                    *out_row = i;
-                    *out_col = 0;
-                    return;
-                }
-            }
-        }
-
-        /* Cursor inside this line */
-        if (cursor_offset > pos && cursor_offset <= pos + logical_len)
-        {
-            *out_row = i;
-            *out_col = cursor_offset - pos;
-
-            free(l);
-            return;
-        }
-
-        pos += logical_len;
-
-        free(l);
-    }
-
-    /* Cursor offset past end: place at end of last inserted line */
-    last_ins = first + inserted - 1;
-
-    if (last_ins >= ed->count)
-        last_ins = ed->count - 1;
-
-    *out_row = last_ins;
-    *out_col = ed->lines[last_ins]->len;
-}
-
-/* Reflow the hard-wrap paragraph around the cursor */
-int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar_t *, int, int), void *hyph_data)
-{
-    int first, last;
-    int old_count, new_count;
-    int replace_count;
-    int inserted;
-    int cur_row_before, cur_col_before;
-    int cur_row_after, cur_col_after;
-    int cursor_offset;
-    size_t joined_len = 0;
-    wchar_t *joined = NULL;
-    wchar_t *outw = NULL;
-    char *outu = NULL;
-    char *snapshot_before = NULL;
-    char *snapshot_after = NULL;
-    EdLine **snapshot_before_lines = NULL;
-    EdLine **snapshot_after_lines = NULL;
-    int snapshot_before_count = 0;
-    int snapshot_after_count = 0;
-    int *wrap_flags = NULL;
-    int out_lines = 0;
-    size_t outw_len;
-    int fi;
-    int pos;
-    unsigned char preserve_align = EA_ALIGN_LEFT;
-    unsigned short *joined_masks = NULL;
-    unsigned short *out_masks = NULL;
-    int line_idx;
-    int seg_start;
-
-    if (!ed || width < 4 || ed->count <= 0)
-        return -1;
-
-    /* Empty line: paragraph separator -- nothing to reflow */
-    if (ed->lines[ed->row]->len == 0)
-        return -1;
-
-    /* Find paragraph boundaries (contiguous non-empty lines) */
-    first = ed->row;
-
-    while (first > 0 && ed->lines[first - 1]->len > 0)
-        first--;
-
-    last = ed->row;
-
-    while (last < ed->count - 1 && ed->lines[last + 1]->len > 0)
-        last++;
-
-    replace_count = last - first + 1;
-    preserve_align = ed->lines[first]->para_align;
-
-    cur_row_before = ed->row;
-    cur_col_before = ed->col;
-
-    /* Use pre-edit snapshot if available to restore undo state */
-    if (ed->auto_rewrap_pre_snapshot && ed->auto_rewrap_pre_start == first)
-    {
-        const char *p = ed->auto_rewrap_pre_snapshot;
-        int pre_count = 0;
-
-        while (*p)
-        {
-            if (*p == '\n')
-                pre_count++;
-
-            p++;
-        }
-
-        snapshot_before = ed->auto_rewrap_pre_snapshot;
-        ed->auto_rewrap_pre_snapshot = NULL;
-
-        old_count = pre_count;
-
-        cur_row_before = ed->auto_rewrap_pre_cursor_row;
-        cur_col_before = ed->auto_rewrap_pre_cursor_col;
-    }
-    else
-    {
-        free(ed->auto_rewrap_pre_snapshot);
-
-        ed->auto_rewrap_pre_snapshot = NULL;
-
-        snapshot_before = ed_range_to_string(ed, first, last + 1);
-
-        if (!snapshot_before)
-            return -1;
-
-        snapshot_before_lines = ed_clone_line_range(ed, first, last + 1, &snapshot_before_count);
-
-        if (!snapshot_before_lines)
-        {
-            free(snapshot_before);
-            return -1;
-        }
-
-        old_count = last - first + 1;
-        cur_row_before = ed->row;
-        cur_col_before = ed->col;
-    }
-
-    /* Join the paragraph into one stream and remember the cursor offset */
-    joined = hwrap_join_para(ed, first, last, ed->row, ed->col, &cursor_offset, &joined_len, &joined_masks);
-
-    if (!joined)
-    {
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        return -1;
-    }
-
-    if (cursor_offset < 0)
-        cursor_offset = (int)joined_len;
-
-    if (!ed->undo_snapshot_mode)
-        ed->undo_snapshot_mode = 1;
-
-    /* Re-split the joined stream into wrapped lines */
-    outw = hwrap_split(joined, joined_len, width, hyph_cb, hyph_data, &out_lines, &wrap_flags, joined_masks, &out_masks);
-
-    free(joined);
-    free(joined_masks);
-
-    joined_masks = NULL;
-
-    if (!outw)
-    {
-        ed->undo_snapshot_mode = 0;
-
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        free(wrap_flags);
-        return -1;
-    }
-
-    /* Convert to UTF-8 and replace the range */
-    outw_len = wcslen(outw);
-    outu = wcs_to_utf8(outw, (int)outw_len);
-
-    if (!outu)
-    {
-        ed->undo_snapshot_mode = 0;
-
-        free(outw);
-        free(out_masks);
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        free(wrap_flags);
-
-        return -1;
-    }
-
-    inserted = ed_replace_range_from_utf8(ed, first, replace_count, outu);
-
-    free(outu);
-    outu = NULL;
-
-    if (inserted <= 0)
-    {
-        ed->undo_snapshot_mode = 0;
-
-        free(outw);
-        free(out_masks);
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        free(wrap_flags);
-
-        return -1;
-    }
-
-    /* Restore paragraph alignment, wrap-hyphens and inline attributes on the newly inserted lines */
-    pos = 0;
-    line_idx = first;
-
-    for (fi = 0; fi < inserted && first + fi < ed->count; fi++)
-    {
-        EdLine *ln = ed->lines[first + fi];
-        int seg_len = 0;
-
-        seg_start = pos;
-
-        while (pos < (int)outw_len && outw[pos] != L'\n')
-        {
-            pos++;
-            seg_len++;
-        }
-
-        if (pos < (int)outw_len && outw[pos] == L'\n')
-            pos++;
-
-        ln->para_align = preserve_align;
-
-        if (wrap_flags && fi < out_lines)
-            ln->has_wrap_hyphen = wrap_flags[fi];
-
-        if (out_masks && seg_len > 0)
-            hwrap_apply_line_masks(ln, &out_masks[seg_start], seg_len);
-
-        line_idx++;
-    }
-
-    free(outw);
-    free(out_masks);
-
-    outw = NULL;
-    out_masks = NULL;
-
-    if (wrap_flags)
-    {
-        free(wrap_flags);
-        wrap_flags = NULL;
-    }
-
-    /* Restore the cursor position from the same offset */
-    hwrap_find_cursor(ed, first, inserted, cursor_offset, &cur_row_after, &cur_col_after);
-
-    ed->row = cur_row_after;
-    ed->col = cur_col_after;
-    ed->modified = 1;
-
-    ed_prefix_invalidate_from(ed, first);
-
-    ed->undo_snapshot_mode = 0;
-
-    /* Build after-snapshot and push undo record */
-    new_count = inserted;
-
-    if (new_count < 0)
-        new_count = 0;
-
-    snapshot_after = ed_range_to_string(ed, first, first + new_count);
-
-    if (!snapshot_after)
-    {
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        return -1;
-    }
-
-    snapshot_after_lines = ed_clone_line_range(ed, first, first + new_count, &snapshot_after_count);
-
-    ed_redo_clear(ed);
-
-    if (ed_undo_open_group(ed) != 0)
-    {
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        ed_free_snapshot(snapshot_after, snapshot_after_lines, snapshot_after_count);
-        return -1;
-    }
-
-    if (undo_push_snapshot_range(ed, first, cur_col_before, snapshot_before, snapshot_after, snapshot_before_lines, snapshot_before_count, snapshot_after_lines, snapshot_after_count, old_count, new_count, cur_row_before, cur_col_before, cur_row_after, cur_col_after) != 0)
-        return -1;
-
-    ed->undo_open = 0;
-    ed_prefix_invalidate(ed);
-
-    return 0;
-}
-
 /* Reflow the current FTN reply quote block */
 int ed_rewrap_ftn_reply(Ed *ed, int width)
 {
-    const wchar_t *line;
+    const wchar_t *line = NULL;
     int prefix_len;
     wchar_t prefix[16];
     int first = 0;
@@ -1817,18 +777,10 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     int new_count = 0;
     int doc_count_before = 0;
     int inserted = 0;
-    int cursor_row_before = 0;
-    int cursor_col_before = 0;
     int cursor_row_after = 0;
     int cursor_col_after = 0;
     int last_line_empty = 0;
     int last_line_len = 0;
-    char *snapshot_before = NULL;
-    char *snapshot_after = NULL;
-    EdLine **snapshot_before_lines = NULL;
-    EdLine **snapshot_after_lines = NULL;
-    int snapshot_before_count = 0;
-    int snapshot_after_count = 0;
     wchar_t *joined = NULL;
     size_t joined_len = 0;
     wchar_t *outw = NULL;
@@ -1857,21 +809,12 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     ftn_reply_bounds(ed, ed->row, prefix, prefix_len, &first, &last);
 
     old_count = last - first + 1;
-    cursor_row_before = ed->row;
-    cursor_col_before = ed->col;
 
-    snapshot_before = ed_range_to_string(ed, first, last + 1);
+    /* Capture the quote block, the commit at the end closes this delta */
+    undo_abort(ed);
 
-    if (!snapshot_before)
+    if (undo_begin(ed, first, old_count) != 0)
         return -1;
-
-    snapshot_before_lines = ed_clone_line_range(ed, first, last + 1, &snapshot_before_count);
-
-    if (!snapshot_before_lines)
-    {
-        free(snapshot_before);
-        return -1;
-    }
 
     ed->undo_snapshot_mode = 1;
 
@@ -1881,7 +824,7 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     {
         ed->undo_snapshot_mode = 0;
 
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
+        undo_abort(ed);
         return -1;
     }
 
@@ -1893,7 +836,7 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     {
         ed->undo_snapshot_mode = 0;
 
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
+        undo_abort(ed);
         return -1;
     }
 
@@ -1904,7 +847,7 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
 
         ed->undo_snapshot_mode = 0;
 
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
+        undo_abort(ed);
         return -1;
     }
 
@@ -1930,7 +873,7 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
     {
         ed->undo_snapshot_mode = 0;
 
-        free(snapshot_before);
+        undo_abort(ed);
         return -1;
     }
 
@@ -1953,34 +896,16 @@ int ed_rewrap_ftn_reply(Ed *ed, int width)
 
     ed->undo_snapshot_mode = 0;
 
-    new_count = ed->count - (doc_count_before - old_count);
+    new_count = ed->count - (doc_count_before - ed->pending_n);
 
     if (new_count < 0)
         new_count = 0;
 
-    snapshot_after = ed_range_to_string(ed, first, first + new_count);
-
-    if (!snapshot_after)
-    {
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        return -1;
-    }
-
-    snapshot_after_lines = ed_clone_line_range(ed, first, first + new_count, &snapshot_after_count);
-
-    ed_redo_clear(ed);
-
-    if (ed_undo_open_group(ed) != 0)
-    {
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        free(snapshot_after);
-        return -1;
-    }
-
-    if (undo_push_snapshot_range(ed, first, cursor_col_before, snapshot_before, snapshot_after, snapshot_before_lines, snapshot_before_count, snapshot_after_lines, snapshot_after_count, old_count, new_count, cursor_row_before, cursor_col_before, cursor_row_after, cursor_col_after) != 0)
+    /* The pre edit capture is closed here by the reflow commit */
+    if (undo_commit(ed, new_count) != 0)
         return -1;
 
-    ed->undo_open = 0;
+    ed_save_undo(ed);
     ed_prefix_invalidate(ed);
 
     return 0;
@@ -1994,17 +919,15 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
     char *content_to_paste = NULL;
     size_t r;
     int needs_conv;
-    int cursor_row_before, cursor_col_before;
-    int cursor_row_after, cursor_col_after;
+    int cursor_row_before;
+    int cursor_row_after;
     EdInfo info;
-    UndoGroup *g = NULL;
 
     if (!ed || !path || !path[0])
         return -1;
 
     /* Save cursor position before paste */
     cursor_row_before = ed->row;
-    cursor_col_before = ed->col;
 
     /* Convert charset if not AUTO/UTF-8 */
     needs_conv = charset_in && charset_in[0] && strcasecmp(charset_in, "AUTO") != 0 && strcasecmp(charset_in, "UTF-8") != 0 && strcasecmp(charset_in, "UTF8") != 0;
@@ -2073,84 +996,39 @@ int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in)
         buf = NULL; /* Ownership transferred to content_to_paste */
     }
 
-    /* Open undo group for paste operation */
-    if (ed_undo_open_group(ed) != 0)
+    /* One delta: the cursor line becomes the pasted lines */
+    if (undo_begin(ed, cursor_row_before, 1) != 0)
     {
         free(content_to_paste);
         return -1;
     }
 
-    /* Suspend undo recording during paste to avoid duplicate operations */
+    /* That delta already covers the paste, skip per character recording */
     ed->undo_snapshot_mode = 1;
 
-    /* Paste the text */
     if (ed_paste_text(ed, content_to_paste) != 0)
     {
         ed->undo_snapshot_mode = 0;
-        ed->undo_open = 0;
 
+        undo_abort(ed);
         free(content_to_paste);
+
         return -1;
     }
 
-    /* Restore undo recording */
     ed->undo_snapshot_mode = 0;
 
-    /* Save state after paste */
     ed_get_info(ed, &info);
 
     cursor_row_after = info.row;
-    cursor_col_after = info.col;
 
-    /* Create OP_PASTE operation */
-    g = &ed->undo_stack[ed->undo_top - 1];
-    g->cur_row = cursor_row_before;
-    g->cur_col = cursor_col_before;
-    g->end_row = cursor_row_after;
-    g->end_col = cursor_col_after;
-
-    if (g->count >= g->cap)
+    if (undo_commit(ed, cursor_row_after - cursor_row_before + 1) != 0)
     {
-        int nc = (g->cap > 0) ? (g->cap * 2) : 4;
-        UndoOp *t = (UndoOp *)realloc(g->ops, (size_t)nc * sizeof(UndoOp));
-
-        if (!t)
-        {
-            ed->undo_open = 0;
-
-            free(content_to_paste);
-            return -1;
-        }
-
-        g->ops = t;
-        g->cap = nc;
-    }
-
-    /* Store the pasted text with block coordinates */
-    g->ops[g->count].type = OP_PASTE;
-    g->ops[g->count].row = cursor_row_before;
-    g->ops[g->count].col = cursor_col_before;
-    g->ops[g->count].len = 0;
-    g->ops[g->count].join_col = 0;
-    g->ops[g->count].text = NULL;
-    g->ops[g->count].utf8_snapshot_new = NULL;
-    g->ops[g->count].utf8_snapshot = strdup(content_to_paste);
-
-    if (!g->ops[g->count].utf8_snapshot)
-    {
-        ed->undo_open = 0;
-
         free(content_to_paste);
         return -1;
     }
 
-    g->ops[g->count].hard_wrap_mode = ed->hard_wrap;
-    g->ops[g->count].end_row = cursor_row_after;
-    g->ops[g->count].end_col = cursor_col_after;
-    g->count++;
-    ed->undo_open = 0;
-
-    /* Free the buffer */
+    ed_save_undo(ed);
     free(content_to_paste);
 
     /* Invalidate prefix after paste */
@@ -2234,6 +1112,283 @@ int ed_export_block_to_file(Ed *ed, const char *path, const char *charset_out)
     }
 
     fclose(f);
+
+    return 0;
+}
+
+/* Paragraph bounds: a run of non empty lines */
+static void para_bounds(Ed *ed, int row, int *first, int *last)
+{
+    int f = row;
+    int l = row;
+
+    if (ed->lines[row]->len == 0)
+    {
+        *first = row;
+        *last = row;
+
+        return;
+    }
+
+    while (f > 0 && ed->lines[f - 1]->len > 0)
+        f--;
+
+    while (l < ed->count - 1 && ed->lines[l + 1]->len > 0)
+        l++;
+
+    *first = f;
+    *last = l;
+}
+
+/* Join the paragraph: word breaks join straight, space breaks get one back */
+static ParaChar *para_join(Ed *ed, int first, int last, int cur_row, int cur_col, int *out_len, int *out_cursor)
+{
+    ParaChar *buf = NULL;
+    int cap = 0;
+    int n = 0;
+    int i;
+
+    for (i = first; i <= last; i++)
+        cap += ed->lines[i]->len + 1;
+
+    buf = (ParaChar *)malloc((size_t)(cap > 0 ? cap : 1) * sizeof(ParaChar));
+
+    if (!buf)
+        return NULL;
+
+    *out_cursor = 0;
+
+    for (i = first; i <= last; i++)
+    {
+        EdLine *ln = ed->lines[i];
+        wchar_t *w = line_to_wcs(ln);
+        int len = ln->len;
+        int stripped;
+        int j;
+
+        if (!w)
+        {
+            free(buf);
+            return NULL;
+        }
+
+        /* A stored trailing hyphen is legacy layout from disk, drop it exactly once */
+        stripped = 0;
+
+        if (ln->brk != LB_HYPHEN && len > 0 && w[len - 1] == L'-' && i < last)
+        {
+            len--;
+            stripped = 1;
+        }
+
+        if (cur_row == i)
+            *out_cursor = n + (cur_col < len ? cur_col : len);
+
+        for (j = 0; j < len; j++)
+        {
+            short font = 0;
+            short size = 0;
+
+            buf[n].ch = w[j];
+            buf[n].mask = ed_attr_mask_at(ln, j, &font, &size);
+            buf[n].font = font;
+            buf[n].size = size;
+
+            n++;
+        }
+
+        /* The eaten space comes back, a break inside a word joins with nothing */
+        if (i < last && ln->brk != LB_HYPHEN && ln->brk != LB_WORD && !stripped && n > 0)
+        {
+            int prev = n - 1;
+
+            buf[n].ch = L' ';
+            buf[n].mask = buf[prev].mask;
+            buf[n].font = buf[prev].font;
+            buf[n].size = buf[prev].size;
+
+            n++;
+        }
+
+        free(w);
+    }
+
+    *out_len = n;
+
+    return buf;
+}
+
+int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
+{
+    ParaChar *para = NULL;
+    wchar_t *text = NULL;
+    LayoutLine *lines = NULL;
+    LayoutOpts opt;
+    EdLine **built = NULL;
+    int first;
+    int last;
+    int plen = 0;
+    int cursor = 0;
+    int max_lines;
+    int n;
+    int i;
+    int new_row = 0;
+    int new_col = 0;
+
+    if (!ed || width <= 0 || ed->count <= 0)
+        return -1;
+
+    /* On any failure below the open capture must be dropped or undo stays dead */
+    para_bounds(ed, ed->row, &first, &last);
+
+    para = para_join(ed, first, last, ed->row, ed->col, &plen, &cursor);
+
+    if (!para)
+        return -1;
+
+    text = (wchar_t *)malloc((size_t)(plen + 1) * sizeof(wchar_t));
+
+    if (!text)
+    {
+        free(para);
+        undo_abort(ed);
+        ed->undo_snapshot_mode = 0;
+
+        return -1;
+    }
+
+    for (i = 0; i < plen; i++)
+        text[i] = para[i].ch;
+
+    text[plen] = 0;
+
+    max_lines = plen + 2;
+    lines = (LayoutLine *)malloc((size_t)max_lines * sizeof(LayoutLine));
+
+    if (!lines)
+    {
+        free(para);
+        free(text);
+
+        undo_abort(ed);
+        ed->undo_snapshot_mode = 0;
+
+        return -1;
+    }
+
+    layout_opts_default(&opt);
+
+    opt.width = ed_layout_char_width;
+    opt.width_user = ed;
+    opt.hyphenate = hyph ? 1 : 0;
+    opt.hyphen = hyph;
+    opt.hyphen_user = hyph_user;
+
+    n = layout_paragraph(text, plen, width, &opt, lines, max_lines);
+
+    if (n < 0)
+    {
+        free(para);
+        free(text);
+        free(lines);
+
+        undo_abort(ed);
+        ed->undo_snapshot_mode = 0;
+
+        return -1;
+    }
+
+    built = (EdLine **)malloc((size_t)n * sizeof(EdLine *));
+
+    if (!built)
+    {
+        free(para);
+        free(text);
+        free(lines);
+
+        undo_abort(ed);
+        ed->undo_snapshot_mode = 0;
+
+        return -1;
+    }
+
+    /* Build the new lines, carrying the styling of every character across */
+    for (i = 0; i < n; i++)
+    {
+        int start = lines[i].start;
+        int count = lines[i].end - start;
+        EdLine *ln = ed_line_from_wcs(ed, text + start, count);
+        int j;
+
+        if (!ln)
+        {
+            while (i-- > 0)
+                ed_line_destroy(built[i]);
+
+            free(built);
+            free(para);
+            free(text);
+            free(lines);
+
+            return -1;
+        }
+
+        for (j = 0; j < count; j++)
+        {
+            ParaChar *pc = &para[start + j];
+
+            if (pc->mask || pc->font || pc->size)
+                ed_attr_line_apply(ln, j, j + 1, pc->mask, 0, pc->font, pc->size);
+        }
+
+        ln->brk = (unsigned char)lines[i].brk;
+        ln->para_align = ed->lines[first]->para_align;
+
+        built[i] = ln;
+
+        /* Where the cursor lands in the reflowed paragraph */
+        if (cursor >= start && cursor <= lines[i].end)
+        {
+            new_row = first + i;
+            new_col = cursor - start;
+        }
+    }
+
+    if (ed_lines_splice(ed, first, last - first + 1, built, n) != 0)
+    {
+        for (i = 0; i < n; i++)
+            ed_line_destroy(built[i]);
+
+        free(built);
+        free(para);
+        free(text);
+        free(lines);
+
+        undo_abort(ed);
+        ed->undo_snapshot_mode = 0;
+
+        return -1;
+    }
+
+    free(built);
+    free(para);
+    free(text);
+    free(lines);
+
+    ed->row = new_row;
+    ed->col = new_col;
+    ed->modified = 1;
+
+    ed_clamp(ed);
+    ed_prefix_invalidate_from(ed, first);
+
+    /* The paragraph was captured before the edit, this closes that delta */
+    ed->undo_snapshot_mode = 0;
+
+    if (undo_commit(ed, n) != 0)
+        return -1;
+
+    ed_save_undo(ed);
 
     return 0;
 }

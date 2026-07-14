@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <wchar.h>
+#include "layout.h"
 
 /* Number of decoded lines ed_line_wcs() can hand out at once */
 enum
@@ -44,19 +45,22 @@ typedef struct
 typedef struct
 {
     void *text; /* Packed codepoints, cw bytes each, always NUL terminated */
-    int len;    /* Character count, not bytes */
-    int cap;    /* Allocated character slots */
-    int cw;     /* Bytes per stored codepoint: 1, 2 or 4 */
-    int word_count;
-    int has_wrap_hyphen;  /* 1 if last char is an artificial wrap-hyphen */
-    int wrap_count_cache; /* -1 = invalid, otherwise cached visual rows */
-    int wrap_cache_width; /* Width for which wrap_count_cache is valid */
-    int emb;              /* Byte size of the text area allocated inline with the struct */
-
-    /* Inline attribute runs (see ed_attr.h); plain malloc, freed by line_free */
     struct EdAttrRunStruct *attrs;
-    int n_attrs;
-    int cap_attrs;
+    struct Ed *owner; /* The editor whose slab this line came from */
+
+    int len; /* Character count, not bytes */
+    int cap; /* Allocated character slots */
+    int word_count;
+    int wrap_count_cache; /* -1 = invalid, otherwise cached visual rows */
+
+    unsigned short emb; /* Byte size of the text area allocated inline with the struct */
+    unsigned short n_attrs;
+    unsigned short cap_attrs;
+    short wrap_cache_width; /* Width for which wrap_count_cache is valid */
+
+    unsigned char cw;         /* Bytes per stored codepoint: 1, 2 or 4 */
+    unsigned char t_arena;    /* Text lives in the load arena, never freed one by one */
+    unsigned char brk;        /* How this line joins to the next, see layout.h LineBreak the wrap hyphen is NEVER a character in the text */
     unsigned char para_align; /* EA_ALIGN_* paragraph alignment */
 
 #if defined(PLATFORM_AMIGA)
@@ -64,55 +68,37 @@ typedef struct
 #endif
 } EdLine;
 
+/* Undo engine types, see undo.h: one op = a line range delta */
+typedef struct UndoOp
+{
+    int row;
+    EdLine **before;
+    int n_before;
+    EdLine **after;
+    int n_after;
+} UndoOp;
+
+typedef struct UndoGroup
+{
+    UndoOp *ops;
+    int count;
+    int cap;
+    int row_before;
+    int col_before;
+    int row_after;
+    int col_after;
+    int coalesce;
+} UndoGroup;
+
 /* Read the codepoint stored at character index i */
 unsigned int ed_line_char(const EdLine *ln, int i);
 
-typedef enum
-{
-    OP_INSERT,        /* inserted wchar_t text at (row,col) */
-    OP_DELETE,        /* deleted wchar_t text at (row,col) */
-    OP_SPLIT,         /* Enter: split line at (row,col) */
-    OP_JOIN,          /* Backspace at col 0: join row with row-1, col=join_col */
-    OP_SNAPSHOT,      /* Full document snapshot: text = full document UTF-8 */
-    OP_PASTE,         /* Paste UTF-8 text at (row,col): text = UTF-8 string */
-    OP_SNAPSHOT_RANGE /* Localized snapshot of [row, row+end_row) lines */
-} UndoOpType;
-
-typedef struct
-{
-    UndoOpType type;
-    int row, col;            /* Position where op occurred */
-    wchar_t *text;           /* Owned; used by OP_INSERT and OP_DELETE */
-    int len;                 /* Chars in text */
-    int cap;                 /* Text capacity in wchar_t */
-    int join_col;            /* For OP_JOIN: length of previous line before join */
-    char *utf8_snapshot;     /* Owned; used by OP_SNAPSHOT: full document UTF-8 */
-    char *utf8_snapshot_new; /* Owned; used by OP_SNAPSHOT_RANGE for redo */
-    int hard_wrap_mode;      /* Used by OP_SNAPSHOT: 0=soft-wrap, 1=hard-wrap */
-    int end_row, end_col;    /* For OP_PASTE: block coordinates end position after paste */
-    EdLine **snapshot_lines; /* Owned; used by OP_PASTE/OP_SNAPSHOT_RANGE old state: deep line copies */
-    int snapshot_line_count;
-    EdLine **snapshot_lines_new; /* Owned; used by OP_SNAPSHOT_RANGE new state: deep line copies */
-    int snapshot_line_count_new;
-    unsigned short *attr_masks; /* Owned; used by OP_INSERT/OP_DELETE: per-char attribute masks */
-    int attr_mask_count;
-    unsigned char para_align; /* Used by OP_DELETE/OP_SNAPSHOT_RANGE: alignment of line/range */
-} UndoOp;
-
-/* Group of ops treated as one undo/redo step */
-typedef struct
-{
-    UndoOp *ops; /* Owned array */
-    int count, cap;
-    int cur_row, cur_col; /* Cursor before the group */
-    int end_row, end_col; /* Cursor after the group */
-} UndoGroup;
-
 struct Ed
 {
-#if defined(PLATFORM_AMIGA)
-    void *mem_pool; /* Per-document memory pool (APTR from CreatePool) */
-#endif
+    void *mem_pool;   /* Exec memory pool on Amiga, always NULL elsewhere */
+    void *slab_head;  /* Chunks the line structs are carved from */
+    void *slab_free;  /* Free list of line slots */
+    void *arena_head; /* Bump chunks holding exact-fit text from the loader */
 
     EdLine **lines;
     int count, alloc;
@@ -125,20 +111,27 @@ struct Ed
     EdLine **killbuf_lines; /* Rich internal clipboard: copied EdLine objects */
     int killbuf_line_count;
 
-    /* Undo stack of groups */
+    /* Undo and redo stacks of groups, see undo.h */
     UndoGroup *undo_stack;
     int undo_top, undo_cap, undo_max;
 
-    /* Redo stack of groups */
     UndoGroup *redo_stack;
     int redo_top, redo_cap, redo_max;
 
-    /* Coalescing state */
-    int undo_open; /* 1 = current group is open for appending */
-    UndoOpType undo_last_op;
-    int undo_last_row;
-    int undo_last_col_end;  /* col after last recorded char */
-    int undo_snapshot_mode; /* 1 = only allow snapshot operations, block individual ops */
+    /* Group state: undo_open spans several edits, started once one landed */
+    int undo_open;
+    int undo_group_started;
+    int undo_typing; /* 1 = single line typing run, commits coalesce */
+
+    /* Lines captured by undo_begin, waiting for undo_commit */
+    EdLine **pending_before;
+    int pending_row;
+    int pending_n;
+    int pending_row_cur;
+    int pending_col_cur;
+    int pending_doc_count; /* ed->count when the capture was taken */
+
+    int undo_snapshot_mode; /* 1 = a range delta covers the edit, skip per-op recording */
     int hard_wrap;          /* 0=soft-wrap, 1=hard-wrap */
     int word_move_mode;     /* 0=standard, 1=vim-like (non-space blocks) */
 
@@ -161,7 +154,6 @@ struct Ed
     int word_count_initialized; /* 1 = word counts are valid, 0 = lazy init pending */
 
     /* Pre-edit snapshot for auto-rewrap undo */
-    char *auto_rewrap_pre_snapshot;
     int auto_rewrap_pre_start;
     int auto_rewrap_pre_end;
     int auto_rewrap_pre_cursor_row;
@@ -189,7 +181,7 @@ int ed_load_stream(Ed *ed, FILE *fp); /* Streaming UTF-8 in */
 int ed_load_stream_charset(Ed *ed, FILE *fp, const char *charset);
 void ed_load(Ed *ed, const char *utf8_text);                /* UTF-8 in */
 char *ed_to_string(const Ed *ed);                           /* UTF-8 out (caller frees) */
-char *ed_range_to_string(const Ed *ed, int start, int end); /* serialise only [start, end) */
+char *ed_range_to_string(const Ed *ed, int start, int end); /* Serialise only [start, end) */
 void ed_auto_rewrap_capture_pre_snapshot(Ed *ed);
 int ed_save_to_file(const Ed *ed, const char *path, const char *charset_out); /* streaming save */
 
@@ -273,8 +265,9 @@ int ed_search_all_custom(Ed *ed, const wchar_t *needle, int case_sensitive, int 
 /* Re-wrap the current FTN reply quote block (Ctrl+W) */
 int ed_rewrap_ftn_reply(Ed *ed, int width);
 
-/* Re-flow hard-wrap paragraph around cursor; hyph_cb returns break offset or -1 */
-int ed_rewrap_paragraph_ex(Ed *ed, int width, int (*hyph_cb)(void *, const wchar_t *, int, int), void *hyph_data);
+/* Re-flow the hard-wrap paragraph around the cursor, see layout.h The wrap hyphen is never stored, the painter draws it from the break kind */
+int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user);
+int ed_layout_char_width(void *user, wchar_t ch, int col);
 
 /* Insert a text file at the cursor position (with undo) */
 int ed_load_file_at_cursor(Ed *ed, const char *path, const char *charset_in);
@@ -318,6 +311,19 @@ int ed_undo_open_group(Ed *ed);
 int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, EdLine **snapshot_before_lines, int snapshot_before_count, EdLine **snapshot_after_lines, int snapshot_after_count, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col);
 EdLine **ed_clone_line_range(Ed *ed, int start, int end, int *out_count);
 void ed_free_snapshot(char *utf8, EdLine **lines, int count);
+
+/* Line primitives shared with the undo engine */
+EdLine *ed_line_clone(Ed *ed, const EdLine *src);
+EdLine *ed_line_from_wcs(Ed *ed, const wchar_t *w, int n);
+
+/* How the line joins to the next one, LB_HYPHEN means draw a hyphen */
+int ed_line_break(const Ed *ed, int line);
+void ed_line_set_break(Ed *ed, int line, int brk);
+
+/* Drop a hyphen left at the end of the line by an older build or another editor */
+void ed_line_drop_trailing_hyphen(Ed *ed, int line);
+void ed_line_destroy(EdLine *ln);
+int ed_lines_splice(Ed *ed, int row, int n_remove, EdLine **insert, int n_insert);
 int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text);
 
 /* Helper functions from editor_helper.c */
@@ -326,7 +332,6 @@ wchar_t *line_to_wcs_range(EdLine *ln, int start, int end);
 char *ed_block_to_string(Ed *ed, int r1, int c1, int r2, int c2);
 void ed_prefix_invalidate(Ed *ed);
 void ed_prefix_invalidate_from(Ed *ed, int from_line);
-int ed_undo_stack_make_room(UndoGroup **stack, int *top, int *cap, int max);
 void ed_set_pos(Ed *ed, int row, int col);
 int ed_detect_quote_prefix(const wchar_t *line);
 

@@ -221,7 +221,7 @@ static int compute_dirty_row(int r)
             s_dirty_tmp[c] = 1;
 
         any = (cols > 0);
-        has_wide = 1; /* paint everything */
+        has_wide = 1; /* Paint everything */
     }
     else
     {
@@ -349,10 +349,10 @@ static void draw_block_glyph(uint32_t cp, int x, int y, int cw, int ch_, UBYTE f
     static UWORD pat_75[2] = {0x7777, 0xDDDD}; /* ▓ dark shade */
     UBYTE saved;
 
-    int xm = x + cw / 2;  /* horizontal middle */
-    int ym = y + ch_ / 2; /* vertical middle */
-    int x1 = x + cw - 1;  /* right edge */
-    int y1 = y + ch_ - 1; /* bottom edge */
+    int xm = x + cw / 2;  /* Horizontal middle */
+    int ym = y + ch_ / 2; /* Vertical middle */
+    int x1 = x + cw - 1;  /* Right edge */
+    int y1 = y + ch_ - 1; /* Bottom edge */
 
     if (!ami_rp || cw < 2 || ch_ < 2)
         return;
@@ -497,7 +497,7 @@ static void render_cell(int row, int col, chtype ch, int attrs)
     char buf[2];
     char utf8_buf[5]; /* UTF-8 buffer for TTF (max 4 bytes + null) */
     UBYTE saved;
-    int cell_w = fw; /* width of the area to repaint -- fw or 2*fw */
+    int cell_w = fw; /* Width of the area to repaint. fw or 2*fw */
     chtype draw_ch = ch;
 
     if (!ami_rp || row < 0 || row >= LINES || col < 0 || col >= COLS)
@@ -678,7 +678,7 @@ static void render_all()
                     if (s_shadow)
                         s_shadow[r * COLS + c] = *cc;
 
-                    run_len++; /* counts for area, not for urun */
+                    run_len++; /* Counts for area, not for urun */
                     c++;
 
                     continue;
@@ -1209,7 +1209,7 @@ static void ami_init_fonts(void)
 /* Create the Amiga window based on current font metrics */
 static int ami_create_window(void)
 {
-    struct Screen *scr;
+    struct Screen *scr = NULL;
     ULONG idcmp, wfl;
     int dw, dh, sw, sh;
 

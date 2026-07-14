@@ -94,7 +94,7 @@ static void ui_init_locale(void)
     codeset = nl_langinfo(CODESET);
 
     if (codeset && (strcmp(codeset, "UTF-8") == 0 || strcmp(codeset, "utf8") == 0 || strcmp(codeset, "UTF8") == 0))
-        return; /* environment already UTF-8 */
+        return; /* Environment already UTF-8 */
 
     /* Try to upgrade LC_CTYPE to UTF-8 locale */
     for (i = 0; utf8_fallbacks[i]; i++)
@@ -104,7 +104,7 @@ static void ui_init_locale(void)
             codeset = nl_langinfo(CODESET);
 
             if (codeset && (strcmp(codeset, "UTF-8") == 0 || strcmp(codeset, "utf8") == 0 || strcmp(codeset, "UTF8") == 0))
-                return; /* success */
+                return; /* Success */
         }
     }
 #endif
@@ -364,7 +364,6 @@ int main(int argc, char **argv)
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
     /* Set cursor color via OSC 12 escape sequence (Unix/Linux) */
-
     tty = fopen("/dev/tty", "w");
 
     if (tty)
@@ -644,6 +643,7 @@ int main(int argc, char **argv)
             if (tab)
             {
                 tab->show_line_numbers = cfg.show_line_numbers;
+
                 ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
 
                 te_app_add_tab(app, tab);

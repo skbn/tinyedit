@@ -25,8 +25,8 @@ extern "C"
     /* Suggested break points for `word` (ASCII / UTF-8) */
     int hyph_split_word(TeApp *app, const char *word, int word_len, int *out_pos, int *out_count);
 
-    /* Find best hyphenation break point for a word given a column limit */
-    int hyph_find_break(TeApp *app, const wchar_t *word, int word_len, int col_limit);
+    /* Break points for the layout engine, in character indices */
+    int ui_layout_hyphen(void *user, const wchar_t *word, int len, int *out, int max);
 
 #ifdef __cplusplus
 }

@@ -388,7 +388,7 @@ int ui_spell_suggest(TeApp *app, const char *word, char **suggestions, int count
     int selected;
     int i;
 
-    total = (count > 0 ? count : 0) + 1; /* always offer "Add" */
+    total = (count > 0 ? count : 0) + 1; /* Always offer "Add" */
     items = (const char **)malloc((size_t)total * sizeof(char *));
 
     if (!items)
@@ -493,8 +493,8 @@ static int hyphen_split_find(TeApp *app, Ed *ed, EdInfo *info, const wchar_t *li
 
     memset(hs, 0, sizeof(*hs));
 
-    /* Case A: hyphen at EOL followed by lowercase word */
-    if (word_end < line_len && line[word_end] == L'-' && word_end + 1 == line_len && info->row + 1 < info->line_count)
+    /* The word reaches the end of a line that was broken inside a word, the hyphen is not in the text any more, the break kind says so */
+    if (word_end == line_len && ed_line_break(ed, info->row) == LB_HYPHEN && info->row + 1 < info->line_count)
     {
         const wchar_t *next_line = ed_line_wcs(ed, info->row + 1);
 
@@ -513,7 +513,7 @@ static int hyphen_split_find(TeApp *app, Ed *ed, EdInfo *info, const wchar_t *li
 
                 hs->first_row = info->row;
                 hs->first_start = word_start;
-                hs->first_hyphen = word_end;
+                hs->first_hyphen = word_end - 1;
                 hs->second_row = info->row + 1;
                 hs->second_start = 0;
                 hs->second_end = next_end;
@@ -533,7 +533,7 @@ static int hyphen_split_find(TeApp *app, Ed *ed, EdInfo *info, const wchar_t *li
         return 0;
     }
 
-    /* Case B: word at column 0 preceded by "word-" on previous line */
+    /* Word at column 0 preceded by "word-" on previous line */
     if (word_start == 0 && info->row > 0 && word_end > 0 && iswlower(line[0]))
     {
         const wchar_t *prev_line = ed_line_wcs(ed, info->row - 1);
@@ -542,9 +542,9 @@ static int hyphen_split_find(TeApp *app, Ed *ed, EdInfo *info, const wchar_t *li
         {
             int prev_len = ed_line_len(ed, info->row - 1);
 
-            if (prev_len >= 2 && prev_line[prev_len - 1] == L'-')
+            if (prev_len >= 1 && ed_line_break(ed, info->row - 1) == LB_HYPHEN)
             {
-                int prev_word_end = prev_len - 1;
+                int prev_word_end = prev_len;
                 int prev_word_start = prev_word_end;
 
                 while (prev_word_start > 0 && te_is_word_char_ex(app->spell_handle, prev_line[prev_word_start - 1]))
@@ -651,8 +651,7 @@ int spell_check_word(TeApp *app)
 
     line_len = ed_line_len(ed, info.row);
 
-    /* Find word boundaries. Use _ex so WORDCHARS (".", "'", digits)
-     * from the loaded .aff also count -- e.g. "etc." extracts whole */
+    /* Find word boundaries. Use _ex so WORDCHARS (".", "'", digits) from the loaded .aff also count -- e.g. "etc." extracts whole */
     word_start = info.col;
 
     while (word_start > 0 && te_is_word_char_ex(app->spell_handle, line[word_start - 1]))
@@ -788,7 +787,7 @@ int spell_check_word(TeApp *app)
     {
         if (spell_add_to_custom_dict(app->spell_handle, check_buf, app->cfg.spell_custom_dict) == 0)
         {
-            app->spell_word_status = 1; /* now considered correct */
+            app->spell_word_status = 1; /* Now considered correct */
 
             ui_spell_cache_clear(&app->spell_cache);
             te_status(app, "Added '%s' to dictionary", check_buf);

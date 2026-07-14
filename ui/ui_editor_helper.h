@@ -19,7 +19,6 @@
 int charset_select(TeApp *app);
 
 #ifdef HAVE_HYPHEN
-int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count);
 #endif
 
 void clear_search_highlights(TeApp *app);
@@ -85,11 +84,11 @@ int ui_rich_align_set(TeApp *app, unsigned char align);
 int wcswidth(const wchar_t *wcs, size_t n);
 #endif
 
-/* Visual width in display columns: wide glyphs=2, normal=1, control=1 */
-int wcs_vwidth(const wchar_t *s, int n);
-
 /* Visual width with tab-stop support */
 int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width);
+
+/* Compute the screen X where a wrap hyphen must be drawn for a hard-wrap line */
+int editor_hyphen_screen_x(int offset_x, int ln_offset, int width, int align_ind, const wchar_t *line, int line_len, int tab_width, int *out_visible);
 
 /* Draw wide string with tab expansion */
 void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_width);

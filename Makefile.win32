@@ -77,11 +77,13 @@ CORE_OBJS = $(OBJDIR)/utf8.o $(OBJDIR)/charset.o \
             $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
             $(OBJDIR)/search.o $(OBJDIR)/portable.o $(OBJDIR)/ncursesw_win32.o \
             $(OBJDIR)/te_rastport_win32.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
 UI_OBJS   = $(OBJDIR)/te_app.o \
             $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_editor.o \
             $(OBJDIR)/ui_editor_helper.o \
+            $(OBJDIR)/ui_view.o \
+            $(OBJDIR)/ui_keys.o \
             $(OBJDIR)/ui_assist.o \
             $(OBJDIR)/ui_files.o \
             $(OBJDIR)/ui_setup.o \
@@ -505,6 +507,14 @@ $(OBJDIR)/pngwutil.o: $(PNGDIR)/pngwutil.c | $(OBJDIR)
 $(OBJDIR)/editor.o: $(COMPDIR)/editor.c $(COMPDIR)/editor.h $(COMPDIR)/ed_attr.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/undo.o: $(COMPDIR)/undo.c $(COMPDIR)/undo.h $(COMPDIR)/editor.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/layout.o: $(COMPDIR)/layout.c $(COMPDIR)/layout.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+
+
 $(OBJDIR)/ed_attr.o: $(COMPDIR)/ed_attr.c $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
@@ -525,6 +535,12 @@ $(OBJDIR)/te_app.o: $(UIDIR)/te_app.c $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_popup.o: $(UIDIR)/ui_popup.c | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_keys.o: $(UIDIR)/ui_keys.c $(UIDIR)/ui_keys.h $(UIDIR)/te.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_view.o: $(UIDIR)/ui_view.c $(UIDIR)/ui_view.h $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_editor.o: $(UIDIR)/ui_editor.c | $(OBJDIR)

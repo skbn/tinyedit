@@ -91,82 +91,64 @@ int hyph_split_word(TeApp *app, const char *word, int word_len, int *out_pos, in
 #endif
 }
 
-/* Auxiliary function to calculate character width */
-static int char_width(wchar_t c)
-{
-    if (c == L'\t')
-        return 1;
-
-    /* For wide characters we assume 1 for simplicity. A more sophisticated implementation would use wcwidth */
-    return 1;
-}
-
-int hyph_find_break(TeApp *app, const wchar_t *word, int word_len, int col_limit)
+/* Dict bridge: encode to utf8, ask for breaks, map byte offsets to char indices */
+int ui_layout_hyphen(void *user, const wchar_t *word, int len, int *out, int max)
 {
 #ifdef HAVE_HYPHEN
-    char *utf8_word = NULL;
-    int utf8_len;
-    int hyph_pos[16];
-    int hyph_count = 0;
-    int k;
+    TeApp *app = (TeApp *)user;
+    char utf8[512];
+    int byte_of[512];
+    int pos[HYPH_MAX_BREAKS];
+    int count = 0;
+    int used = 0;
+    int n = 0;
+    int i;
 
-    /* Validations */
-    if (!app || !word || word_len <= 0)
-        return -1;
+    if (!app || !word || len <= 0 || !out || max <= 0)
+        return 0;
 
-    if (col_limit <= 0)
-        return -1;
-
-    if (word_len < 4 || word_len >= 512)
-        return -1;
-
-    if (!app->hyph_handle)
-        return -1;
-
-    /* Convert to UTF-8 */
-    utf8_word = wcs_to_utf8(word, word_len);
-
-    if (!utf8_word)
-        return -1;
-
-    utf8_len = (int)strlen(utf8_word);
-
-    /* Get breakpoints */
-    if (!hyph_split_word(app, utf8_word, utf8_len, hyph_pos, &hyph_count))
+    /* Encode the word and remember where every character starts */
+    for (i = 0; i < len; i++)
     {
-        free(utf8_word);
-        return -1;
+        int k;
+
+        if (used + 4 >= (int)sizeof(utf8))
+            return 0;
+
+        byte_of[i] = used;
+
+        k = utf8_encode((uint32_t)word[i], utf8 + used);
+
+        if (k <= 0)
+            return 0;
+
+        used += k;
     }
 
-    /* Limit hyph_count to array size */
-    if (hyph_count > 16)
-        hyph_count = 16;
+    utf8[used] = '\0';
+    byte_of[len] = used;
 
-    /* Search for valid breakpoint from right to left */
-    for (k = hyph_count - 1; k >= 0; k--)
+    if (!hyph_split_word(app, utf8, used, pos, &count) || count <= 0)
+        return 0;
+
+    /* Byte offsets back to character indices */
+    for (i = 0; i < count && n < max; i++)
     {
-        int char_off = utf8_charcount(utf8_word, hyph_pos[k]);
-        int break_col = 0;
-        int m;
+        int j;
 
-        /* Validate position */
-        if (char_off <= 0 || char_off >= word_len)
-            continue;
-
-        /* Calculate columns up to breakpoint */
-        for (m = 0; m < char_off; m++)
-            break_col += char_width(word[m]);
-
-        /* Reserve space for '-' */
-        if (break_col > col_limit - 1)
-            continue;
-
-        free(utf8_word);
-        return char_off;
+        for (j = 1; j < len; j++)
+        {
+            if (byte_of[j] == pos[i])
+            {
+                out[n++] = j;
+                break;
+            }
+        }
     }
 
-    free(utf8_word);
+    return n;
+#else
+
+    return 0;
 #endif
-
-    return -1;
 }

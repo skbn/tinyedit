@@ -1393,6 +1393,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 #ifdef HAVE_TTS
                 || strcasecmp(word, "TTS_ENABLED") == 0 || strcasecmp(word, "TTS_VOICE") == 0 || strcasecmp(word, "TTS_RATE") == 0 || strcasecmp(word, "TTS_PITCH") == 0 || strcasecmp(word, "TTS_VOLUME") == 0
 #endif
+#ifdef HAVE_GRAMMAR
+                || strcasecmp(word, "GRAMMAR_ENABLED") == 0 || strcasecmp(word, "GRAMMAR_DICT_PATH") == 0 || strcasecmp(word, "GRAMMAR_DICT_NAME") == 0
+#endif
             )
             {
                 skip_line = 1;

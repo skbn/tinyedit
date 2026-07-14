@@ -174,3 +174,66 @@ void ui_tabs_draw_panel(TeApp *app)
 
     attroff(COLOR_PAIR(COL_BORDER));
 }
+
+/* Keyboard while the tabs panel is open, 1 = key consumed */
+int ui_tabs_panel_key(TeApp *app, int ch, int is_key, int *screen_dirty)
+{
+    if (!app->tabs_panel_active)
+    {
+        /* Tab opens the panel when the tab bar is visible */
+        if (!is_key && ch == '\t' && app->show_tabs)
+        {
+            app->tabs_panel_active = 1;
+            app->tabs_panel_selected = app->active_tab;
+            *screen_dirty = 1;
+
+            return 1;
+        }
+
+        return 0;
+    }
+
+    if (is_key && ch == KEY_UP)
+    {
+        if (app->tabs_panel_selected > 0)
+            app->tabs_panel_selected--;
+
+        *screen_dirty = 1;
+
+        return 1;
+    }
+
+    if (is_key && ch == KEY_DOWN)
+    {
+        if (app->tabs_panel_selected < app->tab_count - 1)
+            app->tabs_panel_selected++;
+
+        *screen_dirty = 1;
+
+        return 1;
+    }
+
+    if (is_key && ch == KEY_ENTER)
+    {
+        te_app_switch_tab(app, app->tabs_panel_selected);
+
+        app->tabs_panel_active = 0;
+        *screen_dirty = 1;
+
+        return 1;
+    }
+
+    if (is_key && ch == 27)
+    {
+        app->tabs_panel_active = 0;
+        *screen_dirty = 1;
+
+        return 1;
+    }
+
+    /* Any other key closes the panel and is handled normally */
+    app->tabs_panel_active = 0;
+    *screen_dirty = 1;
+
+    return 0;
+}

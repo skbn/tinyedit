@@ -20,7 +20,9 @@
 #include "../core/clipboard.h"
 #include "../core/portable.h"
 #include "ui_editor_helper.h"
+#include "ui_view.h"
 #include "../components/editor.h"
+#include "../components/undo.h"
 #include "../components/ed_attr.h"
 #include "te.h"
 #include "ui_files.h"
@@ -47,12 +49,12 @@ static int s_recent_count = 0;
 
 typedef struct
 {
-    char **paths;  /* full path of each hit */
-    int *lines;    /* line number of each hit */
+    char **paths;  /* Full path of each hit */
+    int *lines;    /* Line number of each hit */
     char **labels; /* "path:line: snippet" for ui_popup_list */
     int count;
     int cap;
-    int truncated; /* hit SIF_MAX_HITS limit */
+    int truncated; /* Hit SIF_MAX_HITS limit */
 } SifResults;
 
 #ifdef HAVE_HYPHEN
@@ -63,35 +65,6 @@ typedef struct
 #include "../hyph_wrap/hyph_wrap.h"
 #endif
 #include "ui_hyph.h"
-
-/* Thunk adapting hyph_breakpoints() to EdHyphenFn. user_data is HyphDict* */
-int ui_hyph_thunk(void *user_data, const char *word, int word_len, int *out_pos, int *out_count)
-{
-    HyphDict *h = (HyphDict *)user_data;
-    int cap, n;
-
-    if (!out_count)
-        return 0;
-
-    cap = *out_count;
-
-    if (cap > 16)
-        cap = 16;
-
-    n = 0;
-
-    if (!hyph_breakpoints(h, word, word_len, out_pos, &n) || n == 0)
-    {
-        *out_count = 0;
-        return 0;
-    }
-
-    if (n > cap)
-        n = cap;
-
-    *out_count = n;
-    return 1;
-}
 
 #endif
 
@@ -142,21 +115,6 @@ static int ed_char_vwidth(wchar_t ch)
 #else
 #define CHAR_VWIDTH(c) ((wcswidth(&(c), 1) > 0) ? wcswidth(&(c), 1) : 1)
 #endif
-
-/* Visual width in display columns: wide chars=2, narrow=1, control=1 */
-int wcs_vwidth(const wchar_t *s, int n)
-{
-    int v = 0;
-    int i;
-
-    if (!s || n <= 0)
-        return 0;
-
-    for (i = 0; i < n; i++)
-        v += CHAR_VWIDTH(s[i]);
-
-    return v;
-}
 
 /* Repaint bold/underline runs over an already-drawn segment [seg_start, seg_end) */
 void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int seg_start, int seg_end, int seg_start_vcol, int tab_width)
@@ -385,7 +343,8 @@ int editor_body_offset(TeApp *app, int line_count)
         margin++;
     }
 
-    margin += 1; /* space after the number */
+    /* Space after the number */
+    margin += 1;
 
     tab_width = app->cfg.tab_width > 0 ? app->cfg.tab_width : 4;
 
@@ -499,10 +458,12 @@ static int do_replace(TeApp *app, const wchar_t *needle, const wchar_t *repl)
 
 int replace(TeApp *app)
 {
-    wchar_t needle[64], repl[64];
+    wchar_t needle[64];
+    wchar_t repl[64];
     int case_sensitive = app->search.case_sensitive;
     int whole_word = app->search.whole_word;
-    int *rows = NULL, *cols = NULL;
+    int *rows = NULL;
+    int *cols = NULL;
     int match_count;
 
     wcsncpy(needle, app->search.query, 63);
@@ -694,7 +655,8 @@ int replace_all(TeApp *app)
 int do_search(TeApp *app)
 {
     wchar_t tmp[64];
-    int *rows = NULL, *cols = NULL;
+    int *rows = NULL;
+    int *cols = NULL;
     int match_count;
     int choice;
 
@@ -717,6 +679,7 @@ int do_search(TeApp *app)
     {
         free(rows);
         free(cols);
+
         te_status(app, "Not found");
         return 1;
     }
@@ -887,13 +850,15 @@ int ui_editor_detect_wrap_hyphens(TeApp *app)
 
         word_utf8 = wcs_to_utf8(combined, combined_len);
         spell_ok = (word_utf8 && spell_check(app->spell_handle, word_utf8));
+
         free(word_utf8);
         word_utf8 = NULL;
 
-        /* If the joined word is valid, the hyphen was probably a wrap-hyphen */
         if (spell_ok)
         {
-            ln->has_wrap_hyphen = 1;
+            ed_line_set_break(ed, i, LB_HYPHEN);
+            ed_line_drop_trailing_hyphen(ed, i);
+
             detected++;
         }
     }
@@ -978,9 +943,7 @@ int paste(TeApp *app)
         }
         else
         {
-            free(ed->auto_rewrap_pre_snapshot);
-
-            ed->auto_rewrap_pre_snapshot = NULL;
+            undo_abort(ed);
             te_status(app, "Paste failed");
         }
     }
@@ -1035,9 +998,7 @@ int paste(TeApp *app)
         }
         else
         {
-            free(ed->auto_rewrap_pre_snapshot);
-
-            ed->auto_rewrap_pre_snapshot = NULL;
+            undo_abort(ed);
             te_status(app, "Nothing to paste");
         }
     }
@@ -1074,7 +1035,7 @@ int ui_editor_goto_line(TeApp *app)
 
         if (n >= 1)
         {
-            ed_goto_line(te_app_get_editor(app), n - 1);
+            ed_goto_line(te_app_get_editor(app), n);
             ed_ensure_visible(te_app_get_editor(app));
 
             /* In soft-wrap mode, reset viewport to cursor to avoid slow walking */
@@ -1090,6 +1051,7 @@ int copy(TeApp *app)
 {
     EdInfo info;
     Ed *ed = te_app_get_editor(app);
+
     ed_get_info(ed, &info);
 
     if (info.block.active)
@@ -1122,15 +1084,17 @@ int copy(TeApp *app)
 int cut(TeApp *app)
 {
     EdInfo info;
+
     ed_get_info(te_app_get_editor(app), &info);
 
     if (info.block.active)
     {
         char *utf8 = ed_block_get_utf8(te_app_get_editor(app));
 
+        ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
+
         if (ed_block_cut(te_app_get_editor(app)) == 0)
         {
-            ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
             clear_search_highlights(app);
 
             /* Copy to external clipboard if available */
@@ -1157,6 +1121,7 @@ int cut(TeApp *app)
 int ui_editor_goto_start(TeApp *app)
 {
     EdInfo info;
+
     ed_get_info(te_app_get_editor(app), &info);
 
     if (info.block.active)
@@ -1186,6 +1151,7 @@ int ui_editor_goto_start(TeApp *app)
 int ui_editor_goto_end(TeApp *app)
 {
     EdInfo info;
+
     ed_get_info(te_app_get_editor(app), &info);
 
     if (info.line_count > 0)
@@ -1220,6 +1186,7 @@ int ui_editor_goto_end(TeApp *app)
 int ui_editor_export(TeApp *app)
 {
     EdInfo info;
+
     ed_get_info(te_app_get_editor(app), &info);
 
     if (!info.block.active)
@@ -1247,12 +1214,6 @@ int ui_editor_export(TeApp *app)
 }
 
 #ifdef HAVE_HYPHEN
-static int ftn_reply_hyph_cb(void *user_data, const wchar_t *word, int word_wlen, int col_limit)
-{
-    TeApp *app = (TeApp *)user_data;
-
-    return hyph_find_break(app, word, word_wlen, col_limit);
-}
 #endif
 
 int ftn_reply(TeApp *app)
@@ -1260,8 +1221,8 @@ int ftn_reply(TeApp *app)
     Ed *ed = te_app_get_editor(app);
     int col = editor_eff_wrap(app);
     int rc;
-    int (*hyph_cb)(void *, const wchar_t *, int, int) = NULL;
-    void *hyph_data = NULL;
+    LayoutHyphenFn hyph = NULL;
+    void *hyph_user = NULL;
 
     if (col <= 0)
         col = (app->wrap_col > 0) ? app->wrap_col : 75;
@@ -1271,6 +1232,7 @@ int ftn_reply(TeApp *app)
     if (rc == 0)
     {
         clear_search_highlights(app);
+
         te_status(app, "FTN reply rewrapped");
         ed_ensure_visible(ed);
         return 1;
@@ -1279,12 +1241,14 @@ int ftn_reply(TeApp *app)
 #ifdef HAVE_HYPHEN
     if (app->hyph_wrap_enabled && app->hyph_handle)
     {
-        hyph_cb = ftn_reply_hyph_cb;
-        hyph_data = app;
+        hyph = ui_layout_hyphen;
+        hyph_user = app;
     }
 #endif
 
-    rc = ed_rewrap_paragraph_ex(ed, col, hyph_cb, hyph_data);
+    ed_auto_rewrap_capture_pre_snapshot(ed);
+
+    rc = ed_rewrap_paragraph_ex(ed, col, hyph, hyph_user);
 
     clear_search_highlights(app);
 
@@ -1433,7 +1397,7 @@ static int sif_cb(void *user, const char *path, int line_no, const char *line_te
     if (r->count >= SIF_MAX_HITS)
     {
         r->truncated = 1;
-        return 1; /* stop walk */
+        return 1; /* Stop walk */
     }
 
     if (r->count >= r->cap)
@@ -1448,7 +1412,7 @@ static int sif_cb(void *user, const char *path, int line_no, const char *line_te
     while (*p == ' ' || *p == '\t')
         p++;
 
-    trimmed_text = (char *)p; /* alias, no allocation */
+    trimmed_text = (char *)p; /* Alias, no allocation */
 
     /* Use just the basename in the label to keep it short */
     base = strrchr(path, '/');
@@ -1627,7 +1591,7 @@ int do_search_in_files(TeApp *app)
         strncpy(chosen_path, res.paths[choice], sizeof(chosen_path) - 1);
         chosen_path[sizeof(chosen_path) - 1] = '\0';
 
-        sif_free(&res); /* free before opening the new tab */
+        sif_free(&res); /* Free before opening the new tab */
 
         /* Open the file in a new tab and jump to the line */
         new_tab = te_tab_new();
@@ -1883,7 +1847,7 @@ void ui_editor_recent_free(void)
 /* Show recent files popup and open the selected one */
 int ui_editor_recent_open(TeApp *app)
 {
-    const char **items;
+    const char **items = NULL;
     int i;
     int sel;
 
@@ -2041,12 +2005,6 @@ int ui_rich_attr_toggle(TeApp *app, unsigned short bit)
     int r1, c1, r2, c2;
     int row;
     int all_set;
-    char *snapshot_before = NULL;
-    char *snapshot_after = NULL;
-    EdLine **before_lines = NULL;
-    EdLine **after_lines = NULL;
-    int before_count = 0;
-    int after_count = 0;
     int nrows = 0;
     int undo_ok = 0;
 
@@ -2095,13 +2053,12 @@ int ui_rich_attr_toggle(TeApp *app, unsigned short bit)
         }
     }
 
-    /* Snapshot the affected lines so the style change is undoable */
-
+    /* One delta over the affected lines makes the style change undoable */
     nrows = r2 - r1 + 1;
-    snapshot_before = ed_range_to_string(ed, r1, r1 + nrows);
-    before_lines = ed_clone_line_range(ed, r1, r1 + nrows, &before_count);
 
-    if (snapshot_before && before_lines && ed_undo_open_group(ed) == 0)
+    undo_abort(ed);
+
+    if (undo_begin(ed, r1, nrows) == 0)
         undo_ok = 1;
 
     if (all_set)
@@ -2117,25 +2074,9 @@ int ui_rich_attr_toggle(TeApp *app, unsigned short bit)
 
     if (undo_ok)
     {
-        snapshot_after = ed_range_to_string(ed, r1, r1 + nrows);
-        after_lines = ed_clone_line_range(ed, r1, r1 + nrows, &after_count);
-
-        ed->undo_open = 0;
-
-        if (snapshot_after && after_lines)
-        {
-            /* Same line count before and after: pure style change */
-            undo_push_snapshot_range(ed, r1, 0, snapshot_before, snapshot_after, before_lines, before_count, after_lines, after_count, nrows, nrows, info.row, info.col, info.row, info.col);
-        }
-        else
-        {
-            ed_free_snapshot(snapshot_before, before_lines, before_count);
-            ed_free_snapshot(snapshot_after, after_lines, after_count);
-        }
-    }
-    else
-    {
-        ed_free_snapshot(snapshot_before, before_lines, before_count);
+        /* same line count before and after: a pure style change */
+        undo_commit(ed, nrows);
+        ed_save_undo(ed);
     }
 
     ed_set_modified(ed, 1);
@@ -2149,12 +2090,6 @@ int ui_rich_align_set(TeApp *app, unsigned char align)
     Ed *ed = te_app_get_editor(app);
     EdInfo info;
     int r1, r2, row;
-    char *snapshot_before = NULL;
-    char *snapshot_after = NULL;
-    EdLine **before_lines = NULL;
-    EdLine **after_lines = NULL;
-    int before_count = 0;
-    int after_count = 0;
     int nrows;
     int undo_ok = 0;
     int changed = 0;
@@ -2183,7 +2118,6 @@ int ui_rich_align_set(TeApp *app, unsigned char align)
     }
 
     /* Snapshot the affected lines so the alignment change is undoable */
-
     if (r2 >= ed->count)
         r2 = ed->count - 1;
 
@@ -2198,10 +2132,9 @@ int ui_rich_align_set(TeApp *app, unsigned char align)
     if (!changed)
         return 1;
 
-    snapshot_before = ed_range_to_string(ed, r1, r1 + nrows);
-    before_lines = ed_clone_line_range(ed, r1, r1 + nrows, &before_count);
+    undo_abort(ed);
 
-    if (snapshot_before && before_lines && ed_undo_open_group(ed) == 0)
+    if (undo_begin(ed, r1, nrows) == 0)
         undo_ok = 1;
 
     for (row = r1; row <= r2 && row < ed->count; row++)
@@ -2209,24 +2142,8 @@ int ui_rich_align_set(TeApp *app, unsigned char align)
 
     if (undo_ok)
     {
-        snapshot_after = ed_range_to_string(ed, r1, r1 + nrows);
-        after_lines = ed_clone_line_range(ed, r1, r1 + nrows, &after_count);
-
-        ed->undo_open = 0;
-
-        if (snapshot_after && after_lines)
-        {
-            undo_push_snapshot_range(ed, r1, 0, snapshot_before, snapshot_after, before_lines, before_count, after_lines, after_count, nrows, nrows, info.row, info.col, info.row, info.col);
-        }
-        else
-        {
-            ed_free_snapshot(snapshot_before, before_lines, before_count);
-            ed_free_snapshot(snapshot_after, after_lines, after_count);
-        }
-    }
-    else
-    {
-        ed_free_snapshot(snapshot_before, before_lines, before_count);
+        undo_commit(ed, nrows);
+        ed_save_undo(ed);
     }
 
     ed_set_modified(ed, 1);

@@ -71,11 +71,11 @@ typedef struct
 /* Search state */
 typedef struct
 {
-    wchar_t query[64];        /* last search query */
-    wchar_t last_replace[64]; /* last replacement text */
+    wchar_t query[64];        /* Last search query */
+    wchar_t last_replace[64]; /* Last replacement text */
     int *rows;                /* malloc'd match row indices */
     int *cols;                /* malloc'd match col indices */
-    int count;                /* number of matches */
+    int count;                /* Number of matches */
     int is_mode;              /* 0=normal, 1=search mode */
     int only_mode;            /* 1=only search mode activated by F5 */
     int current_match;        /* Current match index (0-based) for navigation */
@@ -149,8 +149,8 @@ typedef struct
 
 #ifdef HAVE_GRAMMAR
     void *grammar_handle; /* GramCheck* (opaque, avoids header pull-in) */
-    int grammar_enabled;  /* mirrors cfg.grammar_enabled */
-    int grammar_active;   /* runtime on/off */
+    int grammar_enabled;  /* Mirrors cfg.grammar_enabled */
+    int grammar_active;   /* Runtime on/off */
 #endif
 
 #ifdef HAVE_TRANSLATE
@@ -171,7 +171,7 @@ typedef struct
     /* Independent editor assistance toggles */
     int assist_smart_quotes; /* '  -> ‘/’ ; "  -> “/” */
     int assist_repeat_check; /* warn/highlight on "the the" etc */
-    int assist_auto_cap;     /* capitalize after ". ", "? ", "! " */
+    int assist_auto_cap;     /* Capitalize after ". ", "? ", "! " */
 
     int rich_mode; /* rich-text mode: bold/italic/underline/alignment keys active */
 } TeApp;
@@ -350,6 +350,7 @@ void te_hline(int y, int x, int len);
 const char *te_wcs2u8(const wchar_t *wcs);
 
 /* ui_tabs.c (tab navigation) */
+int ui_tabs_panel_key(TeApp *app, int ch, int is_key, int *screen_dirty);
 int ui_tabs_switch_next(TeApp *app);
 int ui_tabs_switch_prev(TeApp *app);
 int ui_tabs_switch_by_index(TeApp *app, int index);

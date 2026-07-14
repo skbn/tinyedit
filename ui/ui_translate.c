@@ -22,6 +22,7 @@
 
 #include "../components/config.h"
 #include "../components/editor.h"
+#include "../components/undo.h"
 #include "../core/utf8.h"
 
 #ifdef HAVE_TRANSLATE
@@ -70,6 +71,7 @@ int ui_translate_load_from_config(TeApp *app)
         backend_name = "mymemory";
         break;
     }
+
     opts.backend = translate_backend_parse(backend_name);
 
     opts.endpoint = app->cfg.translate_endpoint[0] ? app->cfg.translate_endpoint : NULL;
@@ -195,7 +197,6 @@ static int grab_source_text(TeApp *app, char **out_text, int *out_row_first, int
         last++;
 
     /* Join lines with spaces */
-
     for (row = first; row <= last; row++)
     {
         const wchar_t *line = ed_line_wcs(ed, row);
@@ -280,55 +281,30 @@ static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
 
     old_count = last - first + 1;
 
-    /* Snapshot the original lines so undo can restore them in one step */
-    snapshot_before = ed_range_to_string(ed, first, last + 1);
+    /* One delta over the paragraph: those lines became these */
+    undo_abort(ed);
 
-    if (!snapshot_before)
-    {
-        ed->undo_open = 0;
+    if (undo_begin(ed, first, old_count) != 0)
         return -1;
-    }
 
-    snapshot_before_lines = ed_clone_line_range(ed, first, last + 1, &snapshot_before_count);
-
-    if (!snapshot_before_lines)
-    {
-        ed->undo_open = 0;
-        free(snapshot_before);
-        return -1;
-    }
-
-    /* Replace the whole range in one operation */
     new_count = ed_replace_range_from_utf8(ed, first, old_count, new_utf8);
 
     if (new_count <= 0)
     {
-        ed->undo_open = 0;
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
+        undo_abort(ed);
         return -1;
     }
 
-    /* Snapshot the new lines for redo */
-    snapshot_after = ed_range_to_string(ed, first, first + new_count);
-
-    if (!snapshot_after)
-    {
-        ed->undo_open = 0;
-        ed_free_snapshot(snapshot_before, snapshot_before_lines, snapshot_before_count);
-        return -1;
-    }
-
-    snapshot_after_lines = ed_clone_line_range(ed, first, first + new_count, &snapshot_after_count);
-
-    /* Place cursor at end of inserted text, like ed_paste_text does */
+    /* Cursor lands at the end of the inserted text, like a paste */
     cursor_row_after = first + new_count - 1;
     cursor_col_after = ed_line_len(ed, cursor_row_after);
 
-    ed->undo_open = 0;
+    ed_set_pos(ed, cursor_row_after, cursor_col_after);
 
-    /* Record one OP_SNAPSHOT_RANGE for the entire replacement */
-    if (undo_push_snapshot_range(ed, first, 0, snapshot_before, snapshot_after, snapshot_before_lines, snapshot_before_count, snapshot_after_lines, snapshot_after_count, old_count, new_count, cursor_row_before, cursor_col_before, cursor_row_after, cursor_col_after) != 0)
+    if (undo_commit(ed, new_count) != 0)
         return -1;
+
+    ed_save_undo(ed);
 
     ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, first);
@@ -445,6 +421,7 @@ int ui_translate_action(TeApp *app)
     detected[0] = '\0';
 
     result = translate_text((TranslateHandle *)app->translate_handle, from_lang, to_lang, src, detected, sizeof(detected), err, sizeof(err));
+
     refresh();
 
     if (!result)
@@ -465,7 +442,7 @@ int ui_translate_action(TeApp *app)
         memcpy(header, src, (size_t)n);
         header[n] = '\0';
 
-        /* trim trailing whitespace for clean header */
+        /* Trim trailing whitespace for clean header */
         while (n > 0 && (header[n - 1] == ' ' || header[n - 1] == '\n' || header[n - 1] == '\r' || header[n - 1] == '\t'))
             header[--n] = '\0';
 
@@ -514,7 +491,7 @@ int ui_translate_action(TeApp *app)
             ed_save_undo(ed);
 
             ed_set_pos(ed, last, ed_line_len(ed, last));
-            ed_enter(ed); /* line break */
+            ed_enter(ed); /* Line break */
 
             if (ed_paste_text_with_undo(ed, result) == 0)
             {

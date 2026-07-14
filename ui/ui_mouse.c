@@ -36,7 +36,7 @@ static int s_last_x = -1;
 static int s_click_count = 0;
 static int s_dragging = 0;
 static int s_did_drag = 0;
-static int s_keep_block = 0; /* set by double/triple click */
+static int s_keep_block = 0; /* Set by double/triple click */
 static unsigned long s_last_click_time = 0;
 static unsigned long s_event_time_ms = 0;
 static int s_event_time_valid = 0; /* 1 = s_event_time_ms was set by platform */
@@ -68,6 +68,7 @@ static unsigned long get_time_ms(void)
     struct timeval tv;
 
     gettimeofday(&tv, NULL);
+
     t = (unsigned long)(tv.tv_sec * 1000UL + tv.tv_usec / 1000UL);
 #endif
 
