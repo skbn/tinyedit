@@ -329,7 +329,6 @@ int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width)
 int editor_body_offset(TeApp *app, int line_count)
 {
     int margin = 1;
-    int tab_width;
 
     if (!app || !te_app_get_show_line_numbers(app))
         return 0;
@@ -343,13 +342,8 @@ int editor_body_offset(TeApp *app, int line_count)
         margin++;
     }
 
-    /* Space after the number */
+    /* One space after the number */
     margin += 1;
-
-    tab_width = app->cfg.tab_width > 0 ? app->cfg.tab_width : 4;
-
-    /* Round up to the next multiple of tab_width */
-    margin = ((margin + tab_width - 1) / tab_width) * tab_width;
 
     return margin;
 }
