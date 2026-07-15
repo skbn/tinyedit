@@ -311,13 +311,23 @@ int do_save(TeApp *app)
     }
     else if (ui_files_is_wp4(te_app_get_filename(app)))
     {
-        FILE *fp = fopen(te_app_get_filename(app), "wb");
+        FILE *fp = NULL;
         char werr[128];
         char wwarn[128];
         int rc = -1;
 
         werr[0] = '\0';
         wwarn[0] = '\0';
+
+        /* WP 4.2 is an 8-bit format; refuse before truncating the file */
+        if (charset_bits(app->charset_out) != 8)
+        {
+            snprintf(werr, sizeof(werr), "charset %s is not an 8-bit charset; WP 4.2 requires an 8-bit charset", app->charset_out[0] ? app->charset_out : "(none)");
+            te_status(app, "WP error: %s", werr);
+            return -1;
+        }
+
+        fp = fopen(te_app_get_filename(app), "wb");
 
         if (fp)
         {

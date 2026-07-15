@@ -1407,6 +1407,7 @@ static int rewrap_one_paragraph_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, 
 int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
 {
     int n = 0;
+    int n_after = 0;
 
     if (!ed || width <= 0 || ed->count <= 0)
         return -1;
@@ -1421,7 +1422,16 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
     /* The paragraph was captured before the edit, this closes that delta */
     ed->undo_snapshot_mode = 0;
 
-    if (undo_commit(ed, n) != 0)
+    /* Adjust the post-edit line count when the captured range includes a guard line beyond the paragraph */
+    if (ed->pending_before)
+        n_after = ed->pending_n + (ed->count - ed->pending_doc_count);
+    else
+        n_after = n;
+
+    if (n_after < 0)
+        n_after = 0;
+
+    if (undo_commit(ed, n_after) != 0)
         return -1;
 
     ed_save_undo(ed);

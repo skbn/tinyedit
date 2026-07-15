@@ -597,8 +597,6 @@ static void doc_dirty_from(Ed *ed, int row)
     if (ed->prefix_dirty_from < 0 || row < ed->prefix_dirty_from)
         ed->prefix_dirty_from = row;
 
-    ed->prefix_valid = 0;
-
     if (ed->syntax_state_dirty_from < 0 || row < ed->syntax_state_dirty_from)
         ed->syntax_state_dirty_from = row;
 
@@ -653,8 +651,8 @@ static int doc_insert_line(Ed *ed, int row, EdLine *ln)
     return 0;
 }
 
-/* Remove and free count lines at row */
-static void doc_remove_lines(Ed *ed, int row, int count)
+/* Remove and free count lines at row without inheriting the previous line's break flag */
+static void doc_remove_lines_raw(Ed *ed, int row, int count)
 {
     int i;
 
@@ -663,10 +661,6 @@ static void doc_remove_lines(Ed *ed, int row, int count)
 
     if (row + count > ed->count)
         count = ed->count - row;
-
-    /* removing lines: the line above inherits the break of the last removed one */
-    if (count > 0 && row > 0)
-        ed->lines[row - 1]->brk = ed->lines[row + count - 1]->brk;
 
     for (i = 0; i < count; i++)
     {
@@ -680,6 +674,22 @@ static void doc_remove_lines(Ed *ed, int row, int count)
     ed->count -= count;
 
     doc_dirty_from(ed, row);
+}
+
+/* Remove and free count lines at row */
+static void doc_remove_lines(Ed *ed, int row, int count)
+{
+    if (row < 0 || row >= ed->count)
+        return;
+
+    if (row + count > ed->count)
+        count = ed->count - row;
+
+    /* Let the previous line inherit the last removed line's break flag */
+    if (count > 0 && row > 0)
+        ed->lines[row - 1]->brk = ed->lines[row + count - 1]->brk;
+
+    doc_remove_lines_raw(ed, row, count);
 }
 
 /* Build a line from decoded characters, used by the layout reflow */
@@ -824,7 +834,7 @@ void ed_line_destroy(EdLine *ln)
     line_free(ln);
 }
 
-/* Replace n_remove lines at row with n_insert owned lines, takes ownership */
+/* Splice owned lines at row without mutating the previous break */
 int ed_lines_splice(Ed *ed, int row, int n_remove, EdLine **insert, int n_insert)
 {
     int i;
@@ -833,7 +843,7 @@ int ed_lines_splice(Ed *ed, int row, int n_remove, EdLine **insert, int n_insert
         return -1;
 
     if (n_remove > 0)
-        doc_remove_lines(ed, row, n_remove);
+        doc_remove_lines_raw(ed, row, n_remove);
 
     if (n_insert > 0)
     {
@@ -889,7 +899,7 @@ int ed_line_len(const Ed *ed, int line)
     return ed->lines[line]->len;
 }
 
-/* decode one line into the rotating wide view ring */
+/* Decode one line into the rotating wide view ring */
 const wchar_t *ed_line_wcs(const Ed *ed, int line)
 {
     Ed *e = (Ed *)ed;
@@ -1856,12 +1866,41 @@ void ed_load(Ed *ed, const char *utf8_text)
 /* Read a whole stream into memory */
 static char *read_stream(FILE *fp, size_t *out_len)
 {
-    size_t cap = SAVE_BUF_SIZE;
+    size_t cap;
     size_t used = 0;
-    char *buf = (char *)malloc(cap);
+    char *buf = NULL;
+    long known_size = -1;
+
+    /* Pre-allocate the read buffer when the stream length is known */
+    if (fseek(fp, 0, SEEK_END) == 0)
+    {
+        long pos = ftell(fp);
+
+        if (fseek(fp, 0, SEEK_SET) == 0 && pos >= 0)
+            known_size = pos;
+    }
+
+    if (known_size >= 0)
+    {
+        cap = (size_t)known_size + 1;
+        buf = (char *)malloc(cap);
+
+        /* Tolerate a short read. The realloc loop handles the tail */
+        if (buf)
+        {
+            size_t got = fread(buf, 1, (size_t)known_size, fp);
+            used = got;
+        }
+    }
 
     if (!buf)
-        return NULL;
+    {
+        cap = SAVE_BUF_SIZE;
+        buf = (char *)malloc(cap);
+
+        if (!buf)
+            return NULL;
+    }
 
     for (;;)
     {
@@ -2701,6 +2740,10 @@ int ed_delete(Ed *ed)
 /* Snapshot helper for multi line edits, returns 0 when the group opened */
 int ed_delete_line(Ed *ed)
 {
+    int cap_row;
+    int cap_n_before;
+    int cap_n_after;
+
     if (!ed || ed->count <= 0)
         return -1;
 
@@ -2718,7 +2761,21 @@ int ed_delete_line(Ed *ed)
         return 0;
     }
 
-    if (undo_begin(ed, ed->row, 1) != 0)
+    /* Widen the undo capture to include the previous line's break flag */
+    if (ed->row > 0)
+    {
+        cap_row = ed->row - 1;
+        cap_n_before = 2; /* Prev line + line to delete */
+        cap_n_after = 1;  /* Prev line survives */
+    }
+    else
+    {
+        cap_row = ed->row;
+        cap_n_before = 1;
+        cap_n_after = 0;
+    }
+
+    if (undo_begin(ed, cap_row, cap_n_before) != 0)
         return -1;
 
     doc_remove_lines(ed, ed->row, 1);
@@ -2726,7 +2783,7 @@ int ed_delete_line(Ed *ed)
     ed->col = 0;
 
     ed_clamp(ed);
-    undo_commit(ed, 0);
+    undo_commit(ed, cap_n_after);
 
     return 0;
 }
@@ -3513,6 +3570,7 @@ void ed_auto_rewrap_capture_pre_snapshot(Ed *ed)
 {
     int first;
     int last;
+    int n;
 
     if (!ed || ed->count <= 0)
         return;
@@ -3535,15 +3593,20 @@ void ed_auto_rewrap_capture_pre_snapshot(Ed *ed)
             last++;
     }
 
+    n = last - first + 1;
+
+    if (last + 1 < ed->count && n < ED_AUTO_REWRAP_SNAPSHOT_LINE_CAP)
+        n++;
+
     /* Guard: an oversized paragraph is not worth cloning */
-    if (last - first + 1 > ED_AUTO_REWRAP_SNAPSHOT_LINE_CAP)
+    if (n > ED_AUTO_REWRAP_SNAPSHOT_LINE_CAP)
     {
         undo_abort(ed);
 
         return;
     }
 
-    undo_begin(ed, first, last - first + 1);
+    undo_begin(ed, first, n);
 }
 
 /* Replace [start, end) on one row as a single undo entry */

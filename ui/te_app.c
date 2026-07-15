@@ -594,11 +594,11 @@ void te_draw_titlebar(TeApp *app)
     }
 
     /* On Amiga/Windows the window title already shows the app name, so the top bar only needs the filename */
-#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
+    /*#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)*/
     prefix_len = 0;
-#else
-    prefix_len = (int)strlen(WRAPPER_PID) + 2;
-#endif
+    /*#else
+        prefix_len = (int)strlen(WRAPPER_PID) + 2;
+    #endif*/
 
     suffix_len = mod ? 4 : 0;
     max_fn_len = COLS - prefix_len - suffix_len - 30;
@@ -623,11 +623,11 @@ void te_draw_titlebar(TeApp *app)
         fn = truncated;
     }
 
-#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
+    /*#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)*/
     snprintf(left, sizeof(left), "%s%s", fn, mod ? " [+]" : "");
-#else
-    snprintf(left, sizeof(left), "%s  %s%s", WRAPPER_PID, fn, mod ? " [+]" : "");
-#endif
+    /*#else
+        snprintf(left, sizeof(left), "%s  %s%s", WRAPPER_PID, fn, mod ? " [+]" : "");
+    #endif*/
 
     if (tab && tab->editor)
     {

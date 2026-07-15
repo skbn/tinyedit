@@ -35,6 +35,9 @@ void charset_build_kludge(const char *enc, char *out, int outsz);
 /* Resolve alias to canonical name (e.g. "IBMPC" -> "CP437") */
 const char *charset_resolve(const char *name);
 
+/* Return 8 for single-byte charsets, 0 for UTF-8/multi-byte, 16/32 for UTF-16/32, -1 for unknown */
+int charset_bits(const char *name);
+
 /* Count UTF-8 characters lost when converted to out_cs */
 int charset_count_lossy(const char *utf8, const char *out_cs);
 

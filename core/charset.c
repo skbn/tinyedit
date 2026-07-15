@@ -154,6 +154,80 @@ int charset_body_from_utf8(const char *enc, const char *src, int srclen, char *d
     return utf8_to_charset(enc ? enc : CHARSET_WRITE_DEFAULT, src, srclen, dst, dstsz);
 }
 
+int charset_bits(const char *name)
+{
+    const char *cs = NULL;
+    int i;
+    static const char *single_byte[] =
+        {
+            "CP437", "CP850", "CP865", "CP866", "CP1252",
+            "LATIN-1", "LATIN-2", "ISO-8859-1", "ISO-8859-2", NULL};
+
+    if (!name || !name[0])
+        return -1;
+
+    cs = charset_resolve(name);
+
+    if (!cs || !cs[0])
+        return -1;
+
+    /* UTF-8 is variable-length multi-byte */
+    if (strcasecmp(cs, "UTF-8") == 0 || strcasecmp(cs, "UTF8") == 0)
+        return 0;
+
+    /* Other UTF variants (UTF-16, UTF-32, UTF-7, etc) */
+    if (strncasecmp(cs, "UTF", 3) == 0)
+    {
+        if (strstr(cs, "16"))
+            return 16;
+
+        if (strstr(cs, "32"))
+            return 32;
+
+        return 0;
+    }
+
+    /* UCS-2 / UCS-4 */
+    if (strncasecmp(cs, "UCS", 3) == 0)
+    {
+        if (strstr(cs, "2") || strstr(cs, "16"))
+            return 16;
+
+        if (strstr(cs, "4") || strstr(cs, "32"))
+            return 32;
+
+        return 0;
+    }
+
+    if (strcasecmp(cs, "UNICODE") == 0)
+        return 0;
+
+    /* Known single-byte charsets (canonical names after charset_resolve) */
+    for (i = 0; single_byte[i]; i++)
+    {
+        if (strcasecmp(cs, single_byte[i]) == 0)
+            return 8;
+    }
+
+    /* Heuristics for other common single-byte names */
+    if (cs[0] == 'C' && cs[1] == 'P' && isdigit((unsigned char)cs[2]))
+        return 8;
+
+    if (strncasecmp(cs, "LATIN", 5) == 0)
+        return 8;
+
+    if (strncasecmp(cs, "ISO-8859", 8) == 0)
+        return 8;
+
+    if (strncasecmp(cs, "WINDOWS-125", 11) == 0)
+        return 8;
+
+    if (strncasecmp(cs, "MAC", 3) == 0)
+        return 8;
+
+    return -1;
+}
+
 int charset_count_lossy(const char *utf8, const char *out_cs)
 {
     int srclen, dstsz, n, i;

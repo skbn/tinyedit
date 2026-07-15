@@ -20,6 +20,7 @@
 #include "ed_attr.h"
 #include "fmt_wp4.h"
 #include "../core/utf8.h"
+#include "../core/charset.h"
 
 /* One recorded styled run, document-wide */
 struct wp4_run
@@ -108,18 +109,19 @@ static int wp4_prefix_i(const char *s, const char *p)
 
 static int wp4_charset_invalid(const char *cs, char *err, size_t errsz)
 {
-    if (!cs || !cs[0])
+    int bits = charset_bits(cs);
+
+    if (bits != 8)
     {
         if (err && errsz > 0)
-            snprintf(err, errsz, "WP 4.2 requires an 8-bit charset; select one in setup");
-
-        return 1;
-    }
-
-    if (wp4_prefix_i(cs, "UTF") || wp4_prefix_i(cs, "UCS") || strcasecmp(cs, "UNICODE") == 0)
-    {
-        if (err && errsz > 0)
-            snprintf(err, errsz, "charset %s is not an 8-bit charset; select an 8-bit charset in setup", cs);
+        {
+            if (bits == 0)
+                snprintf(err, errsz, "charset %s is multi-byte; WP 4.2 requires an 8-bit charset", cs ? cs : "");
+            else if (bits == 16 || bits == 32)
+                snprintf(err, errsz, "charset %s is %d-bit; WP 4.2 requires an 8-bit charset", cs ? cs : "", bits);
+            else
+                snprintf(err, errsz, "WP 4.2 requires an 8-bit charset; select one in setup");
+        }
 
         return 1;
     }
