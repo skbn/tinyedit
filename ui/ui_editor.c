@@ -450,6 +450,33 @@ void ed_auto_rewrap_after_edit(TeApp *app)
     ed_ensure_visible(te_app_get_editor(app));
 }
 
+/* Same reflow with no commit, the caller holds the open delta */
+void ed_auto_rewrap_after_edit_silent(TeApp *app)
+{
+    int width;
+    LayoutHyphenFn hyph = NULL;
+    void *hyph_user = NULL;
+
+    if (!app->hard_wrap)
+        return;
+
+    width = editor_eff_wrap(app);
+
+    if (width <= 0)
+        return;
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+    if (app->hyph_wrap_enabled && app->hyph_handle)
+    {
+        hyph = ui_layout_hyphen;
+        hyph_user = app;
+    }
+#endif
+
+    ed_rewrap_paragraph_no_undo(te_app_get_editor(app), width, hyph, hyph_user);
+    ed_ensure_visible(te_app_get_editor(app));
+}
+
 /* Calculate width for line numbers (digits + 1 space) */
 static int lineno_width(int line_count)
 {
@@ -465,7 +492,7 @@ static int lineno_width(int line_count)
         width++;
     }
 
-    return width + 1; /* space after number */
+    return width + 1; /* Space after number */
 }
 
 #ifdef HAVE_HUNSPELL
@@ -1467,10 +1494,12 @@ void ui_editor_draw_body(TeApp *app)
             /* One segment covering the whole line, so no wrap indicator */
             paint_segment(&pc, line_idx, wl ? wl : L"", line_len, 0, line_len, i, 1, &first_seg, line_classes);
 
-            /* Hard-wrap hyphen is drawn after the text, never stored */
+            /* Wrap hyphen follows the alignment indent of the text */
             if (ed_line_break(ed, line_idx) == LB_HYPHEN)
             {
-                int hx = pc.offset_x + pc.ln_offset + wcs_vwidth_ex(wl ? wl : L"", line_len, 0, ed_get_tab_width());
+                int text_vw = wcs_vwidth_ex(wl ? wl : L"", line_len, 0, ed_get_tab_width());
+                int align_ind = line_align_indent(ed->lines[line_idx]->para_align, text_vw, pc.width);
+                int hx = pc.offset_x + pc.ln_offset + align_ind + text_vw;
                 int left = pc.offset_x + pc.ln_offset;
                 int right = left + pc.width;
 
@@ -1727,13 +1756,14 @@ static int handle_mouse_key(TeApp *app, int ch, int is_key, int *handled)
     }
     else if (ch == KEY_MOUSE)
     {
-        *handled = 1;
 #ifdef PLATFORM_AMIGA
         unsigned long m;
 #else
         static int s_button_down = 0;
         MEVENT ev;
 #endif
+
+        *handled = 1;
 
 #ifdef PLATFORM_AMIGA
         /* Packed by the wrapper: low 8 bits type, next 12 x, next 12 y */

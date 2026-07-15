@@ -251,46 +251,45 @@ static int grab_source_text(TeApp *app, char **out_text, int *out_row_first, int
 static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
 {
     Ed *ed = te_app_get_editor(app);
-    char *snapshot_before = NULL;
-    char *snapshot_after = NULL;
-    EdLine **snapshot_before_lines = NULL;
-    EdLine **snapshot_after_lines = NULL;
-    int snapshot_before_count = 0;
-    int snapshot_after_count = 0;
     int old_count;
     int new_count;
-    int cursor_row_before;
-    int cursor_col_before;
     int cursor_row_after;
     int cursor_col_after;
-    EdInfo info;
+    int pfirst;
+    int plast;
+    int r;
+    int end_row;
+    int cb;
 
     if (!ed)
         return -1;
 
-    if (ed->undo_snapshot_mode)
-        return -1;
-
-    /* Open a single undo group covering the whole line-range replacement */
-    if (ed_undo_open_group(ed) != 0)
-        return -1;
-
-    ed_get_info(ed, &info);
-    cursor_row_before = info.row;
-    cursor_col_before = info.col;
-
     old_count = last - first + 1;
 
-    /* One delta over the paragraph: those lines became these */
+    /* The delta covers the full paragraph extent around the range */
+    pfirst = first;
+
+    while (pfirst > 0 && ed->lines[pfirst - 1]->len > 0)
+        pfirst--;
+
+    plast = last;
+
+    while (plast < ed->count - 1 && ed->lines[plast + 1]->len > 0)
+        plast++;
+
+    /* One delta covers the replacement and the reflow after it */
     undo_abort(ed);
 
-    if (undo_begin(ed, first, old_count) != 0)
+    if (undo_begin(ed, pfirst, plast - pfirst + 1) != 0)
         return -1;
+
+    ed->undo_snapshot_mode = 1;
 
     new_count = ed_replace_range_from_utf8(ed, first, old_count, new_utf8);
 
     if (new_count <= 0)
     {
+        ed->undo_snapshot_mode = 0;
         undo_abort(ed);
         return -1;
     }
@@ -301,10 +300,36 @@ static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
 
     ed_set_pos(ed, cursor_row_after, cursor_col_after);
 
-    if (undo_commit(ed, new_count) != 0)
-        return -1;
+    /* Refit every paragraph of the inserted region inside the delta */
+    if (app->hard_wrap)
+    {
+        r = first;
+        end_row = first + new_count;
 
-    ed_save_undo(ed);
+        while (r < end_row && r < ed->count)
+        {
+            if (ed_line_len(ed, r) == 0)
+            {
+                r++;
+                continue;
+            }
+
+            cb = ed->count;
+
+            ed_set_pos(ed, r, 0);
+            ed_auto_rewrap_after_edit_silent(app);
+
+            /* The reflow may grow or shrink the region */
+            end_row += ed->count - cb;
+
+            /* Skip to the end of the reflowed paragraph */
+            while (r < ed->count && ed_line_len(ed, r) > 0)
+                r++;
+        }
+    }
+
+    /* Commit the whole thing: n_after = old_count + document line delta */
+    ed_undo_settle(ed);
 
     ed_set_modified(ed, 1);
     ed_prefix_invalidate_from(ed, first);
@@ -462,15 +487,12 @@ int ui_translate_action(TeApp *app)
 
     if (choice == 1)
     {
-        /* Replace lines */
-        ed_auto_rewrap_capture_pre_snapshot(te_app_get_editor(app));
-
+        /* The helper owns the undo delta and the reflow */
         if (replace_lines(app, first, last, result) == 0)
         {
             te_status(app, "Replaced %d line(s) with translation", last - first + 1);
 
             ed_block_clear(te_app_get_editor(app));
-            ed_auto_rewrap_after_edit(app);
         }
         else
             te_status(app, "Replace failed");
@@ -486,22 +508,35 @@ int ui_translate_action(TeApp *app)
         }
         else
         {
+            /* One delta over the break, the paste and the reflow */
+            ed_set_pos(ed, last, ed_line_len(ed, last));
+
+            undo_abort(ed);
             ed_auto_rewrap_capture_pre_snapshot(ed);
 
-            ed_save_undo(ed);
+            ed->undo_snapshot_mode = 1;
 
-            ed_set_pos(ed, last, ed_line_len(ed, last));
             ed_enter(ed); /* Line break */
 
-            if (ed_paste_text_with_undo(ed, result) == 0)
+            if (ed_paste_text(ed, result) == 0)
             {
-                te_status(app, "Inserted translation below paragraph");
+                /* Step back off a trailing empty line before the reflow */
+                while (ed->row > 0 && ed_line_len(ed, ed->row) == 0)
+                    ed_set_pos(ed, ed->row - 1, ed_line_len(ed, ed->row - 1));
 
+                ed_auto_rewrap_after_edit_silent(app);
+                ed_undo_settle(ed);
+
+                te_status(app, "Inserted translation below paragraph");
                 ed_block_clear(ed);
-                ed_auto_rewrap_after_edit(app);
             }
             else
+            {
+                ed->undo_snapshot_mode = 0;
+                undo_abort(ed);
+
                 te_status(app, "Insert failed");
+            }
         }
     }
 

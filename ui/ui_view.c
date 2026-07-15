@@ -16,6 +16,7 @@
 #include "ui_editor_helper.h"
 #include "ui_view.h"
 #include "../components/ed_attr.h"
+#include "../components/layout.h"
 
 /* Viewport anchored on a logical line and one of its sub-rows */
 static int s_top_line = 0;
@@ -59,16 +60,7 @@ void view_reset_desired(void)
 
 int view_align_indent(unsigned char align, int text_vw, int avail)
 {
-    int pad;
-
-    if (align == EA_ALIGN_CENTER)
-        pad = (avail - text_vw) / 2;
-    else if (align == EA_ALIGN_RIGHT)
-        pad = avail - text_vw;
-    else
-        return 0;
-
-    return pad > 0 ? pad : 0;
+    return layout_align_indent(align, text_vw, avail);
 }
 
 /* End offset of the sub-row starting at start: last space fit, else hard cut */

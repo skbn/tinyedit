@@ -496,6 +496,9 @@ int main(int argc, char **argv)
             {
                 detected = ui_editor_detect_wrap_hyphens(app);
 
+                /* Hard mode: fit the document to the configured column */
+                ui_editor_rewrap_loaded(app);
+
                 if (detected > 0)
                     te_status(app, "Recovered: %s (%d wrap-hyphens)", argv[1], detected);
                 else
@@ -514,6 +517,11 @@ int main(int argc, char **argv)
                     {
                         ed_clear_undo_redo(tab->editor);
                         rc = rtf_import(tab->editor, fp, rerr, sizeof(rerr), rwarn, sizeof(rwarn));
+
+                        /* Paragraph format: join the wraps, hard mode reflows them */
+                        if (rc == 0)
+                            ed_join_breaks(tab->editor);
+
                         fclose(fp);
 
                         if (rc != 0)
@@ -552,6 +560,11 @@ int main(int argc, char **argv)
                         ed_clear_undo_redo(tab->editor);
 
                         rc = wp4_import(tab->editor, fp, app->charset_in, werr, sizeof(werr), wwarn, sizeof(wwarn));
+
+                        /* Paragraph format: join the wraps, hard mode reflows them */
+                        if (rc == 0)
+                            ed_join_breaks(tab->editor);
+
                         fclose(fp);
 
                         if (rc != 0)
@@ -620,6 +633,9 @@ int main(int argc, char **argv)
                 }
 
                 detected = ui_editor_detect_wrap_hyphens(app);
+
+                /* Hard mode: fit the document to the configured column */
+                ui_editor_rewrap_loaded(app);
 
                 if (detected > 0)
                     te_status(app, "Detected %d wrap-hyphens", detected);

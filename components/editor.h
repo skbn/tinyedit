@@ -118,9 +118,6 @@ struct Ed
     UndoGroup *redo_stack;
     int redo_top, redo_cap, redo_max;
 
-    /* Group state: undo_open spans several edits, started once one landed */
-    int undo_open;
-    int undo_group_started;
     int undo_typing; /* 1 = single line typing run, commits coalesce */
 
     /* Lines captured by undo_begin, waiting for undo_commit */
@@ -152,12 +149,6 @@ struct Ed
 
     int word_count_total;       /* Cached total word count */
     int word_count_initialized; /* 1 = word counts are valid, 0 = lazy init pending */
-
-    /* Pre-edit snapshot for auto-rewrap undo */
-    int auto_rewrap_pre_start;
-    int auto_rewrap_pre_end;
-    int auto_rewrap_pre_cursor_row;
-    int auto_rewrap_pre_cursor_col;
 
     /* Compact lines are decoded here on demand. Entries stay valid until the next edit clears the ring */
     wchar_t *wcs_view[ED_WCS_VIEW_SLOTS];
@@ -234,7 +225,6 @@ void ed_set_undo_levels(Ed *ed, int levels);
 int ed_undo_depth(const Ed *ed);
 int ed_redo(Ed *ed);
 int ed_redo_depth(const Ed *ed);
-void ed_set_undo_snapshot_mode(Ed *ed, int mode);
 
 /* Mode */
 void ed_toggle_insert(Ed *ed);
@@ -267,6 +257,15 @@ int ed_rewrap_ftn_reply(Ed *ed, int width);
 
 /* Re-flow the hard-wrap paragraph around the cursor, see layout.h The wrap hyphen is never stored, the painter draws it from the break kind */
 int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user);
+
+/* Reflow the cursor paragraph with no undo record */
+int ed_rewrap_paragraph_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user);
+
+/* Fit a loaded document to width, brk bounded, no undo record */
+int ed_rewrap_loaded_document(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user);
+
+/* Refit the whole document to width, one undo entry */
+int ed_rewrap_document(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user);
 int ed_layout_char_width(void *user, wchar_t ch, int col);
 
 /* Insert a text file at the cursor position (with undo) */
@@ -307,10 +306,6 @@ int ed_wrap_count(const wchar_t *line, int len, int width);
 void ed_clamp(Ed *ed);
 void ed_redo_clear(Ed *ed);
 void ed_clear_undo_redo(Ed *ed);
-int ed_undo_open_group(Ed *ed);
-int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, EdLine **snapshot_before_lines, int snapshot_before_count, EdLine **snapshot_after_lines, int snapshot_after_count, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col);
-EdLine **ed_clone_line_range(Ed *ed, int start, int end, int *out_count);
-void ed_free_snapshot(char *utf8, EdLine **lines, int count);
 
 /* Line primitives shared with the undo engine */
 EdLine *ed_line_clone(Ed *ed, const EdLine *src);
@@ -319,12 +314,16 @@ EdLine *ed_line_from_wcs(Ed *ed, const wchar_t *w, int n);
 /* How the line joins to the next one, LB_HYPHEN means draw a hyphen */
 int ed_line_break(const Ed *ed, int line);
 void ed_line_set_break(Ed *ed, int line, int brk);
+void ed_join_breaks(Ed *ed);
 
 /* Drop a hyphen left at the end of the line by an older build or another editor */
 void ed_line_drop_trailing_hyphen(Ed *ed, int line);
 void ed_line_destroy(EdLine *ln);
 int ed_lines_splice(Ed *ed, int row, int n_remove, EdLine **insert, int n_insert);
 int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text);
+
+/* Replace [start, end) on one row as a single undo entry */
+int ed_replace_word_with_undo(Ed *ed, int row, int start, int end, const wchar_t *replacement, int rlen);
 
 /* Helper functions from editor_helper.c */
 wchar_t *line_to_wcs(EdLine *ln);

@@ -348,7 +348,10 @@ static int rtf_control(struct rtf_ctx *c)
         case '~':
             return rtf_put_cp(c, 0xA0UL);
         case '-':
+            /* Optional hyphen is invisible layout, tinyedit re-hyphenates */
+            return 0;
         case '_':
+            /* Non breaking hyphen is a real visible character */
             return rtf_put_cp(c, (unsigned long)'-');
         case '*':
             /* Ignorable destination: the group is safe to skip whole */
@@ -863,10 +866,24 @@ int rtf_export(const struct Ed *ed, FILE *fp)
                 return -1;
         }
 
+        /* The break kind picks the join, readers reflow paragraphs themselves */
         if (row < ed->count - 1)
         {
-            if (fputs("\\par\n", fp) == EOF)
-                return -1;
+            if (ln->brk == LB_HYPHEN)
+            {
+                if (fputs("\\-", fp) == EOF)
+                    return -1;
+            }
+            else if (ln->brk == LB_SPACE)
+            {
+                if (fputc(' ', fp) == EOF)
+                    return -1;
+            }
+            else if (ln->brk != LB_WORD)
+            {
+                if (fputs("\\par\n", fp) == EOF)
+                    return -1;
+            }
         }
     }
 

@@ -95,13 +95,13 @@ typedef struct
 struct thes *thes_open(const char *idx_path, const char *dat_path);
 void thes_close(struct thes *t);
 int thes_lookup_raw(struct thes *t, const char *word, struct thes_result **out);
-void thes_cache_clear(struct thes *t);
 const char *thes_get_encoding(struct thes *t);
 
 /* open idx + dat (e.g. /path/th_es_ES_v2.idx, .dat), returns NULL on error */
 ThesHandle *thes_new(const char *idx_path, const char *dat_path);
 
 void thes_free(ThesHandle *t);
+void thes_cache_clear(struct thes *t);
 
 /* attach/detach spell checker for stemming fallback (no-op in this engine) */
 void thes_set_speller(ThesHandle *t, SpellChecker *sc);
@@ -116,6 +116,5 @@ char **thes_list_dictionaries(const char *dir_path, int *n_dicts);
 void thes_free_dictionaries(char **dicts, int n_dicts);
 
 /* return 1 if thesaurus is available (compiled) */
-int thes_is_available(void);
 
 #endif

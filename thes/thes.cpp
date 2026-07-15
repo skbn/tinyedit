@@ -364,14 +364,6 @@ extern "C"
 
 #endif /* HAVE_MYTHES */
 
-    void thes_cache_clear(ThesHandle *t)
-    {
-#ifdef HAVE_MYTHES
-        if (t)
-            tcache_init(t);
-#endif
-    }
-
     ThesHandle *thes_new(const char *idx_path, const char *dat_path)
     {
 #ifdef HAVE_MYTHES
@@ -734,17 +726,6 @@ extern "C"
         return NULL;
 #endif
     }
-
-    int thes_is_available(void)
-    {
-#ifdef HAVE_MYTHES
-        return 1;
-#else
-        return 0;
-#endif
-    }
-
-    /* Dictionary directory listing */
 
     static int thes_ends_with_idx(const char *name)
     {

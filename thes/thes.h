@@ -73,15 +73,10 @@ extern "C"
     /* Encoding of the loaded thesaurus (e.g. "ISO8859-1"). */
     const char *thes_get_encoding(ThesHandle *t);
 
-    /* Wipe the lookup cache (free its backing arrays) */
-    void thes_cache_clear(ThesHandle *t);
-
     /* List available dictionaries in directory. Returns malloc'd array or NULL. Free with thes_free_dictionaries() */
     char **thes_list_dictionaries(const char *dir_path, int *n_dicts);
 
     void thes_free_dictionaries(char **dicts, int n_dicts);
-
-    int thes_is_available(void);
 
 #ifdef __cplusplus
 }

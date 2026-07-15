@@ -10,7 +10,6 @@
  */
 
 /* layout.h -- pure line breaking, the wrap hyphen is a break flag, never text */
-/* guarantee: layout_join(layout_paragraph(x)) == x, so reflow never accumulates */
 
 #ifndef LAYOUT_H
 #define LAYOUT_H
@@ -62,5 +61,8 @@ int layout_paragraph(const wchar_t *text, int len, int width, const LayoutOpts *
 
 /* Put the paragraph back together, the inverse of layout_paragraph */
 int layout_join(const wchar_t *text, const LayoutLine *lines, int n, wchar_t *out, int cap);
+
+/* Horizontal indent for the alignment */
+int layout_align_indent(unsigned char align, int text_vw, int avail);
 
 #endif

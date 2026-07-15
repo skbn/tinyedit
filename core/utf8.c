@@ -284,10 +284,10 @@ int utf8_encode(uint32_t cp, char *buf)
 
     buf[0] = '?';
 
-    return 1; /* out of Unicode range */
+    return 1; /* Out of Unicode range */
 }
 
-static unsigned char quote_ascii_fallback(uint32_t cp)
+unsigned char utf8_quote_ascii_fallback(uint32_t cp)
 {
     switch (cp)
     {
@@ -301,6 +301,25 @@ static unsigned char quote_ascii_fallback(uint32_t cp)
     case 0x201A:
     case 0x201B:
         return 0x27;
+    default:
+        return 0;
+    }
+}
+
+unsigned char utf8_dash_ascii_fallback(uint32_t cp)
+{
+    switch (cp)
+    {
+    case 0x2010: /* hyphen */
+    case 0x2011: /* non-breaking hyphen */
+    case 0x2012: /* figure dash */
+    case 0x2013: /* en dash */
+    case 0x2014: /* em dash */
+    case 0x2015: /* horizontal bar */
+    case 0x2212: /* minus sign */
+    case 0x2E3A: /* two-em dash */
+    case 0x2E3B: /* three-em dash */
+        return 0x2D;
     default:
         return 0;
     }
@@ -360,7 +379,7 @@ int utf8_to_latin1(const char *src, int srclen, char *dst, int dstmax)
         }
         else
         {
-            ch = quote_ascii_fallback(cp);
+            ch = utf8_quote_ascii_fallback(cp);
 
             if (ch == 0)
                 ch = '?';
@@ -583,7 +602,7 @@ static int utf8_to_cp(const uint16_t *map, const char *src, int sl, char *dst, i
 
         if (i == 128)
         {
-            ch = quote_ascii_fallback(cp);
+            ch = utf8_quote_ascii_fallback(cp);
             dst[di++] = (ch != 0) ? (char)ch : '?';
         }
     }

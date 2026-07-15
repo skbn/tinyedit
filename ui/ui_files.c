@@ -1467,6 +1467,9 @@ int ui_files_open_path(TeApp *app, const char *path)
     {
         detected = ui_editor_detect_wrap_hyphens(app);
 
+        /* Hard mode: fit the document to the configured column */
+        ui_editor_rewrap_loaded(app);
+
         if (detected > 0)
             te_status(app, "Recovered: %s (%d wrap-hyphens)", path, detected);
         else
@@ -1497,6 +1500,10 @@ int ui_files_open_path(TeApp *app, const char *path)
 
         rc = rtf_import(te_app_get_editor(app), fp, err, sizeof(err), warn, sizeof(warn));
 
+        /* WP is a paragraph format: join the wraps, hard mode reflows them */
+        if (rc == 0)
+            ed_join_breaks(te_app_get_editor(app));
+
         fclose(fp);
 
         if (rc != 0)
@@ -1509,6 +1516,9 @@ int ui_files_open_path(TeApp *app, const char *path)
 
         if (te_app_get_active_tab(app))
             te_app_get_active_tab(app)->rich_mode = 1;
+
+        /* Hard mode: fit the joined paragraphs to the configured column */
+        ui_editor_rewrap_loaded(app);
 
         te_app_set_filename(app, path);
         ui_editor_recent_add(path);
@@ -1539,6 +1549,11 @@ int ui_files_open_path(TeApp *app, const char *path)
         ed_clear_undo_redo(te_app_get_editor(app));
 
         rc = wp4_import(te_app_get_editor(app), fp, app->charset_in, err, sizeof(err), warn, sizeof(warn));
+
+        /* WP is a paragraph format: join the wraps, hard mode reflows them */
+        if (rc == 0)
+            ed_join_breaks(te_app_get_editor(app));
+
         fclose(fp);
 
         if (rc != 0)
@@ -1551,6 +1566,9 @@ int ui_files_open_path(TeApp *app, const char *path)
 
         if (te_app_get_active_tab(app))
             te_app_get_active_tab(app)->rich_mode = 1;
+
+        /* Hard mode: fit the joined paragraphs to the configured column */
+        ui_editor_rewrap_loaded(app);
 
         te_app_set_filename(app, path);
         ui_editor_recent_add(path);
@@ -1612,6 +1630,9 @@ int ui_files_open_path(TeApp *app, const char *path)
 
         detected = ui_editor_detect_wrap_hyphens(app);
 
+        /* Hard mode: fit the document to the configured column */
+        ui_editor_rewrap_loaded(app);
+
         if (detected > 0)
             te_status(app, "Loaded: %s (%d wrap-hyphens)", path, detected);
         else
@@ -1643,6 +1664,9 @@ int ui_files_open_path(TeApp *app, const char *path)
     te_app_set_filename(app, path);
 
     detected = ui_editor_detect_wrap_hyphens(app);
+
+    /* Hard mode: fit the document to the configured column */
+    ui_editor_rewrap_loaded(app);
 
     if (detected > 0)
         te_status(app, "Loaded: %s (%d wrap-hyphens)", path, detected);

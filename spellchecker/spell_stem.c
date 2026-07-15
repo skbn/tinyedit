@@ -12,11 +12,6 @@
 #include "spell_priv.h"
 #include "dict_scan.h"
 
-int spell_is_available(void)
-{
-    return 1;
-}
-
 static int ends_with_dic(const unsigned char *name)
 {
     size_t len;

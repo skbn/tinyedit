@@ -23,9 +23,6 @@ int undo_commit(Ed *ed, int n_after);
 /* Drop the capture without recording it, for failed edits */
 void undo_abort(Ed *ed);
 
-/* Push a delta whose before lines were captured by the caller, takes ownership */
-int undo_push(Ed *ed, int row, EdLine **before, int n_before, int n_after);
-
 /* Mark the next commit as coalescable with the previous one when typing */
 void undo_typing_hint(Ed *ed, int on);
 
@@ -33,5 +30,8 @@ void undo_typing_hint(Ed *ed, int on);
 void ed_undo_settle(Ed *ed);
 
 void undo_free_all(Ed *ed);
+
+/* True when row falls inside the open capture, doc delta adjusted */
+int undo_pending_contains(Ed *ed, int row, int span);
 
 #endif

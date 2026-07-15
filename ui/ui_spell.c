@@ -20,6 +20,7 @@
 #include "../core/utf8.h"
 #include "../spellchecker/spell.h"
 #include "../components/editor.h"
+#include "../components/undo.h"
 #include "ui_editor_helper.h"
 
 #ifdef HAVE_HUNSPELL
@@ -578,15 +579,16 @@ static int hyphen_split_find(TeApp *app, Ed *ed, EdInfo *info, const wchar_t *li
     return 0;
 }
 
-/* Replace hyphen-split word with suggestion */
+/* Replace a hyphen-split word, the caller owns the undo delta */
 static void hyphen_split_replace(Ed *ed, const HyphenSplit *hs, const wchar_t *suggestion, int suggestion_len)
 {
     int i;
+    int saved_mode;
 
     if (!ed || !hs || !suggestion || suggestion_len <= 0)
         return;
 
-    ed_save_undo(ed);
+    saved_mode = ed->undo_snapshot_mode;
     ed->undo_snapshot_mode = 1;
 
     /* Delete second half on second_row */
@@ -609,7 +611,7 @@ static void hyphen_split_replace(Ed *ed, const HyphenSplit *hs, const wchar_t *s
     ed_set_pos(ed, hs->first_row, hs->first_start + suggestion_len);
     ed_delete(ed);
 
-    ed->undo_snapshot_mode = 0;
+    ed->undo_snapshot_mode = saved_mode;
 }
 
 /* Check and correct word under cursor */
@@ -806,29 +808,61 @@ int spell_check_word(TeApp *app)
         {
             if (is_hyphen_split)
             {
-                /* Replace the whole hyphen-split word with the suggestion */
-                ed_auto_rewrap_capture_pre_snapshot(ed);
+                /* Hard commits via the reflow, soft is one delta */
+                if (ed->hard_wrap)
+                {
+                    ed_auto_rewrap_capture_pre_snapshot(ed);
 
-                hyphen_split_replace(ed, &hs, suggestion_wcs, suggestion_len);
+                    ed->undo_snapshot_mode = 1;
 
-                ed_auto_rewrap_after_edit(app);
+                    hyphen_split_replace(ed, &hs, suggestion_wcs, suggestion_len);
+
+                    ed_auto_rewrap_after_edit(app);
+                }
+                else
+                {
+                    undo_abort(ed);
+
+                    if (undo_begin(ed, hs.first_row, 2) == 0)
+                    {
+                        hyphen_split_replace(ed, &hs, suggestion_wcs, suggestion_len);
+
+                        undo_commit(ed, 1);
+                        ed_save_undo(ed);
+                    }
+                    else
+                    {
+                        hyphen_split_replace(ed, &hs, suggestion_wcs, suggestion_len);
+                    }
+                }
+
                 te_status(app, "Replaced hyphenated word with '%s'", suggestions[selected]);
             }
             else
             {
                 /* Replace word with suggestion */
-                ed_auto_rewrap_capture_pre_snapshot(ed);
+                if (ed->hard_wrap)
+                {
+                    /* Capture paragraph, replace silently, reflow commits */
+                    ed_auto_rewrap_capture_pre_snapshot(ed);
 
-                ed_save_undo(ed);
-                ed_set_pos(ed, info.row, word_start);
+                    ed->undo_snapshot_mode = 1;
 
-                for (i = 0; i < word_len; i++)
-                    ed_delete(ed);
+                    ed_set_pos(ed, info.row, word_start);
 
-                for (i = 0; i < suggestion_len; i++)
-                    ed_insert_char(ed, suggestion_wcs[i]);
+                    for (i = 0; i < word_len; i++)
+                        ed_delete(ed);
 
-                ed_auto_rewrap_after_edit(app);
+                    for (i = 0; i < suggestion_len; i++)
+                        ed_insert_char(ed, suggestion_wcs[i]);
+
+                    ed_auto_rewrap_after_edit(app);
+                }
+                else
+                {
+                    /* Single-row replacement, one undo entry */
+                    ed_replace_word_with_undo(ed, info.row, word_start, word_start + word_len, suggestion_wcs, suggestion_len);
+                }
 
                 te_status(app, "Replaced with '%s'", suggestions[selected]);
             }

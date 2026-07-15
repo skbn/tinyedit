@@ -33,6 +33,15 @@ char *wrap_paste_text(TeApp *app, const char *utf8, int col);
 /* Trigger paragraph reflow after an edit in hard-wrap mode */
 void ed_auto_rewrap_after_edit(TeApp *app);
 
+/* Silent reflow for callers that keep their own delta open */
+void ed_auto_rewrap_after_edit_silent(TeApp *app);
+
+/* Fit a freshly loaded document to the configured column */
+void ui_editor_rewrap_loaded(TeApp *app);
+
+/* Refit the document after a mode or column change, one undo step */
+void ui_editor_rewrap_docwide(TeApp *app);
+
 /* Left margin for editor body with line numbers */
 int editor_body_offset(TeApp *app, int line_count);
 

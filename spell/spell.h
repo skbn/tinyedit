@@ -49,7 +49,6 @@ extern "C"
     const char *spell_get_encoding(SpellChecker *sc);
     char **spell_list_dictionaries(const char *dir_path, int *n_dicts);
     void spell_free_dictionaries(char **dicts, int n_dicts);
-    int spell_is_available(void);
 
     int spell_stem(SpellChecker *sc, const char *word, char ***out_list);
     int spell_generate(SpellChecker *sc, const char *word, const char *example, char ***out_list);

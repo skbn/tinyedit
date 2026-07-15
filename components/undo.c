@@ -136,7 +136,6 @@ void undo_free_all(Ed *ed)
     ed->redo_top = 0;
     ed->undo_cap = 0;
     ed->redo_cap = 0;
-    ed->undo_open = 0;
 
     lines_release(ed->pending_before, ed->pending_n);
 
@@ -163,8 +162,6 @@ void ed_clear_undo_redo(Ed *ed)
     stack_release(ed->undo_stack, ed->undo_top);
 
     ed->undo_top = 0;
-    ed->undo_open = 0;
-    ed->undo_group_started = 0;
     ed->undo_typing = 0;
 
     ed_redo_clear(ed);
@@ -187,18 +184,16 @@ void ed_set_undo_levels(Ed *ed, int levels)
 
 int ed_undo_depth(const Ed *ed)
 {
-    return ed ? ed->undo_top : 0;
+    if (!ed)
+        return 0;
+
+    /* An in-flight capture counts as one undoable step */
+    return ed->undo_top + (ed->pending_before ? 1 : 0);
 }
 
 int ed_redo_depth(const Ed *ed)
 {
     return ed ? ed->redo_top : 0;
-}
-
-void ed_set_undo_snapshot_mode(Ed *ed, int mode)
-{
-    if (ed)
-        ed->undo_snapshot_mode = mode ? 1 : 0;
 }
 
 void undo_typing_hint(Ed *ed, int on)
@@ -207,41 +202,28 @@ void undo_typing_hint(Ed *ed, int on)
         ed->undo_typing = on ? 1 : 0;
 }
 
-/* Open a group, edits until ed_save_undo land in it as one step */
-int ed_undo_open_group(Ed *ed)
-{
-    if (!ed)
-        return -1;
-
-    ed->undo_open = 1;
-    ed->undo_group_started = 0;
-
-    return 0;
-}
-
-/* Close the open group, the next edit starts a fresh step */
+/* Close the current step: the next edit starts a fresh one and typing coalescing is broken here */
 void ed_save_undo(Ed *ed)
 {
     if (!ed)
         return;
 
-    if (ed->undo_open && ed->undo_group_started && ed->undo_top > 0)
-    {
-        UndoGroup *g = &ed->undo_stack[ed->undo_top - 1];
-
-        g->row_after = ed->row;
-        g->col_after = ed->col;
-    }
-
-    ed->undo_open = 0;
-    ed->undo_group_started = 0;
     ed->undo_typing = 0;
 }
 
 int undo_begin(Ed *ed, int row, int n_before)
 {
-    if (!ed || ed->undo_snapshot_mode)
+    if (!ed)
         return 0;
+
+    /* An op outside the open capture settles it, recording resumes */
+    if (ed->undo_snapshot_mode)
+    {
+        if (undo_pending_contains(ed, row, n_before))
+            return 0;
+
+        ed_undo_settle(ed);
+    }
 
     /* A stray capture means an edit failed midway, drop it */
     if (ed->pending_before)
@@ -278,7 +260,6 @@ static int push_delta(Ed *ed, int row, EdLine **before, int n_before, EdLine **a
 {
     UndoGroup *g = NULL;
     UndoOp *op = NULL;
-    int fresh = 0;
 
     ed_redo_clear(ed);
 
@@ -302,26 +283,15 @@ static int push_delta(Ed *ed, int row, EdLine **before, int n_before, EdLine **a
         }
     }
 
-    if (!ed->undo_open || !ed->undo_group_started || ed->undo_top <= 0)
-    {
-        if (stack_room(&ed->undo_stack, &ed->undo_top, &ed->undo_cap, ed->undo_max) != 0)
-            return -1;
+    if (stack_room(&ed->undo_stack, &ed->undo_top, &ed->undo_cap, ed->undo_max) != 0)
+        return -1;
 
-        g = &ed->undo_stack[ed->undo_top++];
+    g = &ed->undo_stack[ed->undo_top++];
 
-        memset(g, 0, sizeof(*g));
+    memset(g, 0, sizeof(*g));
 
-        g->row_before = cur_row;
-        g->col_before = cur_col;
-        fresh = 1;
-
-        if (ed->undo_open)
-            ed->undo_group_started = 1;
-    }
-    else
-    {
-        g = &ed->undo_stack[ed->undo_top - 1];
-    }
+    g->row_before = cur_row;
+    g->col_before = cur_col;
 
     if (g->count + 1 > g->cap)
     {
@@ -330,8 +300,7 @@ static int push_delta(Ed *ed, int row, EdLine **before, int n_before, EdLine **a
 
         if (!t)
         {
-            if (fresh)
-                ed->undo_top--;
+            ed->undo_top--;
 
             return -1;
         }
@@ -390,36 +359,6 @@ int undo_commit(Ed *ed, int n_after)
     return 0;
 }
 
-/* Caller already owns before[], we take it and snapshot the current after */
-int undo_push(Ed *ed, int row, EdLine **before, int n_before, int n_after)
-{
-    EdLine **after = NULL;
-
-    if (!ed)
-    {
-        lines_release(before, n_before);
-        return -1;
-    }
-
-    after = lines_capture(ed, row, n_after);
-
-    if (!after)
-    {
-        lines_release(before, n_before);
-        return -1;
-    }
-
-    if (push_delta(ed, row, before, n_before, after, n_after, ed->row, ed->col) != 0)
-    {
-        lines_release(before, n_before);
-        lines_release(after, n_after);
-
-        return -1;
-    }
-
-    return 0;
-}
-
 /* Put src lines into the document at row, replacing n_remove of them */
 static int apply_lines(Ed *ed, int row, int n_remove, EdLine **src, int n_src)
 {
@@ -458,10 +397,15 @@ int ed_undo(Ed *ed)
     UndoGroup *g = NULL;
     int i;
 
-    if (!ed || ed->undo_top <= 0)
+    if (!ed)
         return -1;
 
-    ed->undo_open = 0;
+    /* An in-flight capture becomes a delta so the edit is undoable */
+    ed_undo_settle(ed);
+
+    if (ed->undo_top <= 0)
+        return -1;
+
     ed->undo_typing = 0;
     g = &ed->undo_stack[--ed->undo_top];
 
@@ -499,10 +443,14 @@ int ed_redo(Ed *ed)
     UndoGroup *g = NULL;
     int i;
 
-    if (!ed || ed->redo_top <= 0)
+    if (!ed)
         return -1;
 
-    ed->undo_open = 0;
+    ed_undo_settle(ed);
+
+    if (ed->redo_top <= 0)
+        return -1;
+
     ed->undo_typing = 0;
     g = &ed->redo_stack[--ed->redo_top];
 
@@ -534,70 +482,6 @@ int ed_redo(Ed *ed)
     return 0;
 }
 
-/* Compatibility entry, the utf8 snapshot args are ignored by the delta engine */
-int undo_push_snapshot_range(Ed *ed, int row, int col, char *snapshot_before, char *snapshot_after, EdLine **before_lines, int before_count, EdLine **after_lines, int after_count, int old_count, int new_count, int cur_row, int cur_col, int end_row, int end_col)
-{
-    UndoGroup *g = NULL;
-    UndoOp *op = NULL;
-
-    free(snapshot_before);
-    free(snapshot_after);
-
-    if (!ed)
-    {
-        lines_release(before_lines, before_count);
-        lines_release(after_lines, after_count);
-
-        return -1;
-    }
-
-    ed_redo_clear(ed);
-
-    if (stack_room(&ed->undo_stack, &ed->undo_top, &ed->undo_cap, ed->undo_max) != 0)
-    {
-        lines_release(before_lines, before_count);
-        lines_release(after_lines, after_count);
-
-        return -1;
-    }
-
-    g = &ed->undo_stack[ed->undo_top++];
-
-    memset(g, 0, sizeof(*g));
-
-    g->ops = (UndoOp *)malloc(sizeof(UndoOp));
-
-    if (!g->ops)
-    {
-        ed->undo_top--;
-
-        lines_release(before_lines, before_count);
-        lines_release(after_lines, after_count);
-
-        return -1;
-    }
-
-    g->cap = 1;
-    g->count = 1;
-    g->row_before = cur_row;
-    g->col_before = cur_col;
-    g->row_after = end_row;
-    g->col_after = end_col;
-
-    op = &g->ops[0];
-
-    op->row = row;
-    op->before = before_lines;
-    op->n_before = before_count;
-    op->after = after_lines;
-    op->n_after = after_count;
-
-    ed->undo_open = 0;
-    ed->modified = 1;
-
-    return 0;
-}
-
 /* Close any capture an edit left open so the engine can never stay wedged */
 void ed_undo_settle(Ed *ed)
 {
@@ -615,9 +499,31 @@ void ed_undo_settle(Ed *ed)
 
         ed->undo_snapshot_mode = 0;
 
+        /* A snapshot delta must never merge into a typing run */
+        ed->undo_typing = 0;
+
         undo_commit(ed, n_after);
         ed_save_undo(ed);
     }
 
     ed->undo_snapshot_mode = 0;
+}
+
+/* True when [row, row+span) falls inside the open capture, delta adjusted */
+int undo_pending_contains(Ed *ed, int row, int span)
+{
+    int n;
+
+    if (!ed || !ed->pending_before || ed->pending_row < 0)
+        return 0;
+
+    n = ed->pending_n + (ed->count - ed->pending_doc_count);
+
+    if (n < 1)
+        n = 1;
+
+    if (span < 1)
+        span = 1;
+
+    return row >= ed->pending_row && row + span <= ed->pending_row + n;
 }

@@ -547,6 +547,7 @@ int handle_function_keys(TeApp *app, int ch, int is_key)
             /* Normal setup functionality */
             char old_charset_in[TE_CFG_STR_MAX];
             char old_charset_out[TE_CFG_STR_MAX];
+            int rewrap_doc;
             TeTab *tab = NULL;
 
             strncpy(old_charset_in, app->cfg.charset_in, sizeof(old_charset_in) - 1);
@@ -561,10 +562,18 @@ int handle_function_keys(TeApp *app, int ch, int is_key)
                 if (app->cfg.undo_levels > 0)
                     ed_set_undo_levels(te_app_get_editor(app), app->cfg.undo_levels);
 
+                /* Refit when hard is on and the mode or column changed */
+                rewrap_doc = app->cfg.hard_wrap && (!app->hard_wrap || app->wrap_col != app->cfg.autowrap_col);
+
                 app->hard_wrap = app->cfg.hard_wrap;
+
                 ed_set_hard_wrap(te_app_get_editor(app), app->cfg.hard_wrap);
 
                 app->wrap_col = app->cfg.autowrap_col;
+
+                if (rewrap_doc)
+                    ui_editor_rewrap_docwide(app);
+
                 te_app_set_show_line_numbers(app, app->cfg.show_line_numbers);
 
                 /* If charset_in changed in setup, update charset_in */
@@ -1516,6 +1525,10 @@ int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int body_row
     {
         app->hard_wrap = !app->hard_wrap;
         ed_set_hard_wrap(te_app_get_editor(app), app->hard_wrap);
+
+        /* Entering hard mode refits the document to the column */
+        if (app->hard_wrap)
+            ui_editor_rewrap_docwide(app);
 
         /* Ensure cursor stays within visible area when dict panel is active */
 #ifdef HAVE_TRANSLATE_STARDICT

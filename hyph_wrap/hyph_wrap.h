@@ -50,14 +50,10 @@ extern "C"
     /* Find hyphenation break points (returns byte offsets) */
     int hyph_breakpoints(HyphDict *h, const char *word, int word_len, int *out_pos, int *out_count);
 
-    void hyph_cache_clear(HyphDict *h);
-
     /* List available dictionaries in directory */
     char **hyph_list_dictionaries(const char *dir_path, int *n_dicts);
 
     void hyph_free_dictionaries(char **dicts, int n_dicts);
-
-    int hyph_is_available(void);
 
 #ifdef __cplusplus
 }

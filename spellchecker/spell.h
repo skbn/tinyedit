@@ -61,7 +61,6 @@ char **spell_suggest(struct spell *s, const char *word, int *n_suggestions);
 /* free suggestion array returned by spell_suggest (no-op in this engine) */
 void spell_free_suggestions(struct spell *s, char **suggestions, int n_suggestions);
 
-void spell_cache_clear(struct spell *s);
 const char *spell_get_encoding(struct spell *s);
 
 /* Add word to in-memory custom dictionary returns 0 on success -1 on error duplicates ignored */
@@ -94,7 +93,6 @@ int spell_is_ignored(struct spell *s, const char *word);
 void spell_clear_ignored(struct spell *s);
 
 /* return 1 if spell checker is available (compiled) */
-int spell_is_available(void);
 
 /* Unicode word-char classifier. Use instead of iswalnum() for word boundaries */
 int te_is_word_char(wint_t wc);

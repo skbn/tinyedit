@@ -40,6 +40,8 @@ unsigned char unicode_to_cp865(uint32_t cp);
 unsigned char unicode_to_cp866(uint32_t cp);
 unsigned char unicode_to_cp1252(uint32_t cp);
 unsigned char unicode_to_latin2(uint32_t cp);
+unsigned char utf8_quote_ascii_fallback(uint32_t cp);
+unsigned char utf8_dash_ascii_fallback(uint32_t cp);
 
 /* Convert between named charset and UTF-8 (CP437/850/865/866/1252, LATIN-1/2, IBMPC) */
 int charset_to_utf8(const char *cs, const char *src, int srclen, char *dst, int dstmax);

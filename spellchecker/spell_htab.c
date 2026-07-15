@@ -344,11 +344,6 @@ void check_cache_put(struct spell *m, const char *word, int res)
     check_cache_push_front(m, idx);
 }
 
-void spell_cache_clear(struct spell *s)
-{
-    if (s)
-        check_cache_init(s);
-}
 
 const char *spell_get_encoding(struct spell *s)
 {

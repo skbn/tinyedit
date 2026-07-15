@@ -1116,7 +1116,7 @@ int ed_export_block_to_file(Ed *ed, const char *path, const char *charset_out)
     return 0;
 }
 
-/* Paragraph bounds: a run of non empty lines */
+/* Paragraph bounds from the brk bits: LB_PARA ends one, never merge across */
 static void para_bounds(Ed *ed, int row, int *first, int *last)
 {
     int f = row;
@@ -1130,10 +1130,10 @@ static void para_bounds(Ed *ed, int row, int *first, int *last)
         return;
     }
 
-    while (f > 0 && ed->lines[f - 1]->len > 0)
+    while (f > 0 && ed->lines[f - 1]->len > 0 && ed->lines[f - 1]->brk != LB_PARA)
         f--;
 
-    while (l < ed->count - 1 && ed->lines[l + 1]->len > 0)
+    while (l < ed->count - 1 && ed->lines[l]->brk != LB_PARA && ed->lines[l + 1]->len > 0)
         l++;
 
     *first = f;
@@ -1218,28 +1218,24 @@ static ParaChar *para_join(Ed *ed, int first, int last, int cur_row, int cur_col
     return buf;
 }
 
-int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
+/* Reflow lines [first..last] as one paragraph, caller owns the undo delta */
+static int rewrap_range_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user, int first, int last, int *out_new_lines)
 {
     ParaChar *para = NULL;
     wchar_t *text = NULL;
     LayoutLine *lines = NULL;
     LayoutOpts opt;
     EdLine **built = NULL;
-    int first;
-    int last;
     int plen = 0;
     int cursor = 0;
     int max_lines;
     int n;
     int i;
-    int new_row = 0;
+    int new_row = first;
     int new_col = 0;
 
-    if (!ed || width <= 0 || ed->count <= 0)
-        return -1;
-
-    /* On any failure below the open capture must be dropped or undo stays dead */
-    para_bounds(ed, ed->row, &first, &last);
+    if (out_new_lines)
+        *out_new_lines = last - first + 1;
 
     para = para_join(ed, first, last, ed->row, ed->col, &plen, &cursor);
 
@@ -1251,9 +1247,6 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
     if (!text)
     {
         free(para);
-        undo_abort(ed);
-        ed->undo_snapshot_mode = 0;
-
         return -1;
     }
 
@@ -1269,10 +1262,6 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
     {
         free(para);
         free(text);
-
-        undo_abort(ed);
-        ed->undo_snapshot_mode = 0;
-
         return -1;
     }
 
@@ -1291,10 +1280,6 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
         free(para);
         free(text);
         free(lines);
-
-        undo_abort(ed);
-        ed->undo_snapshot_mode = 0;
-
         return -1;
     }
 
@@ -1305,14 +1290,9 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
         free(para);
         free(text);
         free(lines);
-
-        undo_abort(ed);
-        ed->undo_snapshot_mode = 0;
-
         return -1;
     }
 
-    /* Build the new lines, carrying the styling of every character across */
     for (i = 0; i < n; i++)
     {
         int start = lines[i].start;
@@ -1329,7 +1309,6 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
             free(para);
             free(text);
             free(lines);
-
             return -1;
         }
 
@@ -1346,11 +1325,41 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
 
         built[i] = ln;
 
-        /* Where the cursor lands in the reflowed paragraph */
         if (cursor >= start && cursor <= lines[i].end)
         {
             new_row = first + i;
             new_col = cursor - start;
+        }
+    }
+
+    /* Same count and lengths means no cut moved, skip the splice */
+    if (n == last - first + 1)
+    {
+        int same = 1;
+
+        for (i = 0; i < n; i++)
+        {
+            if (built[i]->len != ed->lines[first + i]->len || built[i]->brk != ed->lines[first + i]->brk)
+            {
+                same = 0;
+                break;
+            }
+        }
+
+        if (same)
+        {
+            for (i = 0; i < n; i++)
+                ed_line_destroy(built[i]);
+
+            free(built);
+            free(para);
+            free(text);
+            free(lines);
+
+            if (out_new_lines)
+                *out_new_lines = n;
+
+            return 0;
         }
     }
 
@@ -1363,10 +1372,6 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
         free(para);
         free(text);
         free(lines);
-
-        undo_abort(ed);
-        ed->undo_snapshot_mode = 0;
-
         return -1;
     }
 
@@ -1382,6 +1387,37 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
     ed_clamp(ed);
     ed_prefix_invalidate_from(ed, first);
 
+    if (out_new_lines)
+        *out_new_lines = n;
+
+    return 0;
+}
+
+/* Blank-line paragraph bounds from the cursor row, then reflow */
+static int rewrap_one_paragraph_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user, int *out_new_lines)
+{
+    int first;
+    int last;
+
+    para_bounds(ed, ed->row, &first, &last);
+
+    return rewrap_range_no_undo(ed, width, hyph, hyph_user, first, last, out_new_lines);
+}
+
+int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
+{
+    int n = 0;
+
+    if (!ed || width <= 0 || ed->count <= 0)
+        return -1;
+
+    if (rewrap_one_paragraph_no_undo(ed, width, hyph, hyph_user, &n) != 0)
+    {
+        undo_abort(ed);
+        ed->undo_snapshot_mode = 0;
+        return -1;
+    }
+
     /* The paragraph was captured before the edit, this closes that delta */
     ed->undo_snapshot_mode = 0;
 
@@ -1389,6 +1425,121 @@ int ed_rewrap_paragraph_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_us
         return -1;
 
     ed_save_undo(ed);
+
+    return 0;
+}
+
+/* Same reflow with no undo record, for callers holding an open delta */
+int ed_rewrap_paragraph_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
+{
+    int n = 0;
+
+    if (!ed || width <= 0 || ed->count <= 0)
+        return -1;
+
+    return rewrap_one_paragraph_no_undo(ed, width, hyph, hyph_user, &n);
+}
+
+/* Refit every paragraph to width, brk bounded, one undo entry */
+int ed_rewrap_document(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
+{
+    int row;
+    int first;
+    int last;
+    int n;
+    int old_count;
+    int old_row;
+    int old_col;
+
+    if (!ed || width <= 0 || ed->count <= 0)
+        return 0;
+
+    old_row = ed->row;
+    old_col = ed->col;
+    old_count = ed->count;
+
+    /* One delta covers the whole document */
+    undo_abort(ed);
+
+    if (undo_begin(ed, 0, old_count) != 0)
+        return -1;
+
+    row = 0;
+
+    while (row < ed->count)
+    {
+        if (ed->lines[row]->len == 0)
+        {
+            row++;
+            continue;
+        }
+
+        /* Paragraph runs while the break bit says it continues */
+        first = row;
+        last = row;
+
+        while (last < ed->count - 1 && ed->lines[last]->brk != LB_PARA)
+            last++;
+
+        n = 0;
+
+        if (rewrap_range_no_undo(ed, width, hyph, hyph_user, first, last, &n) != 0)
+        {
+            undo_abort(ed);
+            return -1;
+        }
+
+        row = first + (n > 0 ? n : 1);
+    }
+
+    if (undo_commit(ed, ed->count) != 0)
+        return -1;
+
+    ed_save_undo(ed);
+
+    if (old_row < ed->count)
+        ed_set_pos(ed, old_row, old_col);
+    else
+        ed_set_pos(ed, ed->count - 1, 0);
+
+    return 0;
+}
+
+/* Fit a loaded document to width, brk bounded, untouched if it fits */
+int ed_rewrap_loaded_document(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
+{
+    int row;
+
+    if (!ed || width <= 0 || ed->count <= 0)
+        return 0;
+
+    row = 0;
+
+    while (row < ed->count)
+    {
+        int first = row;
+        int last = row;
+        int n = 0;
+
+        if (ed->lines[row]->len == 0)
+        {
+            row++;
+            continue;
+        }
+
+        /* The paragraph runs while the break bit says "continues" */
+        while (last < ed->count - 1 && ed->lines[last]->brk != LB_PARA)
+            last++;
+
+        /* A paragraph that already fits is left byte identical */
+        if (rewrap_range_no_undo(ed, width, hyph, hyph_user, first, last, &n) != 0)
+            return -1;
+
+        row = first + (n > 0 ? n : 1);
+    }
+
+    ed_set_pos(ed, 0, 0);
+    ed_clamp(ed);
 
     return 0;
 }

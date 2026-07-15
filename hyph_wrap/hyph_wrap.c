@@ -37,7 +37,7 @@ struct HyphDict
 {
 #ifdef HAVE_HYPHEN
     HyphenDict *dict;
-    char dict_enc[24]; /* canonical charset when the .dic is not UTF-8, else "" */
+    char dict_enc[24]; /* Canonical charset when the .dic is not UTF-8, else "" */
 #endif
 
     short head;
@@ -167,14 +167,6 @@ static void hcache_put(HyphDict *h, const char *word, const unsigned char *break
 }
 
 #endif
-
-void hyph_cache_clear(HyphDict *h)
-{
-#ifdef HAVE_HYPHEN
-    if (h)
-        hcache_init(h);
-#endif
-}
 
 HyphDict *hyph_new(const char *dict_path)
 {
@@ -418,15 +410,6 @@ int hyph_breakpoints(HyphDict *h, const char *word, int word_len, int *out_pos, 
     if (out_count)
         *out_count = 0;
 
-    return 0;
-#endif
-}
-
-int hyph_is_available(void)
-{
-#ifdef HAVE_HYPHEN
-    return 1;
-#else
     return 0;
 #endif
 }

@@ -33,7 +33,7 @@ extern void te_status(TeApp *app, const char *fmt, ...);
 #if defined(PLATFORM_AMIGA)
 #define DICT_REV_MAX_SCAN 8000
 #else
-#define DICT_REV_MAX_SCAN 0 /* unlimited */
+#define DICT_REV_MAX_SCAN 0 /* Unlimited */
 #endif
 
 int ui_dict_reverse(TeApp *app)
@@ -145,20 +145,27 @@ int ui_dict_reverse(TeApp *app)
 
         if (replace_wcs)
         {
-            ed_auto_rewrap_capture_pre_snapshot(ed);
-            ed_save_undo(ed);
+            if (ed->hard_wrap)
+            {
+                /* Capture paragraph, replace silently, reflow commits */
+                ed_auto_rewrap_capture_pre_snapshot(ed);
 
-            ed->undo_snapshot_mode = 1;
-            ed_set_pos(ed, info.row, word_start);
+                ed->undo_snapshot_mode = 1;
+                ed_set_pos(ed, info.row, word_start);
 
-            for (i = 0; i < word_len; i++)
-                ed_delete(ed);
+                for (i = 0; i < word_len; i++)
+                    ed_delete(ed);
 
-            for (i = 0; i < replace_len; i++)
-                ed_insert_char(ed, replace_wcs[i]);
+                for (i = 0; i < replace_len; i++)
+                    ed_insert_char(ed, replace_wcs[i]);
 
-            ed->undo_snapshot_mode = 0;
-            ed_auto_rewrap_after_edit(app);
+                ed_auto_rewrap_after_edit(app);
+            }
+            else
+            {
+                /* Single-row replacement, one undo entry */
+                ed_replace_word_with_undo(ed, info.row, word_start, word_start + word_len, replace_wcs, replace_len);
+            }
 
             te_status(app, "Replaced with '%s'", items[selected]);
             free(replace_wcs);

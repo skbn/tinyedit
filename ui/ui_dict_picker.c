@@ -135,11 +135,11 @@ static int extract_candidates(const char *text, char **items, int max)
             {
                 len = (int)(p - line_start);
 
-                /* trim trailing whitespace */
+                /* Trim trailing whitespace */
                 while (len > 0 && (line_start[len - 1] == ' ' || line_start[len - 1] == '\t' || line_start[len - 1] == '\r'))
                     len--;
 
-                /* trim leading whitespace */
+                /* Trim leading whitespace */
                 while (lead < len && (line_start[lead] == ' ' || line_start[lead] == '\t'))
                     lead++;
 
@@ -155,7 +155,7 @@ static int extract_candidates(const char *text, char **items, int max)
 
                     if (pass == 0)
                     {
-                        /* strict pass: also exclude grammar tags, sentences and notes */
+                        /* Strict pass: also exclude grammar tags, sentences and notes */
                         if (keep && line_is_grammar_tag(s, real_len))
                             keep = 0;
 
@@ -377,20 +377,27 @@ int ui_dict_picker(TeApp *app)
 
         if (replace_wcs)
         {
-            ed_auto_rewrap_capture_pre_snapshot(ed);
+            if (ed->hard_wrap)
+            {
+                /* Capture paragraph, replace silently, reflow commits */
+                ed_auto_rewrap_capture_pre_snapshot(ed);
 
-            ed_save_undo(ed);
-            ed->undo_snapshot_mode = 1;
-            ed_set_pos(ed, info.row, word_start);
+                ed->undo_snapshot_mode = 1;
+                ed_set_pos(ed, info.row, word_start);
 
-            for (i = 0; i < word_len; i++)
-                ed_delete(ed);
+                for (i = 0; i < word_len; i++)
+                    ed_delete(ed);
 
-            for (i = 0; i < replace_len; i++)
-                ed_insert_char(ed, replace_wcs[i]);
+                for (i = 0; i < replace_len; i++)
+                    ed_insert_char(ed, replace_wcs[i]);
 
-            ed->undo_snapshot_mode = 0;
-            ed_auto_rewrap_after_edit(app);
+                ed_auto_rewrap_after_edit(app);
+            }
+            else
+            {
+                /* Single-row replacement, one undo entry */
+                ed_replace_word_with_undo(ed, info.row, word_start, word_start + word_len, replace_wcs, replace_len);
+            }
 
             te_status(app, "Replaced with '%s'", items[selected]);
             free(replace_wcs);

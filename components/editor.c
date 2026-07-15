@@ -24,7 +24,7 @@
 
 #define ED_EMB_CHARS 8
 #define ED_BUF_INITIAL_SIZE 1024
-#define SAVE_BUF_SIZE 65536
+#define SAVE_BUF_SIZE 0xFFFF
 
 /* Guard: never serialise a multi-MB paragraph for the rewrap snapshot */
 #define ED_AUTO_REWRAP_SNAPSHOT_LINE_CAP 512
@@ -747,6 +747,47 @@ int ed_line_break(const Ed *ed, int line)
         return LB_PARA;
 
     return (int)ed->lines[line]->brk;
+}
+
+/* Join every marked break into logical lines, used when loading in soft mode */
+void ed_join_breaks(Ed *ed)
+{
+    int i;
+
+    if (!ed)
+        return;
+
+    i = 0;
+
+    while (i < ed->count - 1)
+    {
+        EdLine *ln = ed->lines[i];
+        int brk = (int)ln->brk;
+
+        if (brk == LB_PARA)
+        {
+            i++;
+            continue;
+        }
+
+        /* A space break gets its space back, a word break joins with nothing */
+        if (brk == LB_SPACE)
+        {
+            unsigned int sp = (unsigned int)' ';
+
+            if (line_insert_cps(ln, ln->len, &sp, 1) != 0)
+                return;
+        }
+
+        if (line_append_slice(ln, ed->lines[i + 1], 0, ed->lines[i + 1]->len) != 0)
+            return;
+
+        ln->brk = ed->lines[i + 1]->brk;
+
+        doc_remove_lines(ed, i + 1, 1);
+    }
+
+    ed_clamp(ed);
 }
 
 void ed_line_set_break(Ed *ed, int line, int brk)
@@ -2090,60 +2131,6 @@ int ed_save_to_file(const Ed *ed, const char *path, const char *charset_out)
     return 0;
 }
 
-/* Open a fresh group on the undo stack, redo history dies here */
-EdLine **ed_clone_line_range(Ed *ed, int start, int end, int *out_count)
-{
-    EdLine **v = NULL;
-    int n;
-    int i;
-
-    if (!ed || start < 0 || end > ed->count || start >= end)
-        return NULL;
-
-    n = end - start;
-    v = (EdLine **)malloc((size_t)n * sizeof(EdLine *));
-
-    if (!v)
-        return NULL;
-
-    for (i = 0; i < n; i++)
-    {
-        v[i] = line_clone_slice(ed, ed->lines[start + i], 0, ed->lines[start + i]->len);
-
-        if (!v[i])
-        {
-            while (--i >= 0)
-                line_free(v[i]);
-
-            free(v);
-
-            return NULL;
-        }
-    }
-
-    *out_count = n;
-
-    return v;
-}
-
-void ed_free_snapshot(char *utf8, EdLine **lines, int count)
-{
-    int i;
-
-    free(utf8);
-
-    if (lines)
-    {
-        for (i = 0; i < count; i++)
-        {
-            if (lines[i])
-                line_free(lines[i]);
-        }
-
-        free(lines);
-    }
-}
-
 /* Replace count_to_remove lines at start with lines parsed from UTF-8 */
 int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text)
 {
@@ -2471,6 +2458,13 @@ int ed_insert_char(Ed *ed, wchar_t ch)
     /* Hard wrap reflows the paragraph afterwards, that delta covers this edit */
     if (ed->hard_wrap)
     {
+        /* An edit outside the open capture settles it and starts a new one */
+        if (ed->undo_snapshot_mode && !undo_pending_contains(ed, ed->row, 1))
+        {
+            ed_undo_settle(ed);
+            ed->undo_snapshot_mode = 0;
+        }
+
         if (!ed->undo_snapshot_mode)
             ed_auto_rewrap_capture_pre_snapshot(ed);
 
@@ -2573,6 +2567,13 @@ int ed_backspace(Ed *ed)
 
     if (ed->hard_wrap)
     {
+        /* An edit outside the open capture settles it and starts a new one */
+        if (ed->undo_snapshot_mode && !undo_pending_contains(ed, ed->row, 1))
+        {
+            ed_undo_settle(ed);
+            ed->undo_snapshot_mode = 0;
+        }
+
         if (!ed->undo_snapshot_mode)
             ed_auto_rewrap_capture_pre_snapshot(ed);
 
@@ -2641,6 +2642,13 @@ int ed_delete(Ed *ed)
 
     if (ed->hard_wrap)
     {
+        /* An edit outside the open capture settles it and starts a new one */
+        if (ed->undo_snapshot_mode && !undo_pending_contains(ed, ed->row, 1))
+        {
+            ed_undo_settle(ed);
+            ed->undo_snapshot_mode = 0;
+        }
+
         if (!ed->undo_snapshot_mode)
             ed_auto_rewrap_capture_pre_snapshot(ed);
 
@@ -3518,12 +3526,12 @@ void ed_auto_rewrap_capture_pre_snapshot(Ed *ed)
     {
         first = ed->row;
 
-        while (first > 0 && ed->lines[first - 1]->len > 0)
+        while (first > 0 && ed->lines[first - 1]->len > 0 && ed->lines[first - 1]->brk != LB_PARA)
             first--;
 
         last = ed->row;
 
-        while (last < ed->count - 1 && ed->lines[last + 1]->len > 0)
+        while (last < ed->count - 1 && ed->lines[last]->brk != LB_PARA && ed->lines[last + 1]->len > 0)
             last++;
     }
 
@@ -3532,22 +3540,81 @@ void ed_auto_rewrap_capture_pre_snapshot(Ed *ed)
     {
         undo_abort(ed);
 
-        ed->auto_rewrap_pre_start = -1;
-        ed->auto_rewrap_pre_end = -1;
-
         return;
     }
 
-    if (undo_begin(ed, first, last - first + 1) != 0)
+    undo_begin(ed, first, last - first + 1);
+}
+
+/* Replace [start, end) on one row as a single undo entry */
+int ed_replace_word_with_undo(Ed *ed, int row, int start, int end, const wchar_t *replacement, int rlen)
+{
+    EdLine *ln = NULL;
+    unsigned int *cps = NULL;
+    int i;
+
+    if (!ed || row < 0 || row >= ed->count || start < 0)
+        return -1;
+
+    ln = ed->lines[row];
+
+    if (!ln || start > ln->len || end < start || end > ln->len)
+        return -1;
+
+    if (rlen < 0)
+        rlen = 0;
+
+    /* One-line, one-delta undo entry: capture the line, mutate, commit */
+    undo_abort(ed);
+
+    if (undo_begin(ed, row, 1) != 0)
+        return -1;
+
+    /* Suppress the per-op captures of the public entry points */
+    ed->undo_snapshot_mode = 1;
+
+    if (end > start)
+        line_delete_cps(ln, start, end - start);
+
+    if (rlen > 0)
     {
-        ed->auto_rewrap_pre_start = -1;
-        ed->auto_rewrap_pre_end = -1;
+        cps = (unsigned int *)malloc((size_t)rlen * sizeof(unsigned int));
 
-        return;
+        if (!cps)
+        {
+            ed->undo_snapshot_mode = 0;
+
+            undo_abort(ed);
+            return -1;
+        }
+
+        for (i = 0; i < rlen; i++)
+            cps[i] = (unsigned int)replacement[i];
+
+        if (line_insert_cps(ln, start, cps, rlen) != 0)
+        {
+            free(cps);
+
+            ed->undo_snapshot_mode = 0;
+            undo_abort(ed);
+            return -1;
+        }
+
+        free(cps);
     }
 
-    ed->auto_rewrap_pre_start = first;
-    ed->auto_rewrap_pre_end = last + 1;
-    ed->auto_rewrap_pre_cursor_row = ed->row;
-    ed->auto_rewrap_pre_cursor_col = ed->col;
+    ed->row = row;
+    ed->col = start + rlen;
+    ed->modified = 1;
+
+    doc_dirty_from(ed, row);
+
+    ed->undo_snapshot_mode = 0;
+
+    if (undo_commit(ed, 1) != 0)
+        return -1;
+
+    ed_save_undo(ed);
+
+    return 0;
 }

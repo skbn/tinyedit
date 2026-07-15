@@ -229,29 +229,6 @@ static int cache_acquire(struct thes *t)
     return i;
 }
 
-void thes_cache_clear(struct thes *t)
-{
-    int i;
-
-    if (!t)
-        return;
-
-    for (i = 0; i < THES_CACHE_N; i++)
-    {
-        if (t->cache[i].key[0] != '\0')
-        {
-            cache_entry_free_strings(&t->cache[i]);
-            t->cache[i].key[0] = '\0';
-            t->cache[i].prev = -1;
-            t->cache[i].next = -1;
-        }
-    }
-
-    t->head = -1;
-    t->tail = -1;
-    t->count = 0;
-}
-
 /* Parse "word|N" into *word_out and *n_out */
 static int parse_header(const char *line, char *word_out, int *n_out)
 {
@@ -272,6 +249,30 @@ static int parse_header(const char *line, char *word_out, int *n_out)
     *n_out = atoi(bar + 1);
 
     return 0;
+}
+
+void thes_cache_clear(struct thes *t)
+{
+    int i;
+
+    if (!t)
+        return;
+
+    for (i = 0; i < THES_CACHE_N; i++)
+    {
+        if (t->cache[i].key[0] != '\0')
+        {
+            cache_entry_free_strings(&t->cache[i]);
+
+            t->cache[i].key[0] = '\0';
+            t->cache[i].prev = -1;
+            t->cache[i].next = -1;
+        }
+    }
+
+    t->head = -1;
+    t->tail = -1;
+    t->count = 0;
 }
 
 /* Parse meaning line "count|meaning|syn1|syn2|..." */
@@ -908,9 +909,4 @@ void thes_free_dictionaries(char **dicts, int n_dicts)
         free(dicts[i]);
 
     free(dicts);
-}
-
-int thes_is_available(void)
-{
-    return 1;
 }

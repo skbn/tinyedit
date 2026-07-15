@@ -161,12 +161,6 @@ static int cache_acquire(struct hyph *h)
     return i;
 }
 
-void hyph_cache_clear(struct hyph *h)
-{
-    if (h)
-        cache_init(h);
-}
-
 /* Parse pattern like "2b1c" into letters and levels */
 static int parse_pattern(const char *src, struct hyph_pattern *p)
 {
@@ -407,33 +401,6 @@ void hyph_free(struct hyph *h)
 const char *hyph_get_encoding(struct hyph *h)
 {
     return h ? h->enc : NULL;
-}
-
-void hyph_set_minimums(HyphDict *h, int lhmin, int rhmin)
-{
-    if (!h)
-        return;
-
-    if (lhmin > 0)
-        h->lhmin = lhmin;
-
-    if (rhmin > 0)
-        h->rhmin = rhmin;
-
-    /* Cache holds previously computed results with old minimums */
-    hyph_cache_clear(h);
-}
-
-void hyph_get_minimums(HyphDict *h, int *lhmin, int *rhmin)
-{
-    if (!h)
-        return;
-
-    if (lhmin)
-        *lhmin = h->lhmin;
-
-    if (rhmin)
-        *rhmin = h->rhmin;
 }
 
 /* Check if pattern matches at position */
@@ -704,9 +671,4 @@ void hyph_free_dictionaries(char **dicts, int n_dicts)
         free(dicts[i]);
 
     free(dicts);
-}
-
-int hyph_is_available(void)
-{
-    return 1;
 }

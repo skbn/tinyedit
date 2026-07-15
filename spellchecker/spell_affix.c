@@ -12,7 +12,7 @@
 #include "spell_priv.h"
 
 /* Parse line "SFX X N" or "SFX X 0 ado [^aeiou]" */
-int parse_aff_header(const char *line, int flag_type, ms_cp *flag_out, char *cp_out, int *n_out)
+static int parse_aff_header(const char *line, int flag_type, ms_cp *flag_out, char *cp_out, int *n_out)
 {
     /* Line starts after "SFX " or "PFX " */
     char tmp[64];
@@ -82,7 +82,7 @@ int parse_aff_header(const char *line, int flag_type, ms_cp *flag_out, char *cp_
 }
 
 /* Parse "SFX X strip add cond [morph]" => strip, add, cond */
-int parse_aff_rule(const char *line, ms_cp expected_flag, int flag_type, char **strip, char **add, char **cond)
+static int parse_aff_rule(const char *line, ms_cp expected_flag, int flag_type, char **strip, char **add, char **cond)
 {
     const char *p = line;
     char tok[256];
@@ -205,7 +205,7 @@ int parse_aff_rule(const char *line, ms_cp expected_flag, int flag_type, char **
 }
 
 /* Parse TRY abc... line */
-void parse_try(struct spell *m, const char *rest)
+static void parse_try(struct spell *m, const char *rest)
 {
     free(m->try_chars);
     m->try_chars = ms_strdup(rest);
@@ -213,7 +213,7 @@ void parse_try(struct spell *m, const char *rest)
 
 /* Parse "REP N" header (does nothing, dynamic capacity) */
 /* Parse "REP from to" line */
-void parse_rep(struct spell *m, const char *line)
+static void parse_rep(struct spell *m, const char *line)
 {
     /* "REP " already removed */
     const char *sp = strchr(line, ' ');
@@ -261,7 +261,7 @@ void parse_rep(struct spell *m, const char *line)
     m->n_reps++;
 }
 
-void parse_map(struct spell *m, const char *line)
+static void parse_map(struct spell *m, const char *line)
 {
     char ***ng = NULL;
     char **arr = NULL;

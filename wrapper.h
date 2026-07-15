@@ -46,6 +46,6 @@
 #define WRAPPER_OS_NAME "unknown"
 #endif
 
-#define WRAPPER_PID "TinyEdit 1.3.4 " WRAPPER_OS_NAME
+#define WRAPPER_PID "TinyEdit 1.3.5 " WRAPPER_OS_NAME
 
 #endif

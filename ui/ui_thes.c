@@ -12,6 +12,7 @@
 #include "ui_thes.h"
 #include "ui_thes_glue.h"
 #include "ui_editor_helper.h"
+#include "../components/undo.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -465,11 +466,16 @@ int ui_thes_lookup_word(UI_APP_T *app)
                 {
                     int del_count;
 
-                    ed_auto_rewrap_capture_pre_snapshot(ed);
-                    ed_save_undo(ed);
-
+                    /* Hard commits via the reflow, soft is one delta */
                     if (ed->hard_wrap)
-                        ed->undo_snapshot_mode = 1;
+                        ed_auto_rewrap_capture_pre_snapshot(ed);
+                    else
+                    {
+                        undo_abort(ed);
+                        undo_begin(ed, hs.first_row, 2);
+                    }
+
+                    ed->undo_snapshot_mode = 1;
 
                     /* Remove first half (including the hyphen) on the first row */
                     ed_set_pos(ed, hs.first_row, hs.first_start);
@@ -483,39 +489,49 @@ int ui_thes_lookup_word(UI_APP_T *app)
 
                     /* Remove the second half on the following row */
                     ed_set_pos(ed, hs.second_row, hs.second_start);
+
                     del_count = hs.second_end - hs.second_start;
 
                     for (i = 0; i < del_count; i++)
                         ed_delete(ed);
 
                     if (ed->hard_wrap)
+                    {
+                        /* The reflow commits the paragraph delta */
+                        ed_auto_rewrap_after_edit(app);
+                    }
+                    else
+                    {
                         ed->undo_snapshot_mode = 0;
 
-                    ed_save_undo(ed);
-                    ed_auto_rewrap_after_edit(app);
+                        undo_commit(ed, 2);
+                        ed_save_undo(ed);
+                    }
                 }
                 else
                 {
-                    ed_auto_rewrap_capture_pre_snapshot(ed);
-
-                    ed_save_undo(ed);
-
                     if (ed->hard_wrap)
+                    {
+                        /* Capture paragraph, replace silently, reflow commits */
+                        ed_auto_rewrap_capture_pre_snapshot(ed);
+
                         ed->undo_snapshot_mode = 1;
 
-                    ed_set_pos(ed, info.row, ws);
+                        ed_set_pos(ed, info.row, ws);
 
-                    for (i = 0; i < (we - ws); i++)
-                        ed_delete(ed);
+                        for (i = 0; i < (we - ws); i++)
+                            ed_delete(ed);
 
-                    for (i = 0; i < wlen; i++)
-                        ed_insert_char(ed, wsyn[i]);
+                        for (i = 0; i < wlen; i++)
+                            ed_insert_char(ed, wsyn[i]);
 
-                    if (ed->hard_wrap)
-                        ed->undo_snapshot_mode = 0;
-
-                    ed_save_undo(ed);
-                    ed_auto_rewrap_after_edit(app);
+                        ed_auto_rewrap_after_edit(app);
+                    }
+                    else
+                    {
+                        /* Single-row replacement, one undo entry */
+                        ed_replace_word_with_undo(ed, info.row, ws, we, wsyn, wlen);
+                    }
                 }
 
                 free(wsyn);

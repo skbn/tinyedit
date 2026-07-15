@@ -184,14 +184,6 @@ static void cache_put(SpellChecker *sc, const char *word, int result)
 }
 #endif
 
-void spell_cache_clear(SpellChecker *sc)
-{
-#ifdef HAVE_HUNSPELL
-    if (sc)
-        cache_init(sc);
-#endif
-}
-
 SpellChecker *spell_new(const char *aff_path, const char *dic_path)
 {
 #ifdef HAVE_HUNSPELL
@@ -419,15 +411,6 @@ const char *spell_get_encoding(SpellChecker *sc)
     return sc ? sc->encoding : NULL;
 #else
     return NULL;
-#endif
-}
-
-int spell_is_available(void)
-{
-#ifdef HAVE_HUNSPELL
-    return 1;
-#else
-    return 0;
 #endif
 }
 
@@ -680,7 +663,7 @@ int spell_load_custom(SpellChecker *sc, const char *path)
     fp = fopen(path, "rb");
 
     if (!fp)
-        return -1; /* not fatal -- caller treats as "no custom dict yet" */
+        return -1; /* Not fatal -- caller treats as "no custom dict yet" */
 
     while (fgets(buf, (int)sizeof(buf), fp))
     {
@@ -755,5 +738,13 @@ int spell_add_to_custom_dict(SpellChecker *sc, const char *word, const char *cus
 #else
 
     return -1;
+#endif
+}
+
+void spell_cache_clear(SpellChecker *sc)
+{
+#ifdef HAVE_HUNSPELL
+    if (sc)
+        cache_init(sc);
 #endif
 }

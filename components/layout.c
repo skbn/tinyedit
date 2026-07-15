@@ -307,3 +307,19 @@ int layout_join(const wchar_t *text, const LayoutLine *lines, int n, wchar_t *ou
 
     return used;
 }
+
+/* Alignment indent, see layout.h. Pure math, no dependencies on the display */
+int layout_align_indent(unsigned char align, int text_vw, int avail)
+{
+    int pad;
+
+    /* EA_ALIGN_LEFT (0) and EA_ALIGN_JUST (3): no leading indent */
+    if (align == 1) /* EA_ALIGN_CENTER */
+        pad = (avail - text_vw) / 2;
+    else if (align == 2) /* EA_ALIGN_RIGHT */
+        pad = avail - text_vw;
+    else
+        return 0;
+
+    return pad > 0 ? pad : 0;
+}

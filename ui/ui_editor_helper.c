@@ -2150,3 +2150,57 @@ int ui_rich_align_set(TeApp *app, unsigned char align)
 
     return 1;
 }
+
+/* Fit a freshly loaded document to the configured column, no undo */
+void ui_editor_rewrap_loaded(TeApp *app)
+{
+    int width;
+    LayoutHyphenFn hyph = NULL;
+    void *hyph_user = NULL;
+
+    if (!app || !app->hard_wrap)
+        return;
+
+    width = editor_eff_wrap(app);
+
+    if (width <= 0)
+        return;
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+    if (app->hyph_wrap_enabled && app->hyph_handle)
+    {
+        hyph = ui_layout_hyphen;
+        hyph_user = app;
+    }
+#endif
+
+    ed_rewrap_loaded_document(te_app_get_editor(app), width, hyph, hyph_user);
+    ed_ensure_visible(te_app_get_editor(app));
+}
+
+/* Refit the document after a mode or column change, one undo step */
+void ui_editor_rewrap_docwide(TeApp *app)
+{
+    int width;
+    LayoutHyphenFn hyph = NULL;
+    void *hyph_user = NULL;
+
+    if (!app || !app->hard_wrap)
+        return;
+
+    width = editor_eff_wrap(app);
+
+    if (width <= 0)
+        return;
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+    if (app->hyph_wrap_enabled && app->hyph_handle)
+    {
+        hyph = ui_layout_hyphen;
+        hyph_user = app;
+    }
+#endif
+
+    ed_rewrap_document(te_app_get_editor(app), width, hyph, hyph_user);
+    ed_ensure_visible(te_app_get_editor(app));
+}

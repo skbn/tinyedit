@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "editor.h"
 #include "ed_attr.h"
@@ -42,6 +43,11 @@ struct wp4_ctx
     /* Current position in characters */
     int line;
     int col;
+
+    /* Break kind of every finished line, same order as the newlines */
+    unsigned char *brks;
+    int brk_count;
+    int brk_cap;
 
     /* Open styled run on the current line */
     int run_start;
@@ -76,6 +82,50 @@ static const signed char wp4_mb_len[64] =
         -1, -1, -1, -1, -1, -1, -1, -1, /* E8..EF */
         0, 0, 0, 0, 0, 0, 0, 0,         /* F0..F7 mostly variable structures */
         0, 0, 0, 0, 0, 0, 0, -1};       /* F8..FE variable, FF is a bare gate/terminator */
+
+static int wp4_prefix_i(const char *s, const char *p)
+{
+    size_t pl = strlen(p);
+    size_t i;
+    size_t sl;
+
+    if (!s || !p)
+        return 0;
+
+    sl = strlen(s);
+
+    if (sl < pl)
+        return 0;
+
+    for (i = 0; i < pl; i++)
+    {
+        if (tolower((unsigned char)s[i]) != tolower((unsigned char)p[i]))
+            return 0;
+    }
+
+    return 1;
+}
+
+static int wp4_charset_invalid(const char *cs, char *err, size_t errsz)
+{
+    if (!cs || !cs[0])
+    {
+        if (err && errsz > 0)
+            snprintf(err, errsz, "WP 4.2 requires an 8-bit charset; select one in setup");
+
+        return 1;
+    }
+
+    if (wp4_prefix_i(cs, "UTF") || wp4_prefix_i(cs, "UCS") || strcasecmp(cs, "UNICODE") == 0)
+    {
+        if (err && errsz > 0)
+            snprintf(err, errsz, "charset %s is not an 8-bit charset; select an 8-bit charset in setup", cs);
+
+        return 1;
+    }
+
+    return 0;
+}
 
 static void wp4_seterr(struct wp4_ctx *c, long off, const char *msg, int code)
 {
@@ -213,8 +263,27 @@ static int wp4_put_utf8(struct wp4_ctx *c, const char *u8, size_t n)
     return 0;
 }
 
-/* End of paragraph: flush the run, record alignment and emit a newline */
-static int wp4_par(struct wp4_ctx *c)
+/* End of paragraph: flush the run, record alignment and emit a newline. Record how the finished line joins to the next one */
+static int wp4_brk_push(struct wp4_ctx *c, unsigned char brk)
+{
+    if (c->brk_count >= c->brk_cap)
+    {
+        int cap = c->brk_cap > 0 ? c->brk_cap * 2 : 256;
+        unsigned char *t = (unsigned char *)realloc(c->brks, (size_t)cap);
+
+        if (!t)
+            return -1;
+
+        c->brks = t;
+        c->brk_cap = cap;
+    }
+
+    c->brks[c->brk_count++] = brk;
+
+    return 0;
+}
+
+static int wp4_par_brk(struct wp4_ctx *c, unsigned char brk)
 {
     if (wp4_flush_run(c) != 0)
         return -1;
@@ -225,6 +294,9 @@ static int wp4_par(struct wp4_ctx *c)
     if (wp4_text_reserve(c, 1) != 0)
         return -1;
 
+    if (wp4_brk_push(c, brk) != 0)
+        return -1;
+
     c->text[c->text_len++] = '\n';
     c->line++;
     c->col = 0;
@@ -233,6 +305,11 @@ static int wp4_par(struct wp4_ctx *c)
     c->para_align = EA_ALIGN_LEFT;
 
     return 0;
+}
+
+static int wp4_par(struct wp4_ctx *c)
+{
+    return wp4_par_brk(c, LB_PARA);
 }
 
 /* Skip uninterpreted multi-byte code data: len>0=fixed bytes, 0=scan to gate, returns 0/-1 */
@@ -282,6 +359,9 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
     if (!ed || !fp)
         return -1;
 
+    if (wp4_charset_invalid(charset, err, errsz))
+        return -1;
+
     memset(&c, 0, sizeof(c));
 
     c.fp = fp;
@@ -317,13 +397,10 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
             ok = (wp4_par(&c) == 0);
             break;
 
-        case 0x0D: /* Soft return: a wrap point, the paragraph reflows */
+        case 0x0D: /* Soft return: line break inside the paragraph */
         case 0x0B: /* Soft page: same, WP pagination is not content */
-        {
-            char b = ' ';
-            ok = (wp4_put_utf8(&c, &b, 1) == 0);
+            ok = (wp4_par_brk(&c, LB_SPACE) == 0);
             break;
-        }
 
         case 0x9D:
             c.mask |= EA_BOLD;
@@ -460,10 +537,12 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
             break;
         }
 
-        case 0xAC: /* Soft hyphen: an optional break point, invisible */
-        case 0xAD: /* Soft hyphen at end of line */
+        case 0xAC: /* Soft hyphen inside the line: invisible, we re-hyphenate */
+            break;
+
+        case 0xAD: /* Soft hyphen at end of line: our hyphen break exactly */
         case 0xAE: /* Soft hyphen at end of page */
-            /* Drop: TinyEdit re-hyphenates, keeping would inject stray '-' */
+            ok = (wp4_par_brk(&c, LB_HYPHEN) == 0);
             break;
 
         case 0x9A: /* Cancel hyphenation of following word: no text */
@@ -521,9 +600,18 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
 
     if (ok)
     {
+        EdInfo info;
+        int i;
+
         c.text[c.text_len] = '\0';
 
         ed_load(ed, c.text);
+
+        /* Stamp the breaks so the painter draws hyphens and reflow rejoins */
+        ed_get_info(ed, &info);
+
+        for (i = 0; i < c.brk_count && i < info.line_count - 1; i++)
+            ed_line_set_break(ed, i, (int)c.brks[i]);
 
         for (i = 0; i < c.n_runs; i++)
         {
@@ -538,6 +626,7 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
     }
 
     free(c.text);
+    free(c.brks);
     free(c.runs);
     free(c.para_aligns);
 
@@ -572,6 +661,7 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
 {
     unsigned short cur;
     int dropped_layout = 0;
+    int lost_chars = 0;
     int row;
     int i;
     int prev_align = EA_ALIGN_LEFT;
@@ -584,6 +674,9 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
         warn[0] = '\0';
 
     if (!ed || !fp)
+        return -1;
+
+    if (wp4_charset_invalid(charset, err, errsz))
         return -1;
 
     for (row = 0; row < ed->count; row++)
@@ -622,9 +715,21 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
         {
             unsigned short want = 0;
             unsigned long cp = ed_line_char(ln, i);
+            unsigned char ascii;
             char u8[8];
             char raw[2];
             int n;
+
+            /* Convert typographic quotes and dashes to plain ASCII before encoding */
+            ascii = utf8_quote_ascii_fallback((uint32_t)cp);
+
+            if (ascii)
+                cp = ascii;
+
+            ascii = utf8_dash_ascii_fallback((uint32_t)cp);
+
+            if (ascii)
+                cp = ascii;
 
             /* Advance to the run covering this column, if any */
             while (r < n_runs && runs[r].end <= i)
@@ -667,10 +772,20 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
 
             if (n <= 0 || utf8_to_charset(charset, u8, n, raw, (int)sizeof(raw)) != 1 || raw[0] == '?')
             {
-                if (err && errsz > 0)
-                    snprintf(err, errsz, "line %d col %d: character not representable in %s", row + 1, i + 1, charset ? charset : "(null)");
+                lost_chars++;
 
-                return -1;
+                if (fputc('?', fp) == EOF)
+                    return -1;
+
+                continue;
+            }
+
+            if (raw[0] >= 0x20 && raw[0] <= 0x7E)
+            {
+                if (fputc((unsigned char)raw[0], fp) == EOF)
+                    return -1;
+
+                continue;
             }
 
             if (fputc(0xE1, fp) == EOF || fputc((unsigned char)raw[0], fp) == EOF || fputc(0xE1, fp) == EOF)
@@ -696,14 +811,35 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
                 return -1;
         }
 
-        if (fputc(0x0A, fp) == EOF)
-            return -1;
+        /* The break kind picks the WP code, wrapped words survive the trip */
+        if (ln->brk == LB_HYPHEN && row < ed->count - 1)
+        {
+            if (fputc(0xAD, fp) == EOF)
+                return -1;
+        }
+        else if (ln->brk == LB_SPACE && row < ed->count - 1)
+        {
+            if (fputc(0x0D, fp) == EOF)
+                return -1;
+        }
+        else if (ln->brk != LB_WORD || row == ed->count - 1)
+        {
+            if (fputc(0x0A, fp) == EOF)
+                return -1;
+        }
 
         prev_align = align;
     }
 
-    if (dropped_layout && warn && warnsz > 0)
-        snprintf(warn, warnsz, "font and size are not written by the WP 4.2 exporter");
+    if (warn && warnsz > 0)
+    {
+        if (lost_chars > 0 && dropped_layout)
+            snprintf(warn, warnsz, "%d characters could not be represented; font and size are not written", lost_chars);
+        else if (lost_chars > 0)
+            snprintf(warn, warnsz, "%d characters could not be represented", lost_chars);
+        else if (dropped_layout)
+            snprintf(warn, warnsz, "font and size are not written by the WP 4.2 exporter");
+    }
 
     return 0;
 }
