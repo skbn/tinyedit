@@ -358,6 +358,8 @@ static EdLine *line_new(Ed *ed)
     ln->cw = 1;
     ln->len = 0;
     ln->wrap_count_cache = -1;
+    ln->word_count = 0;
+    ln->word_count_dirty = 1;
     ln->para_align = EA_ALIGN_LEFT;
 
     line_term(ln);
@@ -388,6 +390,10 @@ static void line_free(EdLine *ln)
 static void line_touch(EdLine *ln)
 {
     ln->wrap_count_cache = -1;
+    ln->word_count_dirty = 1;
+
+    if (ln->owner)
+        ((Ed *)ln->owner)->word_count_initialized = 0;
 }
 
 /* Ensure capacity for chars codepoints of width want_cw, repacks if needed */
@@ -1646,7 +1652,17 @@ int ed_word_count(Ed *ed)
         ed->word_count_total = 0;
 
         for (i = 0; i < ed->count; i++)
-            ed->word_count_total += line_count_words(ed->lines[i]);
+        {
+            EdLine *ln = ed->lines[i];
+
+            if (ln->word_count_dirty)
+            {
+                ln->word_count = line_count_words(ln);
+                ln->word_count_dirty = 0;
+            }
+
+            ed->word_count_total += ln->word_count;
+        }
 
         ed->word_count_initialized = 1;
     }

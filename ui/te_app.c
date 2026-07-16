@@ -782,6 +782,8 @@ void te_draw_statusbar(TeApp *app)
     int msg_len, rzone_len, rzone_start, max_left;
     char hint[64];
     char charset_info[192];
+    char wc_str[32] = "";
+    char right_zone[128];
     TeTab *tab = NULL;
 
     y = LINES - 1;
@@ -796,14 +798,25 @@ void te_draw_statusbar(TeApp *app)
 
     snprintf(hint, sizeof(hint), " F2=Save F3=Charset F1=Help ");
 
-    rzone_len = (int)strlen(hint);
+    if (app)
+    {
+        tab = te_app_get_active_tab(app);
+
+        if (app->cfg.word_count && tab && tab->editor)
+            snprintf(wc_str, sizeof(wc_str), "  Words: %d", ed_word_count(tab->editor));
+    }
+
+    rzone_len = (int)strlen(hint) + (int)strlen(wc_str);
     rzone_start = COLS - rzone_len - 1;
 
     if (rzone_start < 0)
         rzone_start = COLS;
 
     if (rzone_start < COLS)
-        mvaddnstr(y, rzone_start, hint, rzone_len);
+    {
+        snprintf(right_zone, sizeof(right_zone), "%s%s", wc_str, hint);
+        mvaddnstr(y, rzone_start, right_zone, rzone_len);
+    }
 
     if (app)
     {
@@ -816,18 +829,10 @@ void te_draw_statusbar(TeApp *app)
         }
         else
         {
-            tab = te_app_get_active_tab(app);
-
             if (tab)
             {
                 const char *fn = NULL;
                 const char *last_slash = NULL;
-                char wc_str[32];
-
-                wc_str[0] = '\0';
-
-                if (app->cfg.word_count && tab->editor)
-                    snprintf(wc_str, sizeof(wc_str), "  Words: %d", ed_word_count(tab->editor));
 
                 if (tab->filename[0])
                 {
@@ -838,11 +843,11 @@ void te_draw_statusbar(TeApp *app)
 
                     fn = last_slash ? last_slash + 1 : tab->filename;
 
-                    snprintf(charset_info, sizeof(charset_info), "%.80s  View: %.15s  Save: %.15s%.10s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
+                    snprintf(charset_info, sizeof(charset_info), "%.80s  View: %.15s  Save: %.15s", fn, tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8");
                 }
                 else
                 {
-                    snprintf(charset_info, sizeof(charset_info), "View: %s  Save: %s%s", tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8", wc_str);
+                    snprintf(charset_info, sizeof(charset_info), "View: %s  Save: %s", tab->charset_in[0] ? tab->charset_in : "UTF-8", tab->charset_out[0] ? tab->charset_out : "UTF-8");
                 }
             }
             else
