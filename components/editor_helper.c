@@ -41,6 +41,19 @@ typedef struct
     short size;
 } ParaChar;
 
+/* Grow-only scratch shared across many rewraps to skip a per-para malloc storm */
+typedef struct
+{
+    ParaChar *para;
+    int para_cap;
+    wchar_t *text;
+    int text_cap;
+    LayoutLine *lines;
+    int lines_cap;
+    EdLine **built;
+    int built_cap;
+} RewrapScratch;
+
 /* Convert entire line to wchar_t string (caller frees) */
 wchar_t *line_to_wcs(EdLine *ln)
 {
@@ -1140,42 +1153,134 @@ static void para_bounds(Ed *ed, int row, int *first, int *last)
     *last = l;
 }
 
-/* Join the paragraph: word breaks join straight, space breaks get one back */
-static ParaChar *para_join(Ed *ed, int first, int last, int cur_row, int cur_col, int *out_len, int *out_cursor)
+static void rewrap_scratch_init(RewrapScratch *s)
 {
-    ParaChar *buf = NULL;
+    s->para = NULL;
+    s->para_cap = 0;
+    s->text = NULL;
+    s->text_cap = 0;
+    s->lines = NULL;
+    s->lines_cap = 0;
+    s->built = NULL;
+    s->built_cap = 0;
+}
+
+static void rewrap_scratch_free(RewrapScratch *s)
+{
+    free(s->para);
+    free(s->text);
+    free(s->lines);
+    free(s->built);
+
+    rewrap_scratch_init(s);
+}
+
+static int scratch_reserve_para(RewrapScratch *s, int need)
+{
+    ParaChar *t = NULL;
+
+    if (need <= s->para_cap)
+        return 0;
+
+    t = (ParaChar *)realloc(s->para, (size_t)need * sizeof(ParaChar));
+
+    if (!t)
+        return -1;
+
+    s->para = t;
+    s->para_cap = need;
+
+    return 0;
+}
+
+static int scratch_reserve_text(RewrapScratch *s, int need)
+{
+    wchar_t *t = NULL;
+
+    if (need <= s->text_cap)
+        return 0;
+
+    t = (wchar_t *)realloc(s->text, (size_t)need * sizeof(wchar_t));
+
+    if (!t)
+        return -1;
+
+    s->text = t;
+    s->text_cap = need;
+
+    return 0;
+}
+
+static int scratch_reserve_lines(RewrapScratch *s, int need)
+{
+    LayoutLine *t = NULL;
+
+    if (need <= s->lines_cap)
+        return 0;
+
+    t = (LayoutLine *)realloc(s->lines, (size_t)need * sizeof(LayoutLine));
+
+    if (!t)
+        return -1;
+
+    s->lines = t;
+    s->lines_cap = need;
+
+    return 0;
+}
+
+static int scratch_reserve_built(RewrapScratch *s, int need)
+{
+    EdLine **t = NULL;
+
+    if (need <= s->built_cap)
+        return 0;
+
+    t = (EdLine **)realloc(s->built, (size_t)need * sizeof(EdLine *));
+
+    if (!t)
+        return -1;
+
+    s->built = t;
+    s->built_cap = need;
+
+    return 0;
+}
+
+/* Join the paragraph into scratch->para, word breaks straight, space breaks add one */
+static int para_join_into(Ed *ed, int first, int last, int cur_row, int cur_col, int *out_len, int *out_cursor, RewrapScratch *scr)
+{
     int cap = 0;
     int n = 0;
     int i;
+    ParaChar *buf = NULL;
 
     for (i = first; i <= last; i++)
         cap += ed->lines[i]->len + 1;
 
-    buf = (ParaChar *)malloc((size_t)(cap > 0 ? cap : 1) * sizeof(ParaChar));
+    if (cap <= 0)
+        cap = 1;
 
-    if (!buf)
-        return NULL;
+    if (scratch_reserve_para(scr, cap) != 0)
+        return -1;
 
+    buf = scr->para;
     *out_cursor = 0;
 
     for (i = first; i <= last; i++)
     {
         EdLine *ln = ed->lines[i];
-        wchar_t *w = line_to_wcs(ln);
         int len = ln->len;
+        int last_ch;
         int stripped;
         int j;
 
-        if (!w)
-        {
-            free(buf);
-            return NULL;
-        }
-
-        /* A stored trailing hyphen is legacy layout from disk, drop it exactly once */
+        /* Read chars from the packed line directly, no per-line wcs alloc */
+        last_ch = (len > 0) ? (int)ed_line_char(ln, len - 1) : 0;
         stripped = 0;
 
-        if (ln->brk != LB_HYPHEN && len > 0 && w[len - 1] == L'-' && i < last)
+        /* A stored trailing hyphen is legacy layout from disk, drop it once */
+        if (ln->brk != LB_HYPHEN && len > 0 && last_ch == (int)L'-' && i < last)
         {
             len--;
             stripped = 1;
@@ -1189,7 +1294,7 @@ static ParaChar *para_join(Ed *ed, int first, int last, int cur_row, int cur_col
             short font = 0;
             short size = 0;
 
-            buf[n].ch = w[j];
+            buf[n].ch = (wchar_t)ed_line_char(ln, j);
             buf[n].mask = ed_attr_mask_at(ln, j, &font, &size);
             buf[n].font = font;
             buf[n].size = size;
@@ -1197,7 +1302,7 @@ static ParaChar *para_join(Ed *ed, int first, int last, int cur_row, int cur_col
             n++;
         }
 
-        /* The eaten space comes back, a break inside a word joins with nothing */
+        /* Eaten space returns, breaks inside a word join with nothing */
         if (i < last && ln->brk != LB_HYPHEN && ln->brk != LB_WORD && !stripped && n > 0)
         {
             int prev = n - 1;
@@ -1209,23 +1314,17 @@ static ParaChar *para_join(Ed *ed, int first, int last, int cur_row, int cur_col
 
             n++;
         }
-
-        free(w);
     }
 
     *out_len = n;
 
-    return buf;
+    return 0;
 }
 
-/* Reflow lines [first..last] as one paragraph, caller owns the undo delta */
-static int rewrap_range_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user, int first, int last, int *out_new_lines)
+/* Reflow lines [first..last] into a paragraph using scratch buffers */
+static int rewrap_range_no_undo_ex(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user, int first, int last, int *out_new_lines, RewrapScratch *scr)
 {
-    ParaChar *para = NULL;
-    wchar_t *text = NULL;
-    LayoutLine *lines = NULL;
     LayoutOpts opt;
-    EdLine **built = NULL;
     int plen = 0;
     int cursor = 0;
     int max_lines;
@@ -1233,37 +1332,28 @@ static int rewrap_range_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hy
     int i;
     int new_row = first;
     int new_col = 0;
+    int old_count = last - first + 1;
+    int same;
 
     if (out_new_lines)
-        *out_new_lines = last - first + 1;
+        *out_new_lines = old_count;
 
-    para = para_join(ed, first, last, ed->row, ed->col, &plen, &cursor);
-
-    if (!para)
+    if (para_join_into(ed, first, last, ed->row, ed->col, &plen, &cursor, scr) != 0)
         return -1;
 
-    text = (wchar_t *)malloc((size_t)(plen + 1) * sizeof(wchar_t));
-
-    if (!text)
-    {
-        free(para);
+    if (scratch_reserve_text(scr, plen + 1) != 0)
         return -1;
-    }
 
     for (i = 0; i < plen; i++)
-        text[i] = para[i].ch;
+        scr->text[i] = scr->para[i].ch;
 
-    text[plen] = 0;
+    scr->text[plen] = 0;
 
-    max_lines = plen + 2;
-    lines = (LayoutLine *)malloc((size_t)max_lines * sizeof(LayoutLine));
+    /* At most one line per width chars, small safety margin */
+    max_lines = plen / (width > 0 ? width : 1) + 4;
 
-    if (!lines)
-    {
-        free(para);
-        free(text);
+    if (scratch_reserve_lines(scr, max_lines) != 0)
         return -1;
-    }
 
     layout_opts_default(&opt);
 
@@ -1273,59 +1363,46 @@ static int rewrap_range_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hy
     opt.hyphen = hyph;
     opt.hyphen_user = hyph_user;
 
-    n = layout_paragraph(text, plen, width, &opt, lines, max_lines);
+    n = layout_paragraph(scr->text, plen, width, &opt, scr->lines, max_lines);
 
     if (n < 0)
-    {
-        free(para);
-        free(text);
-        free(lines);
         return -1;
-    }
 
-    built = (EdLine **)malloc((size_t)n * sizeof(EdLine *));
-
-    if (!built)
-    {
-        free(para);
-        free(text);
-        free(lines);
+    if (scratch_reserve_built(scr, n) != 0)
         return -1;
-    }
 
     for (i = 0; i < n; i++)
     {
-        int start = lines[i].start;
-        int count = lines[i].end - start;
-        EdLine *ln = ed_line_from_wcs(ed, text + start, count);
+        int start = scr->lines[i].start;
+        int count = scr->lines[i].end - start;
+        EdLine *ln = NULL;
         int j;
+        int k;
+
+        ln = ed_line_from_wcs(ed, scr->text + start, count);
 
         if (!ln)
         {
-            while (i-- > 0)
-                ed_line_destroy(built[i]);
+            for (k = 0; k < i; k++)
+                ed_line_destroy(scr->built[k]);
 
-            free(built);
-            free(para);
-            free(text);
-            free(lines);
             return -1;
         }
 
         for (j = 0; j < count; j++)
         {
-            ParaChar *pc = &para[start + j];
+            ParaChar *pc = &scr->para[start + j];
 
             if (pc->mask || pc->font || pc->size)
                 ed_attr_line_apply(ln, j, j + 1, pc->mask, 0, pc->font, pc->size);
         }
 
-        ln->brk = (unsigned char)lines[i].brk;
+        ln->brk = (unsigned char)scr->lines[i].brk;
         ln->para_align = ed->lines[first]->para_align;
 
-        built[i] = ln;
+        scr->built[i] = ln;
 
-        if (cursor >= start && cursor <= lines[i].end)
+        if (cursor >= start && cursor <= scr->lines[i].end)
         {
             new_row = first + i;
             new_col = cursor - start;
@@ -1333,52 +1410,40 @@ static int rewrap_range_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hy
     }
 
     /* Same count and lengths means no cut moved, skip the splice */
-    if (n == last - first + 1)
+    same = 0;
+
+    if (n == old_count)
     {
-        int same = 1;
+        same = 1;
 
         for (i = 0; i < n; i++)
         {
-            if (built[i]->len != ed->lines[first + i]->len || built[i]->brk != ed->lines[first + i]->brk)
+            if (scr->built[i]->len != ed->lines[first + i]->len || scr->built[i]->brk != ed->lines[first + i]->brk)
             {
                 same = 0;
                 break;
             }
         }
-
-        if (same)
-        {
-            for (i = 0; i < n; i++)
-                ed_line_destroy(built[i]);
-
-            free(built);
-            free(para);
-            free(text);
-            free(lines);
-
-            if (out_new_lines)
-                *out_new_lines = n;
-
-            return 0;
-        }
     }
 
-    if (ed_lines_splice(ed, first, last - first + 1, built, n) != 0)
+    if (same)
     {
         for (i = 0; i < n; i++)
-            ed_line_destroy(built[i]);
+            ed_line_destroy(scr->built[i]);
 
-        free(built);
-        free(para);
-        free(text);
-        free(lines);
-        return -1;
+        if (out_new_lines)
+            *out_new_lines = n;
+
+        return 0;
     }
 
-    free(built);
-    free(para);
-    free(text);
-    free(lines);
+    if (ed_lines_splice(ed, first, old_count, scr->built, n) != 0)
+    {
+        for (i = 0; i < n; i++)
+            ed_line_destroy(scr->built[i]);
+
+        return -1;
+    }
 
     ed->row = new_row;
     ed->col = new_col;
@@ -1391,6 +1456,21 @@ static int rewrap_range_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hy
         *out_new_lines = n;
 
     return 0;
+}
+
+/* Old signature: local scratch, single call, free on return */
+static int rewrap_range_no_undo(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user, int first, int last, int *out_new_lines)
+{
+    RewrapScratch scr;
+    int rc;
+
+    rewrap_scratch_init(&scr);
+
+    rc = rewrap_range_no_undo_ex(ed, width, hyph, hyph_user, first, last, out_new_lines, &scr);
+
+    rewrap_scratch_free(&scr);
+
+    return rc;
 }
 
 /* Blank-line paragraph bounds from the cursor row, then reflow */
@@ -1518,11 +1598,14 @@ int ed_rewrap_document(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
 /* Fit a loaded document to width, brk bounded, untouched if it fits */
 int ed_rewrap_loaded_document(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph_user)
 {
+    RewrapScratch scr;
     int row;
+    int rc = 0;
 
     if (!ed || width <= 0 || ed->count <= 0)
         return 0;
 
+    rewrap_scratch_init(&scr);
     row = 0;
 
     while (row < ed->count)
@@ -1530,6 +1613,7 @@ int ed_rewrap_loaded_document(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph
         int first = row;
         int last = row;
         int n = 0;
+        EdLine *ln;
 
         if (ed->lines[row]->len == 0)
         {
@@ -1541,12 +1625,28 @@ int ed_rewrap_loaded_document(Ed *ed, int width, LayoutHyphenFn hyph, void *hyph
         while (last < ed->count - 1 && ed->lines[last]->brk != LB_PARA)
             last++;
 
-        /* A paragraph that already fits is left byte identical */
-        if (rewrap_range_no_undo(ed, width, hyph, hyph_user, first, last, &n) != 0)
-            return -1;
+        /* Fast path: single line that already fits and carries no styling */
+        ln = ed->lines[first];
+
+        if (first == last && ln->len <= width && ln->n_attrs == 0)
+        {
+            row = first + 1;
+            continue;
+        }
+
+        if (rewrap_range_no_undo_ex(ed, width, hyph, hyph_user, first, last, &n, &scr) != 0)
+        {
+            rc = -1;
+            break;
+        }
 
         row = first + (n > 0 ? n : 1);
     }
+
+    rewrap_scratch_free(&scr);
+
+    if (rc != 0)
+        return rc;
 
     ed_set_pos(ed, 0, 0);
     ed_clamp(ed);

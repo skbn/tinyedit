@@ -48,12 +48,10 @@ typedef struct
     struct EdAttrRunStruct *attrs;
     struct Ed *owner; /* The editor whose slab this line came from */
 
-    int len; /* Character count, not bytes */
-    int cap; /* Allocated character slots */
-    int word_count;
+    int len;              /* Character count, not bytes */
+    int cap;              /* Allocated character slots */
     int wrap_count_cache; /* -1 = invalid, otherwise cached visual rows */
 
-    unsigned short emb; /* Byte size of the text area allocated inline with the struct */
     unsigned short n_attrs;
     unsigned short cap_attrs;
     short wrap_cache_width; /* Width for which wrap_count_cache is valid */

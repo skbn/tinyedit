@@ -225,8 +225,8 @@ static size_t slab_slot_bytes(void)
 {
     size_t n = sizeof(EdLine) + (size_t)ED_EMB_CHARS;
 
-    /* keep the slots aligned like malloc would */
-    return (n + 15u) & ~(size_t)15u;
+    /* Align to pointer size, no wider alignment is needed */
+    return (n + 7u) & ~(size_t)7u;
 }
 
 static void *slab_alloc(Ed *ed)
@@ -332,14 +332,13 @@ static void *line_emb_area(EdLine *ln)
 
 static int line_text_is_emb(const EdLine *ln)
 {
-    return ln->emb > 0 && ln->text == (const void *)((const char *)ln + sizeof(EdLine));
+    return ln->text == (const void *)((const char *)ln + sizeof(EdLine));
 }
 
 /* New empty line with a small inline text area */
 static EdLine *line_new(Ed *ed)
 {
     EdLine *ln = NULL;
-    int emb = ED_EMB_CHARS;
 
     ln = (EdLine *)slab_alloc(ed);
 
@@ -354,9 +353,8 @@ static EdLine *line_new(Ed *ed)
     ln->mem_pool = ed ? ed->mem_pool : NULL;
 #endif
 
-    ln->emb = emb;
     ln->text = line_emb_area(ln);
-    ln->cap = emb - 1;
+    ln->cap = ED_EMB_CHARS - 1;
     ln->cw = 1;
     ln->len = 0;
     ln->wrap_count_cache = -1;
@@ -390,7 +388,6 @@ static void line_free(EdLine *ln)
 static void line_touch(EdLine *ln)
 {
     ln->wrap_count_cache = -1;
-    ln->word_count = -1;
 }
 
 /* Ensure capacity for chars codepoints of width want_cw, repacks if needed */
@@ -1649,10 +1646,7 @@ int ed_word_count(Ed *ed)
         ed->word_count_total = 0;
 
         for (i = 0; i < ed->count; i++)
-        {
-            ed->lines[i]->word_count = line_count_words(ed->lines[i]);
-            ed->word_count_total += ed->lines[i]->word_count;
-        }
+            ed->word_count_total += line_count_words(ed->lines[i]);
 
         ed->word_count_initialized = 1;
     }
@@ -1790,7 +1784,7 @@ static EdLine *line_from_utf8(Ed *ed, const char *s, int nbytes)
     }
 
     /* Reserve exactly once: inline if it fits, else one arena block */
-    if ((count + 1) * cw > ln->emb)
+    if ((count + 1) * cw > ED_EMB_CHARS)
     {
         void *t = arena_alloc(ed, (size_t)(count + 1) * (size_t)cw);
 
@@ -2208,7 +2202,12 @@ int ed_save_to_file(const Ed *ed, const char *path, const char *charset_out)
 int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text)
 {
     const char *p = NULL;
+    const char *s = NULL;
     int inserted = 0;
+    int nl_count = 0;
+    int seg_count;
+    int excess;
+    int i;
 
     if (!ed || start < 0 || start > ed->count)
         return -1;
@@ -2216,6 +2215,18 @@ int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const cha
     doc_remove_lines(ed, start, count_to_remove);
 
     p = utf8_text ? utf8_text : "";
+
+    /* One line per segment: nl_count newlines yield nl_count + 1 segments */
+    for (s = p; *s; s++)
+    {
+        if (*s == '\n')
+            nl_count++;
+    }
+
+    seg_count = nl_count + 1;
+
+    if (doc_make_room(ed, start, seg_count) != 0)
+        return -1;
 
     for (;;)
     {
@@ -2228,14 +2239,10 @@ int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const cha
 
         ln = line_from_utf8(ed, p, seg);
 
-        if (!ln || doc_insert_line(ed, start + inserted, ln) != 0)
-        {
-            if (ln)
-                line_free(ln);
-
+        if (!ln)
             break;
-        }
 
+        ed->lines[start + inserted] = ln;
         inserted++;
 
         if (!nl)
@@ -2243,6 +2250,19 @@ int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const cha
 
         p = nl + 1;
     }
+
+    /* Compact any unused reserved slots left by an early failure */
+    excess = seg_count - inserted;
+
+    if (excess > 0)
+    {
+        for (i = start + inserted; i + excess < ed->count; i++)
+            ed->lines[i] = ed->lines[i + excess];
+
+        ed->count -= excess;
+    }
+
+    doc_dirty_from(ed, start);
 
     ed_clamp(ed);
 
@@ -3282,19 +3302,24 @@ static int paste_lines(Ed *ed, EdLine **src, int nsrc)
         return 0;
     }
 
+    /* Reserve nsrc-1 slots once instead of shifting per inserted line */
+    if (doc_make_room(ed, ed->row + 1, nsrc - 1) != 0)
+    {
+        line_free(tail);
+        return -1;
+    }
+
     for (i = 1; i < nsrc; i++)
     {
         EdLine *cp = line_clone_slice(ed, src[i], 0, src[i]->len);
 
-        if (!cp || doc_insert_line(ed, ed->row + i, cp) != 0)
+        if (!cp)
         {
-            if (cp)
-                line_free(cp);
-
             line_free(tail);
-
             return -1;
         }
+
+        ed->lines[ed->row + i] = cp;
     }
 
     ed->row += nsrc - 1;
@@ -3363,12 +3388,22 @@ int ed_block_paste(Ed *ed)
 int ed_paste_text(Ed *ed, const char *utf8_text)
 {
     const char *p = NULL;
+    const char *s = NULL;
     EdLine *cur = NULL;
     EdLine *tail = NULL;
     int first = 1;
+    int nl_count = 0;
+    int dirty_start;
 
     if (!ed || !utf8_text)
         return -1;
+
+    /* Pre-count newlines to reserve room once instead of shifting per line */
+    for (s = utf8_text; *s; s++)
+    {
+        if (*s == '\n')
+            nl_count++;
+    }
 
     cur = ed->lines[ed->row];
     tail = line_clone_slice(ed, cur, ed->col, cur->len - ed->col);
@@ -3377,6 +3412,14 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
         return -1;
 
     line_truncate(cur, ed->col);
+
+    dirty_start = ed->row;
+
+    if (nl_count > 0 && doc_make_room(ed, ed->row + 1, nl_count) != 0)
+    {
+        line_free(tail);
+        return -1;
+    }
 
     p = utf8_text;
 
@@ -3394,18 +3437,15 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
         {
             EdLine *ln = line_new(ed);
 
-            if (!ln || doc_insert_line(ed, ed->row + 1, ln) != 0)
+            if (!ln)
             {
-                if (ln)
-                    line_free(ln);
-
                 line_free(tail);
-
                 return -1;
             }
 
             ed->row++;
             ed->col = 0;
+            ed->lines[ed->row] = ln;
         }
 
         while (q < end)
@@ -3445,7 +3485,7 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
 
     ed->modified = 1;
 
-    doc_dirty_from(ed, ed->row);
+    doc_dirty_from(ed, dirty_start);
 
     return 0;
 }
