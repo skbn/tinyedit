@@ -361,8 +361,8 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
     if (!ed || !fp)
         return -1;
 
-    if (wp4_charset_invalid(charset, err, errsz))
-        return -1;
+    /*if (wp4_charset_invalid(charset, err, errsz))
+        return -1;*/
 
     memset(&c, 0, sizeof(c));
 
@@ -373,7 +373,7 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
 
     while (ok && (ch = fgetc(fp)) != EOF)
     {
-        long at = ftell(fp) - 1;
+#define AT() (ftell(fp) - 1)
 
         /* Plain ASCII text */
         if (ch >= 0x20 && ch <= 0x7E)
@@ -445,14 +445,14 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
 
             if (type == EOF || center_col == EOF || start_col == EOF || close == EOF)
             {
-                wp4_seterr(&c, at, "truncated center alignment gate", -1);
+                wp4_seterr(&c, AT(), "truncated center alignment gate", -1);
                 ok = 0;
                 break;
             }
 
             if (close != 0xC3)
             {
-                wp4_seterr(&c, at, "unterminated center alignment gate", -1);
+                wp4_seterr(&c, AT(), "unterminated center alignment gate", -1);
                 ok = 0;
                 break;
             }
@@ -470,14 +470,14 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
 
             if (align_char == EOF || align_col == EOF || start_col == EOF || close == EOF)
             {
-                wp4_seterr(&c, at, "truncated right alignment gate", -1);
+                wp4_seterr(&c, AT(), "truncated right alignment gate", -1);
                 ok = 0;
                 break;
             }
 
             if (close != 0xC4)
             {
-                wp4_seterr(&c, at, "unterminated right alignment gate", -1);
+                wp4_seterr(&c, AT(), "unterminated right alignment gate", -1);
                 ok = 0;
                 break;
             }
@@ -496,14 +496,14 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
 
             if (b == EOF || close == EOF)
             {
-                wp4_seterr(&c, at, "truncated extended character gate", -1);
+                wp4_seterr(&c, AT(), "truncated extended character gate", -1);
                 ok = 0;
                 break;
             }
 
             if (close != 0xE1)
             {
-                wp4_seterr(&c, at, "unterminated extended character gate", -1);
+                wp4_seterr(&c, AT(), "unterminated extended character gate", -1);
                 ok = 0;
                 break;
             }
@@ -513,7 +513,7 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
 
             if (n <= 0)
             {
-                wp4_seterr(&c, at, "unmappable extended character", b);
+                wp4_seterr(&c, AT(), "unmappable extended character", b);
                 ok = 0;
                 break;
             }
@@ -567,18 +567,19 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
 
                 if (wp4_skip_mb(&c, ch, len) != 0)
                 {
-                    wp4_seterr(&c, at, "truncated multi-byte function", ch);
+                    wp4_seterr(&c, AT(), "truncated multi-byte function", ch);
                     ok = 0;
                 }
 
                 break;
             }
 
-            wp4_seterr(&c, at, "unsupported WP 4.2 code", ch);
+            wp4_seterr(&c, AT(), "unsupported WP 4.2 code", ch);
             ok = 0;
             break;
         }
     }
+#undef AT
 
     /* Close a trailing unterminated paragraph */
     if (ok && (c.col > 0 || c.line == 0))

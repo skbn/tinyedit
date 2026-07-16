@@ -762,40 +762,74 @@ int ed_line_break(const Ed *ed, int line)
 /* Join every marked break into logical lines, used when loading in soft mode */
 void ed_join_breaks(Ed *ed)
 {
-    int i;
+    int read;
+    int write;
+    int failed = 0;
 
-    if (!ed)
+    if (!ed || ed->count <= 0)
         return;
 
-    i = 0;
+    read = 0;
+    write = 0;
 
-    while (i < ed->count - 1)
+    while (read < ed->count && !failed)
     {
-        EdLine *ln = ed->lines[i];
-        int brk = (int)ln->brk;
+        EdLine *head = ed->lines[read];
 
-        if (brk == LB_PARA)
+        if (write != read)
+            ed->lines[write] = head;
+
+        while (read < ed->count - 1 && head->brk != LB_PARA && !failed)
         {
-            i++;
-            continue;
+            EdLine *next = ed->lines[read + 1];
+
+            if (head->brk == LB_SPACE)
+            {
+                unsigned int sp = (unsigned int)' ';
+
+                if (line_insert_cps(head, head->len, &sp, 1) != 0)
+                {
+                    /* Abort but keep what we've compacted so the doc stays coherent */
+                    failed = 1;
+                    break;
+                }
+            }
+
+            if (line_append_slice(head, next, 0, next->len) != 0)
+            {
+                failed = 1;
+                break;
+            }
+
+            head->brk = next->brk;
+
+            line_free(next);
+            ed->lines[read + 1] = NULL;
+            read++;
         }
 
-        /* A space break gets its space back, a word break joins with nothing */
-        if (brk == LB_SPACE)
-        {
-            unsigned int sp = (unsigned int)' ';
+        if (failed)
+            break;
 
-            if (line_insert_cps(ln, ln->len, &sp, 1) != 0)
-                return;
-        }
-
-        if (line_append_slice(ln, ed->lines[i + 1], 0, ed->lines[i + 1]->len) != 0)
-            return;
-
-        ln->brk = ed->lines[i + 1]->brk;
-
-        doc_remove_lines(ed, i + 1, 1);
+        write++;
+        read++;
     }
+
+    /* Free any lines still dangling past the compacted region */
+    while (read < ed->count)
+    {
+        if (ed->lines[read])
+        {
+            line_free(ed->lines[read]);
+            ed->lines[read] = NULL;
+        }
+
+        read++;
+    }
+
+    ed->count = write;
+
+    doc_dirty_from(ed, 0);
 
     ed_clamp(ed);
 }

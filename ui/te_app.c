@@ -294,6 +294,12 @@ int te_app_add_tab(TeApp *app, TeTab *tab)
 
     tab->show_line_numbers = app->show_line_numbers;
 
+    strncpy(tab->charset_in, app->cfg.charset_in, sizeof(tab->charset_in) - 1);
+    tab->charset_in[sizeof(tab->charset_in) - 1] = '\0';
+
+    strncpy(tab->charset_out, app->cfg.charset_out, sizeof(tab->charset_out) - 1);
+    tab->charset_out[sizeof(tab->charset_out) - 1] = '\0';
+
     app->tabs[app->tab_count] = tab;
     app->tab_count++;
 
@@ -344,6 +350,8 @@ int te_app_close_tab(TeApp *app, int index)
         }
     }
 
+    te_app_switch_tab(app, app->active_tab);
+
     return 0;
 }
 
@@ -364,6 +372,28 @@ void te_app_switch_tab(TeApp *app, int index)
 
         if (app->tabs[index]->editor)
             app->hard_wrap = ed_get_hard_wrap(app->tabs[index]->editor);
+
+        if (app->tabs[index]->charset_in[0])
+        {
+            strncpy(app->charset_in, app->tabs[index]->charset_in, sizeof(app->charset_in) - 1);
+            app->charset_in[sizeof(app->charset_in) - 1] = '\0';
+        }
+        else
+        {
+            strncpy(app->charset_in, app->cfg.charset_in, sizeof(app->charset_in) - 1);
+            app->charset_in[sizeof(app->charset_in) - 1] = '\0';
+        }
+
+        if (app->tabs[index]->charset_out[0])
+        {
+            strncpy(app->charset_out, app->tabs[index]->charset_out, sizeof(app->charset_out) - 1);
+            app->charset_out[sizeof(app->charset_out) - 1] = '\0';
+        }
+        else
+        {
+            strncpy(app->charset_out, app->cfg.charset_out, sizeof(app->charset_out) - 1);
+            app->charset_out[sizeof(app->charset_out) - 1] = '\0';
+        }
     }
 }
 

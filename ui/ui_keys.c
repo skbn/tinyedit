@@ -1538,7 +1538,14 @@ int handle_navigation_keys(TeApp *app, int ch, int soft, int width, int body_row
 
         /* Entering hard mode refits the document to the column */
         if (app->hard_wrap)
+        {
             ui_editor_rewrap_docwide(app);
+        }
+        else
+        {
+            ed_join_breaks(te_app_get_editor(app));
+            ed_ensure_visible(te_app_get_editor(app));
+        }
 
         /* Ensure cursor stays within visible area when dict panel is active */
 #ifdef HAVE_TRANSLATE_STARDICT
