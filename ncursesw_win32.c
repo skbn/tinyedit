@@ -148,8 +148,29 @@ static int is_wide_cp(unsigned int cp)
     if (cp >= 0x1100 && cp <= 0x115F)
         return 1; /* Hangul Jamo */
 
-    if (cp >= 0x2190 && cp <= 0x2BFF)
-        return 0;
+    if (cp >= 0x2190 && cp <= 0x21FF)
+        return 1; /* Arrows */
+
+    if (cp >= 0x2329 && cp <= 0x232A)
+        return 1; /* Angle brackets */
+
+    if (cp >= 0x2500 && cp <= 0x257F)
+        return 0; /* Box Drawing - narrow, same as ncurses Linux */
+
+    if (cp >= 0x2580 && cp <= 0x259F)
+        return 1; /* Block Elements - wide, rendered with GDI */
+
+    if (cp >= 0x25A0 && cp <= 0x25FF)
+        return 1; /* Geometric Shapes */
+
+    if (cp >= 0x2600 && cp <= 0x26FF)
+        return 1; /* Miscellaneous Symbols */
+
+    if (cp >= 0x2700 && cp <= 0x27BF)
+        return 1; /* Dingbats */
+
+    if (cp >= 0x2B00 && cp <= 0x2BFF)
+        return 1; /* Miscellaneous Symbols and Arrows */
 
     if (cp >= 0x2E80 && cp <= 0x303E)
         return 1; /* CJK Radicals, Kangxi, CJK Symbols */
@@ -181,8 +202,8 @@ static int is_wide_cp(unsigned int cp)
     if (cp >= 0xFFE0 && cp <= 0xFFE6)
         return 1; /* Fullwidth signs */
 
-    if (cp >= 0x1F300 && cp <= 0x1FAFF)
-        return 1; /* Emoji and pictographs */
+    if (cp >= 0x1F000 && cp <= 0x1FAFF)
+        return 1; /* Mahjong, playing cards, enclosed alphanumerics, emoticons and pictographs */
 
     if (cp >= 0x20000 && cp <= 0x3FFFD)
         return 1; /* CJK Ext B..G (supplementary ideographs) */

@@ -770,6 +770,7 @@ int rtf_export(const struct Ed *ed, FILE *fp)
     struct rtf_state cur;
     int row;
     int i;
+    int at_para_start = 1;
 
     if (!ed || !fp)
         return -1;
@@ -787,14 +788,18 @@ int rtf_export(const struct Ed *ed, FILE *fp)
         memset(&cur, 0, sizeof(cur));
         cur.font_id = -1;
 
-        if (fputs("\\pard", fp) == EOF)
-            return -1;
+        /* Only set paragraph defaults at the start of a paragraph, mid paragraph continuations keep the current setup */
+        if (at_para_start)
+        {
+            if (fputs("\\pard", fp) == EOF)
+                return -1;
 
-        if (fputs(aw[ln->para_align & 3], fp) == EOF)
-            return -1;
+            if (fputs(aw[ln->para_align & 3], fp) == EOF)
+                return -1;
 
-        if (fputc(' ', fp) == EOF)
-            return -1;
+            if (fputc(' ', fp) == EOF)
+                return -1;
+        }
 
         for (i = 0; i < ln->len; i++)
         {
@@ -866,7 +871,9 @@ int rtf_export(const struct Ed *ed, FILE *fp)
                 return -1;
         }
 
-        /* The break kind picks the join, readers reflow paragraphs themselves */
+        /* Pick the join, LB_SPACE glues within the paragraph, LB_HYPHEN adds a soft hyphen, LB_PARA closes the paragraph */
+        at_para_start = 0;
+
         if (row < ed->count - 1)
         {
             if (ln->brk == LB_HYPHEN)
@@ -883,7 +890,15 @@ int rtf_export(const struct Ed *ed, FILE *fp)
             {
                 if (fputs("\\par\n", fp) == EOF)
                     return -1;
+
+                at_para_start = 1;
             }
+        }
+        else
+        {
+            /* Terminate the final paragraph too so Word does not treat the tail as an unclosed run */
+            if (fputs("\\par\n", fp) == EOF)
+                return -1;
         }
     }
 

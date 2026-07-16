@@ -13,7 +13,8 @@ Editor de texto ligero para AmigaOS, Linux y Windows usando ncurses
 - Guiones (hyphenation) con implementación nativa (AmigaOS/Windows) o libhyphen (*nix) (opcional, USE_HYPHEN=1)
 - Tesauro (thesaurus) con implementación nativa (AmigaOS/Windows) o libmythes (*nix) (opcional, USE_MYTHES=1)
 - Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
-- Corrector gramatical/estilístico experimental usando packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1)
+- Corrector gramatical/estilístico experimental usando packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1); la revisión gramatical solo funciona sobre texto UTF-8
+- Soporte parcial de texto enriquecido para archivos .rtf y .wp/.wp4
 - Panel de traductor con soporte online y diccionario offline compatible con StarDict
 - Soporte de ratón (funciona en terminal, SSH y sesiones remotas)
 - Colores configurables (y fuentes TTF en AmigaOS)
@@ -95,11 +96,6 @@ Diccionarios, patrones de guiones y datos de tesauro:
 - Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us hyphen-es hyphen-en mythes-es mythes-en`
 - FreeBSD: `doas pkg install es-hunspell en-hunspell es-hyphen en-mythes es-mythes`
 - macOS: Los archivos de diccionario se incluyen con hunspell
-
-Para compilar con corrector ortográfico nativo (spellchecker/ como AmigaOS):
-```bash
-make -f Makefile.unix.static
-```
 
 ### Windows (MinGW)
 ```bash
@@ -481,11 +477,11 @@ tinyedit soporta texto a voz al compilar con `USE_TTS=1`:
 - **AmigaOS**: Usa `translator.library` v43 y `narrator.device` v34/v37
 
 Atajos:
-- **Hablar selección / párrafo**: `Ctrl+Alt+L` (Unix/Windows), `Alt+Shift+L` (AmigaOS)
+- **Hablar selección / párrafo**: `Ctrl+Alt+X` (Unix/Windows), `Alt+Shift+X` (AmigaOS)
 - **Hablar documento completo**: `Ctrl+Alt+K` (Unix/Windows), `Alt+Shift+K` (AmigaOS)
 - **Pausar / reanudar voz**: `Ctrl+Alt+P` (Unix/Windows), `Alt+Shift+P` (AmigaOS)
 - **Detener voz**: `Ctrl+Alt+O` (Unix/Windows), `Alt+Shift+O` (AmigaOS)
-- **Popup de ajustes de voz**: `Ctrl+Alt+J` (Unix/Windows), `Alt+Shift+J` (AmigaOS)
+- **Popup de ajustes de voz**: `Ctrl+Alt+V` (Unix/Windows), `Alt+Shift+V` (AmigaOS)
 
 Configura voz, velocidad, tono y volumen desde Configuración (F4)
 
@@ -494,6 +490,7 @@ Configura voz, velocidad, tono y volumen desde Configuración (F4)
 tinyedit incluye un corrector gramatical/estilístico experimental al compilar con `USE_GRAMMAR=1`:
 
 - Módulo C autocontenido, sin librería externa
+- La revisión gramatical se hace sobre texto UTF-8; archivos con otros charsets pueden dar resultados incorrectos
 - Carga packs de reglas `.rul` desde el directorio configurado (por defecto: `/usr/share/gramcheck` en Linux, `/usr/local/share/gramcheck` en BSD, `C:\gramcheck\rules` en Windows, `PROGDIR:rules` en AmigaOS)
 - El directorio `rules/` incluye packs para inglés, español, alemán, francés, italiano y portugués
 - Los packs de reglas se derivan de los XML de LanguageTool usando `tools/lt2rul.py`
@@ -502,6 +499,28 @@ tinyedit incluye un corrector gramatical/estilístico experimental al compilar c
 - **No es un corrector ortográfico/gramatical completo por idioma**: no sabe dónde poner acentos ni elegir palabras según el contexto de la frase o la morfología. Es un asistente ligero para problemas superficiales comunes.
 
 Habilita y configura el pack de reglas desde Configuración (F4) en el panel de diccionario
+
+## Formatos de Texto Enriquecido y Heredados
+
+tinyedit puede abrir y guardar archivos `.rtf` y `.wp`/`.wp4` con soporte parcial de texto enriquecido:
+
+- **RTF 1.x** importación/exportación (`.rtf`):
+  - Conserva **negrita**, *cursiva*, subrayado y alineación de párrafo.
+  - Lee información básica de fuente y tamaño, pero no las guarda.
+  - La información de color se descarta.
+  - Los caracteres no ASCII se escriben como escapes `\u` con respaldo `?`.
+
+- **WordPerfect 4.2** importación/exportación (`.wp`, `.wp4`):
+  - Conserva negrita, cursiva, subrayado y alineación de párrafo.
+  - Requiere un charset de 8 bits (p. ej. LATIN-1, CP850, CP1252) para guardar; UTF-8 se rechaza.
+  - Los caracteres que no se puedan representar en el charset de salida se reemplazan por `?` y se muestra una advertencia.
+  - No se escriben fuente ni tamaño.
+
+Cuando se carga un archivo de texto enriquecido, el editor pasa a modo rico y los atajos de formato están disponibles:
+- Unix/Windows: `Ctrl+Alt+B/I/U/L/E/R/J` para negrita, cursiva, subrayado, alinear izquierda, centrar, derecha, justificar.
+- AmigaOS: `Alt+Shift+B/I/U/L/E/R/J` para los mismos comandos.
+
+Se pueden mezclar archivos de texto plano y enriquecido en pestañas, pero el formato rico solo se conserva al guardar en `.rtf` o `.wp`/`.wp4`.
 
 ## Capturas de Pantalla
 

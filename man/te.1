@@ -141,7 +141,7 @@ next to the original file at a configurable interval when enabled.
 The editor supports insert and overwrite modes. Word movement can be set to
 standard (alphanumeric plus underscore) or vim-like (non-space blocks).
 .Ss Go to Line
-Jump to a specific line number using the go-to-line dialog.
+Press Alt+G to open the go-to-line dialog.
 .Ss Rewrap Paragraph
 The current paragraph can be rewrapped to the configured auto-wrap column.
 Rewrap uses hyphenation when enabled and a dictionary is loaded.
@@ -210,6 +210,48 @@ Case-insensitive comparison
 .El
 .Pp
 These features can be toggled individually in Setup under "Editor Assistance".
+.Sh RICH TEXT AND LEGACY FORMATS
+.Nm te
+can load and save rich-text files in RTF 1.x and WordPerfect 4.2 formats.
+Files with the
+.Pa .rtf
+or
+.Pa .wp / .wp4
+extension are routed through the corresponding importer/exporter.
+.Pp
+RTF files preserve bold, italic, underline and paragraph alignment.
+Font and size are read from the file but are not written back, and color
+information is dropped. Non-ASCII characters are emitted as
+\eu escapes with a
+.Sq ?
+fallback.
+.Pp
+WordPerfect 4.2 files preserve bold, italic, underline and paragraph alignment.
+Only 8-bit charsets (e.g. LATIN-1, CP850, CP1252) can be used for saving; UTF-8
+is rejected. Characters that cannot be encoded in the selected charset are
+replaced with
+.Sq ?
+and a warning is shown.
+Font and size are not written.
+.Pp
+When a rich-text file is loaded or saved with the matching extension, the tab
+switches to rich mode and the formatting shortcuts can be used.
+.Sh GRAMMAR CHECKER
+.Nm te
+includes an experimental grammar/style checker when compiled with
+.Sy USE_GRAMMAR=1 .
+It uses self-contained C code and loads
+.Pa .rul
+rule packs. The bundled
+.Pa rules/
+directory contains packs for English, Spanish, German, French, Italian and
+Portuguese; more can be generated from LanguageTool XML files with
+.Pa tools/lt2rul.py .
+.Pp
+The grammar checker operates on UTF-8 text; documents that use a non-UTF-8
+charset may produce incorrect results.
+.Pp
+Enable and configure the rule pack from Setup (F4) under the dictionary panel.
 .Sh TRANSLATOR
 .Nm te
 includes a translator panel that can be compiled with online translation
@@ -271,7 +313,7 @@ includes an integrated help panel that lists the available keyboard shortcuts
 and commands. Press F1 or Alt+Y to open it and see the full shortcut reference
 for the current build.
 .Sh KEYBOARD SHORTCUTS
-Basic navigation and editing shortcuts:
+.Ss Navigation and editing
 .Bl -tag -width "Ctrl+Left/Right"
 .It Sy Arrows
 Move cursor
@@ -285,26 +327,160 @@ Page up
 Page down
 .It Sy Ctrl+Left/Right
 Word left / right
+.It Sy Ctrl+G
+Go to start of document
+.It Sy Ctrl+K
+Go to end of document
+.It Sy Alt+G
+Go to line
 .It Sy Ctrl+Y
 Delete line
 .It Sy Ctrl+Z
 Undo
 .It Sy Alt+Z
 Redo
-.It Sy Ctrl+S
-Save
-.It Sy ESC / F10
-Quit
+.It Sy Ins / Alt+I
+Toggle insert / overwrite
+.It Sy Tab
+Insert tab
+.It Sy Ctrl+W
+Rewrap FTN reply quote block
+.It Sy Alt+Q
+Toggle wrap mode
+.It Sy Alt+D
+Toggle line numbers
+.It Sy Alt+E
+Toggle hyphen wrap
+.It Sy F3 / Alt+C
+Choose output charset for current file
 .El
 .Pp
-Spellchecker and thesaurus shortcuts:
-.Bl -tag -width "Alt+A"
+.Ss Block selection
+.Bl -tag -width "Ctrl+Left/Right"
+.It Sy Ctrl+C
+Copy block
+.It Sy Ctrl+X
+Cut block
+.It Sy Ctrl+V
+Paste block (or clipboard)
+.It Sy BS / Del
+Delete block (no clipboard)
+.It Sy Ctrl+O
+Export block to file
+.It Sy Alt+V
+Sort selected lines
+.It Sy Alt+X
+Convert case of selected block
+.El
+.Pp
+.Ss Files and tabs
+.Bl -tag -width "Ctrl+Left/Right"
+.It Sy F2 / Ctrl+S
+Save
+.It Sy F7 / Alt+O
+Insert file at cursor
+.It Sy Ctrl+L
+Open file (new tab)
+.It Sy Ctrl+N
+New file (new tab)
+.It Sy Ctrl+Alt+Y
+Open recent file
+.It Sy ESC / F10
+Quit
+.It Sy F9 / Alt+L
+Toggle tabs panel
+.It Sy Alt+J
+Next tab
+.It Sy Alt+K
+Previous tab
+.It Sy Alt+W
+Close current tab
+.It Sy Alt+S
+Toggle spell/translate panel
+.It Sy F8 / Alt+U
+Unicode glyph picker
+.El
+.Pp
+.Ss Search and replace
+.Bl -tag -width "Ctrl+Left/Right"
+.It Sy F5 / Alt+F
+Search / replace current
+.It Sy Ctrl+R
+Find & replace
+.It Sy F3 / Alt+C
+Previous result
+.It Sy F4 / Alt+T
+Next result
+.It Sy F6 / Alt+B
+Replace all (search mode)
+.It Sy ESC
+Exit search mode
+.El
+.Pp
+.Ss Spell, hyphen and thesaurus
+.Bl -tag -width "Ctrl+Left/Right"
+.It Sy Alt+H
+Toggle spell checker
 .It Sy Alt+P
 Spellcheck word under cursor
-.It Sy Alt+H
-Toggle spell checker panel
 .It Sy Alt+A
 Thesaurus lookup
+.It Sy Alt+E
+Toggle hyphen wrap
+.El
+.Pp
+.Ss Optional features
+Available when the corresponding feature is compiled in
+.Pq USE_TRANSLATE=1 , USE_TTS=1 :
+.Bl -tag -width "Ctrl+Alt+V (Alt+Shift+V on AmigaOS)"
+.It Sy Ctrl+T
+Toggle translator
+.It Sy Alt+R
+Translate selected text
+.It Sy Alt+M
+Dictionary popup (pick translation)
+.It Sy Alt+N
+Reverse lookup (scan dict)
+.It Sy Alt+B
+Exchange languages
+.It Sy Ctrl+Alt+X (Alt+Shift+X on AmigaOS)
+Speak selection / paragraph
+.It Sy Ctrl+Alt+K (Alt+Shift+K on AmigaOS)
+Speak entire document
+.It Sy Ctrl+Alt+P (Alt+Shift+P on AmigaOS)
+Pause / resume speech
+.It Sy Ctrl+Alt+O (Alt+Shift+O on AmigaOS)
+Stop speech
+.It Sy Ctrl+Alt+V (Alt+Shift+V on AmigaOS)
+Voice settings popup
+.El
+.Pp
+.Ss Rich text formatting
+Available when the current tab is in rich-text mode
+.Pq .rtf , .wp , .wp4 .
+.Bl -tag -width "Ctrl+Alt+V (Alt+Shift+V on AmigaOS)"
+.It Sy Ctrl+Alt+B (Alt+Shift+B on AmigaOS)
+Bold
+.It Sy Ctrl+Alt+I (Alt+Shift+I on AmigaOS)
+Italic
+.It Sy Ctrl+Alt+U (Alt+Shift+U on AmigaOS)
+Underline
+.It Sy Ctrl+Alt+L (Alt+Shift+L on AmigaOS)
+Align left
+.It Sy Ctrl+Alt+E (Alt+Shift+E on AmigaOS)
+Align center
+.It Sy Ctrl+Alt+R (Alt+Shift+R on AmigaOS)
+Align right
+.It Sy Ctrl+Alt+J (Alt+Shift+J on AmigaOS)
+Justify
+.El
+.Pp
+.Ss Other
+.Bl -tag -width "Ctrl+Left/Right"
+.It Sy F1 / Alt+Y
+Show help
+.It Sy Ctrl+Alt+S
+Cycle syntax language
 .El
 .Sh FILES
 .Bl -tag -width "~/.tinyedit/config"

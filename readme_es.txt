@@ -4,10 +4,14 @@ Características principales:
 - Soporte completo UTF-8 con conversión de charset (interno UTF-8, salida configurable)
 - Múltiples charsets: UTF-8, LATIN-1/2, CP437, CP850, CP865, CP866, CP1252
 - Renderizado TTF con soporte Unicode completo (incluyendo emojis) en AmigaOS
+- Interfaz de pestañas para editar varios archivos
+- Resaltado de sintaxis (C/C++, asm x86/m68k, Amiga C) con emparejamiento de corchetes y resaltado de línea actual
+- Corrector ortográfico, guiones, tesauro y traductor (opcional, USE_HUNSPELL=1, USE_HYPHEN=1, USE_MYTHES=1, USE_TRANSLATE=1)
+- Soporte de ratón (terminal, SSH y sesiones remotas)
 - Colores y fuentes configurables
 - Modos auto-wrap y hard-wrap
 - Soporte deshacer/rehacer
-- Búsqueda de texto
+- Búsqueda y reemplazo de texto
 - Portapapeles
 - Pegado con corchetes (Unix/Linux)
 - Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
@@ -15,7 +19,7 @@ Características principales:
 - Configurable vía archivo o menú
  
 Compilación
-AmigaOS requiere ttengine.library de https://aminet.net/package/util/libs/ttengine-68k
+AmigaOS requiere FreeType, libpng y zlib. Extrae freetype-2.14.3.tar.xz, libpng-1.6.58.tar.xz y zlib.tar.gz en el directorio tinyedit y renómbralos a freetype, libpng y zlib. Usa bebbo gcc
 
 Para Linux/BSD/macOS usa Makefile.unix; para Windows Makefile.win32. Las funciones opcionales se activan con USE_HUNSPELL=1, USE_HYPHEN=1, USE_MYTHES=1, USE_TRANSLATE=1, USE_STARDICT=1, USE_TTS=1, USE_GRAMMAR=1
 
@@ -37,7 +41,7 @@ Presiona ESC o F10. Si tienes cambios sin guardar, te preguntará
 
 Copiar y pegar
 1. Ve al inicio del texto que quieres copiar
-2. Presiona F6 o Alt+B (marca el inicio del bloque)
+2. Marca el bloque con la selección del editor (mantén Shift y usa las flechas)
 3. Ve al final del texto con las flechas
 4. Presiona Ctrl+C para copiar
 5. Ve a donde quieres pegar
@@ -53,7 +57,6 @@ Buscar texto
 5. Usa F3 o Alt+C para ir al resultado anterior
 6. Usa F4 o Alt+T para ir al siguiente resultado
 7. Presiona ESC para salir del modo de búsqueda
-8. Presiona Alt+G para quitar los resaltados y salir del modo buscar
 
 Buscar y reemplazar
 1. Presiona Ctrl+R
@@ -69,7 +72,7 @@ Deshacer errores
 Presiona Ctrl+Z para deshacer. Alt+Z para rehacer
 
 Ir a una línea
-Presiona Ctrl+Q, escribe el número de línea, y Enter
+Presiona Alt+G, escribe el número de línea, y Enter
 
 Ir al inicio/final del documento
 Ctrl+G va al inicio. Ctrl+K va al final.
@@ -107,7 +110,7 @@ tinyedit trabaja siempre con UTF-8 internamente. Hay dos formas de configurar ch
 
 Ejemplo práctico:
   - Quieres que todos tus archivos se guarden en CP437 por defecto:
-  - Presiona F4 o Alt+S, ve a "Charset", selecciona CP437, guarda con F10 o S
+  - Presiona F4 o Alt+T, ve a "Charset", selecciona CP437, guarda con F10 o S
   - Abres un archivo de DOS (CP437) y ves caracteres raros:
   - Presiona F3 o Alt+C, selecciona CP437 como View charset
   - El archivo se recarga desde disco convertido a UTF-8
@@ -124,11 +127,12 @@ Charsets disponibles:
 - CP1252 (Windows Europeo occidental)
 - LATIN-2 (ISO-8859-2, Europeo central)
 
+Formatos de texto enriquecido y heredados
+tinyedit puede abrir y guardar archivos .rtf y .wp/.wp4 con soporte parcial de texto enriquecido. Al cargar uno de esos archivos, el editor pasa a modo rico y los atajos de formato (Ctrl+Alt+B/I/U/L/E/R/J en Unix/Windows, Alt+Shift+B/I/U/L/E/R/J en AmigaOS) quedan disponibles. RTF conserva negrita/cursiva/subrayado/alineación pero descarta el color. WP 4.2 requiere un charset de 8 bits para guardar y no almacena fuente ni tamaño.
+
 Otros atajos útiles
-- Ctrl+W: rewrap párrafo (ajusta el ancho de línea)
+- Ctrl+W: rewrap bloque de cita FTN reply
 - Ctrl+Y: borrar línea actual
-- Ctrl+T: borrar palabra a la derecha
-- Ctrl+_: borrar palabra a la izquierda
 - Ctrl+B / Home: inicio de línea
 - Ctrl+E / End: fin de línea
 - Ctrl+U / PgUp: página arriba
@@ -138,5 +142,5 @@ Otros atajos útiles
 - Ins / Alt+I: toggle insert/overwrite
 
 Ayuda
-Presiona F1 o ? en cualquier momento para ver los atajos de teclado
+Presiona F1 o Alt+Y en cualquier momento para ver los atajos de teclado
 

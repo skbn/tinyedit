@@ -46,7 +46,6 @@ typedef struct
 {
     void *text; /* Packed codepoints, cw bytes each, always NUL terminated */
     struct EdAttrRunStruct *attrs;
-    struct Ed *owner; /* The editor whose slab this line came from */
 
     int len;                        /* Character count, not bytes */
     int cap;                        /* Allocated character slots */
@@ -318,7 +317,7 @@ void ed_join_breaks(Ed *ed);
 
 /* Drop a hyphen left at the end of the line by an older build or another editor */
 void ed_line_drop_trailing_hyphen(Ed *ed, int line);
-void ed_line_destroy(EdLine *ln);
+void ed_line_destroy(Ed *ed, EdLine *ln);
 int ed_lines_splice(Ed *ed, int row, int n_remove, EdLine **insert, int n_insert);
 int ed_replace_range_from_utf8(Ed *ed, int start, int count_to_remove, const char *utf8_text);
 

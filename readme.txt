@@ -6,6 +6,7 @@ Main features:
 - TTF rendering with full Unicode support (including emojis) on AmigaOS
 - Tabbed interface for editing multiple files
 - Syntax highlighting (C/C++, x86/m68k asm, Amiga C) with bracket matching and current line highlight
+- Spell checker, hyphenation, thesaurus and translator (optional, USE_HUNSPELL=1, USE_HYPHEN=1, USE_MYTHES=1, USE_TRANSLATE=1)
 - Configurable colors (and TTF fonts on AmigaOS)
 - Auto-wrap and hard-wrap modes
 - Undo/redo support
@@ -14,7 +15,8 @@ Main features:
 - Clipboard support
 - Bracketed paste support (Unix/Linux)
 - Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
-- Experimental grammar/style checker with rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1)
+- Experimental grammar/style checker with rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1); grammar checks only work on UTF-8 text
+- Partial rich-text support for .rtf and .wp/.wp4 files
 - Configurable via file or menu
  
 Building
@@ -56,7 +58,6 @@ Search text
 5. Use F3 or Alt+C to go to the previous result
 6. Use F4 or Alt+T to go to the next result
 7. Press ESC to exit search mode
-8. Press Alt+G to clear highlights and exit search mode
 
 Search and replace
 1. Press Ctrl+R
@@ -126,6 +127,10 @@ Available charsets:
 - CP866 (DOS Cyrillic/Russian)
 - CP1252 (Windows Western European)
 - LATIN-2 (ISO-8859-2, Central European)
+
+Rich text and legacy file formats
+tinyedit can open and save .rtf and .wp/.wp4 files with partial rich-text support. When such a file is loaded, the editor switches to rich mode and the formatting shortcuts (Ctrl+Alt+B/I/U/L/E/R/J on Unix/Windows, Alt+Shift+B/I/U/L/E/R/J on AmigaOS) become available. RTF preserves bold/italic/underline/alignment but drops color. WP 4.2 requires an 8-bit charset for saving and does not store font/size.
+
 
 Other useful shortcuts
 - Ctrl+W: rewrap FTN reply quote block

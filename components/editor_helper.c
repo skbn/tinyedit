@@ -1384,7 +1384,7 @@ static int rewrap_range_no_undo_ex(Ed *ed, int width, LayoutHyphenFn hyph, void 
         if (!ln)
         {
             for (k = 0; k < i; k++)
-                ed_line_destroy(scr->built[k]);
+                ed_line_destroy(ed, scr->built[k]);
 
             return -1;
         }
@@ -1429,7 +1429,7 @@ static int rewrap_range_no_undo_ex(Ed *ed, int width, LayoutHyphenFn hyph, void 
     if (same)
     {
         for (i = 0; i < n; i++)
-            ed_line_destroy(scr->built[i]);
+            ed_line_destroy(ed, scr->built[i]);
 
         if (out_new_lines)
             *out_new_lines = n;
@@ -1440,7 +1440,7 @@ static int rewrap_range_no_undo_ex(Ed *ed, int width, LayoutHyphenFn hyph, void 
     if (ed_lines_splice(ed, first, old_count, scr->built, n) != 0)
     {
         for (i = 0; i < n; i++)
-            ed_line_destroy(scr->built[i]);
+            ed_line_destroy(ed, scr->built[i]);
 
         return -1;
     }

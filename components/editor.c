@@ -347,8 +347,6 @@ static EdLine *line_new(Ed *ed)
 
     memset(ln, 0, sizeof(EdLine));
 
-    ln->owner = ed;
-
 #if defined(PLATFORM_AMIGA)
     ln->mem_pool = ed ? ed->mem_pool : NULL;
 #endif
@@ -367,7 +365,8 @@ static EdLine *line_new(Ed *ed)
     return ln;
 }
 
-static void line_free(EdLine *ln)
+/* Ed is needed for the slab release, mem_pool still lives on the line for Amiga */
+static void line_free(Ed *ed, EdLine *ln)
 {
     if (!ln)
         return;
@@ -383,17 +382,15 @@ static void line_free(EdLine *ln)
     if (ln->text && !line_text_is_emb(ln) && !ln->t_arena)
         line_mem_free(line_pool(ln), ln->text, line_text_bytes(ln));
 
-    slab_release(ln->owner, ln);
+    slab_release(ed, ln);
 }
 
 /* Invalidate the per line caches after any content change */
+/* The doc level word_count_initialized is cleared by doc_dirty_from on every mutation */
 static void line_touch(EdLine *ln)
 {
     ln->wrap_count_cache = -1;
     ln->word_count_dirty = 1;
-
-    if (ln->owner)
-        ((Ed *)ln->owner)->word_count_initialized = 0;
 }
 
 /* Ensure capacity for chars codepoints of width want_cw, repacks if needed */
@@ -574,7 +571,7 @@ static EdLine *line_clone_slice(Ed *ed, const EdLine *src, int start, int count)
 
         if (line_need(ln, count, want) != 0)
         {
-            line_free(ln);
+            line_free(ed, ln);
             return NULL;
         }
 
@@ -668,7 +665,7 @@ static void doc_remove_lines_raw(Ed *ed, int row, int count)
     for (i = 0; i < count; i++)
     {
         if (ed->lines[row + i])
-            line_free(ed->lines[row + i]);
+            line_free(ed, ed->lines[row + i]);
     }
 
     for (i = row; i + count < ed->count; i++)
@@ -714,7 +711,7 @@ EdLine *ed_line_from_wcs(Ed *ed, const wchar_t *w, int n)
 
     if (!cps)
     {
-        line_free(ln);
+        line_free(ed, ln);
         return NULL;
     }
 
@@ -724,7 +721,7 @@ EdLine *ed_line_from_wcs(Ed *ed, const wchar_t *w, int n)
     if (line_insert_cps(ln, 0, cps, n) != 0)
     {
         free(cps);
-        line_free(ln);
+        line_free(ed, ln);
 
         return NULL;
     }
@@ -806,7 +803,7 @@ void ed_join_breaks(Ed *ed)
 
             head->brk = next->brk;
 
-            line_free(next);
+            line_free(ed, next);
             ed->lines[read + 1] = NULL;
             read++;
         }
@@ -823,7 +820,7 @@ void ed_join_breaks(Ed *ed)
     {
         if (ed->lines[read])
         {
-            line_free(ed->lines[read]);
+            line_free(ed, ed->lines[read]);
             ed->lines[read] = NULL;
         }
 
@@ -866,9 +863,9 @@ EdLine *ed_line_clone(Ed *ed, const EdLine *src)
     return line_clone_slice(ed, src, 0, src->len);
 }
 
-void ed_line_destroy(EdLine *ln)
+void ed_line_destroy(Ed *ed, EdLine *ln)
 {
-    line_free(ln);
+    line_free(ed, ln);
 }
 
 /* Splice owned lines at row without mutating the previous break */
@@ -906,7 +903,7 @@ void ed_clamp(Ed *ed)
         EdLine *ln = line_new(ed);
 
         if (ln && doc_insert_line(ed, 0, ln) != 0)
-            line_free(ln);
+            line_free(ed, ln);
     }
 
     if (ed->row < 0)
@@ -1705,7 +1702,7 @@ Ed *ed_new(void)
 
     if (doc_insert_line(ed, 0, ln) != 0)
     {
-        line_free(ln);
+        line_free(ed, ln);
         free(ed);
 
         return NULL;
@@ -1730,7 +1727,7 @@ void ed_free(Ed *ed)
     for (i = 0; i < ed->count; i++)
     {
         if (ed->lines[i])
-            line_free(ed->lines[i]);
+            line_free(ed, ed->lines[i]);
     }
 
     free(ed->lines);
@@ -1743,7 +1740,7 @@ void ed_free(Ed *ed)
         for (i = 0; i < ed->killbuf_line_count; i++)
         {
             if (ed->killbuf_lines[i])
-                line_free(ed->killbuf_lines[i]);
+                line_free(ed, ed->killbuf_lines[i]);
         }
 
         free(ed->killbuf_lines);
@@ -1806,7 +1803,7 @@ static EdLine *line_from_utf8(Ed *ed, const char *s, int nbytes)
 
         if (!t)
         {
-            line_free(ln);
+            line_free(ed, ln);
             return NULL;
         }
 
@@ -1884,7 +1881,7 @@ void ed_load(Ed *ed, const char *utf8_text)
         if (!ln || doc_insert_line(ed, ed->count, ln) != 0)
         {
             if (ln)
-                line_free(ln);
+                line_free(ed, ln);
 
             break;
         }
@@ -2648,7 +2645,7 @@ int ed_enter(Ed *ed)
 
     if (doc_insert_line(ed, ed->row + 1, tail) != 0)
     {
-        line_free(tail);
+        line_free(ed, tail);
         undo_abort(ed);
 
         return -1;
@@ -2976,7 +2973,7 @@ int ed_duplicate_line(Ed *ed)
     if (!dup || doc_insert_line(ed, ed->row + 1, dup) != 0)
     {
         if (dup)
-            line_free(dup);
+            line_free(ed, dup);
 
         undo_abort(ed);
 
@@ -3134,7 +3131,7 @@ static void kill_drop(Ed *ed)
         for (i = 0; i < ed->killbuf_line_count; i++)
         {
             if (ed->killbuf_lines[i])
-                line_free(ed->killbuf_lines[i]);
+                line_free(ed, ed->killbuf_lines[i]);
         }
 
         free(ed->killbuf_lines);
@@ -3174,7 +3171,7 @@ int ed_block_copy(Ed *ed)
         if (!v[i])
         {
             while (--i >= 0)
-                line_free(v[i]);
+                line_free(ed, v[i]);
 
             free(v);
 
@@ -3189,7 +3186,7 @@ int ed_block_copy(Ed *ed)
     if (!flat)
     {
         for (i = 0; i < n; i++)
-            line_free(v[i]);
+            line_free(ed, v[i]);
 
         free(v);
 
@@ -3298,7 +3295,7 @@ static int paste_lines(Ed *ed, EdLine **src, int nsrc)
 
     if (line_append_slice(cur, src[0], 0, src[0]->len) != 0)
     {
-        line_free(tail);
+        line_free(ed, tail);
         return -1;
     }
 
@@ -3308,11 +3305,11 @@ static int paste_lines(Ed *ed, EdLine **src, int nsrc)
 
         if (line_append_slice(cur, tail, 0, tail->len) != 0)
         {
-            line_free(tail);
+            line_free(ed, tail);
             return -1;
         }
 
-        line_free(tail);
+        line_free(ed, tail);
         doc_dirty_from(ed, ed->row);
 
         return 0;
@@ -3321,7 +3318,7 @@ static int paste_lines(Ed *ed, EdLine **src, int nsrc)
     /* Reserve nsrc-1 slots once instead of shifting per inserted line */
     if (doc_make_room(ed, ed->row + 1, nsrc - 1) != 0)
     {
-        line_free(tail);
+        line_free(ed, tail);
         return -1;
     }
 
@@ -3331,7 +3328,7 @@ static int paste_lines(Ed *ed, EdLine **src, int nsrc)
 
         if (!cp)
         {
-            line_free(tail);
+            line_free(ed, tail);
             return -1;
         }
 
@@ -3343,11 +3340,11 @@ static int paste_lines(Ed *ed, EdLine **src, int nsrc)
 
     if (line_append_slice(ed->lines[ed->row], tail, 0, tail->len) != 0)
     {
-        line_free(tail);
+        line_free(ed, tail);
         return -1;
     }
 
-    line_free(tail);
+    line_free(ed, tail);
     doc_dirty_from(ed, ed->row - nsrc + 1);
 
     return 0;
@@ -3433,7 +3430,7 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
 
     if (nl_count > 0 && doc_make_room(ed, ed->row + 1, nl_count) != 0)
     {
-        line_free(tail);
+        line_free(ed, tail);
         return -1;
     }
 
@@ -3455,7 +3452,7 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
 
             if (!ln)
             {
-                line_free(tail);
+                line_free(ed, tail);
                 return -1;
             }
 
@@ -3473,7 +3470,7 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
 
             if (line_insert_cps(ed->lines[ed->row], ed->col, &cp, 1) != 0)
             {
-                line_free(tail);
+                line_free(ed, tail);
                 return -1;
             }
 
@@ -3493,11 +3490,11 @@ int ed_paste_text(Ed *ed, const char *utf8_text)
 
     if (line_append_slice(ed->lines[ed->row], tail, 0, tail->len) != 0)
     {
-        line_free(tail);
+        line_free(ed, tail);
         return -1;
     }
 
-    line_free(tail);
+    line_free(ed, tail);
 
     ed->modified = 1;
 

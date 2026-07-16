@@ -53,6 +53,7 @@
 
 #ifdef HAVE_GRAMMAR
 #include "../grammar/grammar.h"
+#include "ui_grammar.h"
 #endif /* HAVE_GRAMMAR */
 
 #ifdef HAVE_TRANSLATE
@@ -1799,6 +1800,16 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
             {
                 *cfg = work;
                 ui_tts_load_from_config(app);
+            }
+#endif
+
+#ifdef HAVE_GRAMMAR
+            /* Reload grammar checker if its settings changed */
+            if (cfg->grammar_enabled != work.grammar_enabled || strcmp(cfg->grammar_dict_path, work.grammar_dict_path) != 0 || strcmp(cfg->grammar_dict_name, work.grammar_dict_name) != 0)
+            {
+                *cfg = work;
+                app->grammar_enabled = cfg->grammar_enabled;
+                ui_grammar_load_from_config(app);
             }
 #endif
 

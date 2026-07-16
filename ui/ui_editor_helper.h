@@ -116,11 +116,17 @@ int editor_hyphen_screen_x(int offset_x, int ln_offset, int width, int align_ind
 
 /* Draw wide string with tab expansion */
 void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_width);
+void ui_draw_wcs_line_with_tabs_ex(int y, int x, const wchar_t *s, int n, int tab_width, const int *offsets);
 
 /* Repaint bold/underline runs over an already-drawn segment */
 void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int seg_start, int seg_end, int seg_start_vcol, int tab_width);
+void ui_draw_wcs_attr_runs_ex(int y, int x, const wchar_t *l, const EdLine *ln, int seg_start, int seg_end, int seg_start_vcol, int tab_width, const int *offsets);
 
 /* Draw wide string with tab expansion and per-character syntax colors */
 void ui_draw_wcs_line_with_tabs_and_colors(int y, int x, const wchar_t *s, int n, int tab_width, const SyntaxClass *classes, int start_col);
+void ui_draw_wcs_line_with_tabs_and_colors_ex(int y, int x, const wchar_t *s, int n, int tab_width, const SyntaxClass *classes, int start_col, const int *offsets);
+
+/* Compute per-char cumulative extra column offsets to justify seg to target_vw */
+int ui_justify_offsets(const wchar_t *seg, int seg_len, int cur_vw, int target_vw, int *offsets);
 
 #endif /* UI_EDITOR_HELPER_H */

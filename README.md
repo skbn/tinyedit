@@ -13,7 +13,8 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 - Hyphenation with native implementation (AmigaOS/Windows) or libhyphen (*nix) (optional, USE_HYPHEN=1)
 - Thesaurus with native implementation (AmigaOS/Windows) or libmythes (*nix) (optional, USE_MYTHES=1)
 - Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
-- Experimental grammar/style checker using rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1)
+- Experimental grammar/style checker using rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1); grammar checks only work on UTF-8 text
+- Partial rich-text support for .rtf and .wp/.wp4 files
 - Translator panel with online support and StarDict-compatible offline dictionary
 - Mouse support (works in terminal, SSH and remote sessions)
 - Configurable colors (and TTF fonts on AmigaOS)
@@ -46,7 +47,7 @@ To compile with native implementations (without installing external libraries):
 make -f Makefile.unix.static
 ```
 
-Native implementations include spell checker, hyphenation, thesaurus and offline dictionary (StarDict-compatible), but require libcurl for online translator.
+Native implementations include spell checker, hyphenation, thesaurus and offline dictionary (StarDict-compatible), but require libcurl for online translator
 
 To compile with Hunspell spell checker (optional):
 - Debian/Ubuntu: `sudo apt install libhunspell-dev`
@@ -81,25 +82,20 @@ make -f Makefile.unix USE_TTS=1
 - OpenBSD: `pkg_add espeak`
 - macOS: `brew install espeak-ng` (or use the built-in `say` command)
 
-No build-time dependency is required: tinyedit spawns the TTS backend as a subprocess at runtime.
+No build-time dependency is required: tinyedit spawns the TTS backend as a subprocess at runtime
 
 To compile with grammar checker support (optional):
 ```bash
 make -f Makefile.unix USE_GRAMMAR=1
 ```
-- No external library dependency; uses a self-contained C module and `.rul` rule packs.
-- Rule packs can be generated from LanguageTool XML files using `tools/lt2rul.py`.
+- No external library dependency; uses a self-contained C module and `.rul` rule packs
+- Rule packs can be generated from LanguageTool XML files using `tools/lt2rul.py`
 
 Dictionaries, hyphenation patterns and thesaurus data:
 - Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
 - Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us hyphen-es hyphen-en mythes-es mythes-en`
 - FreeBSD: `doas pkg install es-hunspell en-hunspell es-hyphen en-mythes es-mythes`
 - macOS: Dictionary files are included with hunspell
-
-To compile with native spell checker (spellchecker/ like AmigaOS):
-```bash
-make -f Makefile.unix.static
-```
 
 ### Windows (MinGW)
 ```bash
@@ -481,11 +477,11 @@ tinyedit supports text-to-speech when compiled with `USE_TTS=1`:
 - **AmigaOS**: Uses `translator.library` v43 and `narrator.device` v34/v37
 
 Shortcuts:
-- **Speak selection / paragraph**: `Ctrl+Alt+L` (Unix/Windows), `Alt+Shift+L` (AmigaOS)
+- **Speak selection / paragraph**: `Ctrl+Alt+X` (Unix/Windows), `Alt+Shift+X` (AmigaOS)
 - **Speak entire document**: `Ctrl+Alt+K` (Unix/Windows), `Alt+Shift+K` (AmigaOS)
 - **Pause / resume speech**: `Ctrl+Alt+P` (Unix/Windows), `Alt+Shift+P` (AmigaOS)
 - **Stop speech**: `Ctrl+Alt+O` (Unix/Windows), `Alt+Shift+O` (AmigaOS)
-- **Voice settings popup**: `Ctrl+Alt+J` (Unix/Windows), `Alt+Shift+J` (AmigaOS)
+- **Voice settings popup**: `Ctrl+Alt+V` (Unix/Windows), `Alt+Shift+V` (AmigaOS)
 
 Configure voice, rate, pitch and volume from Setup (F4)
 
@@ -502,6 +498,28 @@ tinyedit includes an experimental grammar/style checker when compiled with `USE_
 - **This is not a full language-aware proofreader**: it does not know where to place accents or choose words based on sentence context or morphology. It is a lightweight assistant for common surface issues
 
 Enable and configure the rule pack from Setup (F4) under the dictionary panel
+
+## Rich Text and Legacy File Formats
+
+tinyedit can open and save `.rtf` and `.wp`/`.wp4` files with partial rich-text support:
+
+- **RTF 1.x** import/export (`.rtf`):
+  - Preserves **bold**, *italic*, underline and paragraph alignment
+  - Reads basic font and size information, but does not save font/size changes
+  - Color information is dropped
+  - Non-ASCII characters are written as `\u` escapes with a `?` fallback
+
+- **WordPerfect 4.2** import/export (`.wp`, `.wp4`):
+  - Preserves bold, italic, underline and paragraph alignment
+  - Requires an 8-bit charset (e.g. LATIN-1, CP850, CP1252) for saving; UTF-8 is rejected
+  - Characters that cannot be represented in the selected output charset are replaced with `?` and a warning is shown
+  - Font and size are not written
+
+When a rich-text file is loaded, the editor switches to rich mode and the text-formatting shortcuts are available:
+- Unix/Windows: `Ctrl+Alt+B/I/U/L/E/R/J` for bold, italic, underline, align left, center, right, justify
+- AmigaOS: `Alt+Shift+B/I/U/L/E/R/J` for the same commands
+
+Plain-text and rich-text files can be mixed in tabs, but rich formatting is only preserved when saving to `.rtf` or `.wp`/`.wp4`
 
 ## Screenshots
 

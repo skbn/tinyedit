@@ -17,10 +17,10 @@
 #include "undo.h"
 
 EdLine *ed_line_clone(Ed *ed, const EdLine *src);
-void ed_line_destroy(EdLine *ln);
+void ed_line_destroy(Ed *ed, EdLine *ln);
 int ed_lines_splice(Ed *ed, int row, int n_remove, EdLine **insert, int n_insert);
 
-static void lines_release(EdLine **v, int n)
+static void lines_release(Ed *ed, EdLine **v, int n)
 {
     int i;
 
@@ -28,7 +28,7 @@ static void lines_release(EdLine **v, int n)
         return;
 
     for (i = 0; i < n; i++)
-        ed_line_destroy(v[i]);
+        ed_line_destroy(ed, v[i]);
 
     free(v);
 }
@@ -53,7 +53,7 @@ static EdLine **lines_capture(Ed *ed, int row, int n)
 
         if (!v[i])
         {
-            lines_release(v, i);
+            lines_release(ed, v, i);
             return NULL;
         }
     }
@@ -61,10 +61,10 @@ static EdLine **lines_capture(Ed *ed, int row, int n)
     return v;
 }
 
-static void op_release(UndoOp *op)
+static void op_release(Ed *ed, UndoOp *op)
 {
-    lines_release(op->before, op->n_before);
-    lines_release(op->after, op->n_after);
+    lines_release(ed, op->before, op->n_before);
+    lines_release(ed, op->after, op->n_after);
 
     op->before = NULL;
     op->after = NULL;
@@ -72,12 +72,12 @@ static void op_release(UndoOp *op)
     op->n_after = 0;
 }
 
-static void group_release(UndoGroup *g)
+static void group_release(Ed *ed, UndoGroup *g)
 {
     int i;
 
     for (i = 0; i < g->count; i++)
-        op_release(&g->ops[i]);
+        op_release(ed, &g->ops[i]);
 
     free(g->ops);
 
@@ -86,22 +86,22 @@ static void group_release(UndoGroup *g)
     g->cap = 0;
 }
 
-static void stack_release(UndoGroup *stack, int n)
+static void stack_release(Ed *ed, UndoGroup *stack, int n)
 {
     int i;
 
     for (i = 0; i < n; i++)
-        group_release(&stack[i]);
+        group_release(ed, &stack[i]);
 }
 
 /* Make room for one more group, dropping the oldest past the limit */
-static int stack_room(UndoGroup **stack, int *top, int *cap, int max)
+static int stack_room(Ed *ed, UndoGroup **stack, int *top, int *cap, int max)
 {
     UndoGroup *t = NULL;
 
     if (max > 0 && *top >= max)
     {
-        group_release(&(*stack)[0]);
+        group_release(ed, &(*stack)[0]);
         memmove(*stack, *stack + 1, (size_t)(*top - 1) * sizeof(UndoGroup));
         (*top)--;
     }
@@ -124,8 +124,8 @@ static int stack_room(UndoGroup **stack, int *top, int *cap, int max)
 
 void undo_free_all(Ed *ed)
 {
-    stack_release(ed->undo_stack, ed->undo_top);
-    stack_release(ed->redo_stack, ed->redo_top);
+    stack_release(ed, ed->undo_stack, ed->undo_top);
+    stack_release(ed, ed->redo_stack, ed->redo_top);
 
     free(ed->undo_stack);
     free(ed->redo_stack);
@@ -137,7 +137,7 @@ void undo_free_all(Ed *ed)
     ed->undo_cap = 0;
     ed->redo_cap = 0;
 
-    lines_release(ed->pending_before, ed->pending_n);
+    lines_release(ed, ed->pending_before, ed->pending_n);
 
     ed->pending_before = NULL;
     ed->pending_n = 0;
@@ -149,7 +149,7 @@ void ed_redo_clear(Ed *ed)
     if (!ed)
         return;
 
-    stack_release(ed->redo_stack, ed->redo_top);
+    stack_release(ed, ed->redo_stack, ed->redo_top);
 
     ed->redo_top = 0;
 }
@@ -159,14 +159,14 @@ void ed_clear_undo_redo(Ed *ed)
     if (!ed)
         return;
 
-    stack_release(ed->undo_stack, ed->undo_top);
+    stack_release(ed, ed->undo_stack, ed->undo_top);
 
     ed->undo_top = 0;
     ed->undo_typing = 0;
 
     ed_redo_clear(ed);
 
-    lines_release(ed->pending_before, ed->pending_n);
+    lines_release(ed, ed->pending_before, ed->pending_n);
 
     ed->pending_before = NULL;
     ed->pending_n = 0;
@@ -248,7 +248,7 @@ void undo_abort(Ed *ed)
     if (!ed)
         return;
 
-    lines_release(ed->pending_before, ed->pending_n);
+    lines_release(ed, ed->pending_before, ed->pending_n);
 
     ed->pending_before = NULL;
     ed->pending_n = 0;
@@ -270,20 +270,20 @@ static int push_delta(Ed *ed, int row, EdLine **before, int n_before, EdLine **a
 
         if (g->coalesce && g->count == 1 && g->ops[0].row == row && g->ops[0].n_after == 1)
         {
-            lines_release(g->ops[0].after, g->ops[0].n_after);
+            lines_release(ed, g->ops[0].after, g->ops[0].n_after);
 
             g->ops[0].after = after;
             g->ops[0].n_after = n_after;
             g->row_after = ed->row;
             g->col_after = ed->col;
 
-            lines_release(before, n_before);
+            lines_release(ed, before, n_before);
 
             return 0;
         }
     }
 
-    if (stack_room(&ed->undo_stack, &ed->undo_top, &ed->undo_cap, ed->undo_max) != 0)
+    if (stack_room(ed, &ed->undo_stack, &ed->undo_top, &ed->undo_cap, ed->undo_max) != 0)
         return -1;
 
     g = &ed->undo_stack[ed->undo_top++];
@@ -346,7 +346,7 @@ int undo_commit(Ed *ed, int n_after)
 
     if (push_delta(ed, ed->pending_row, ed->pending_before, ed->pending_n, after, n_after, ed->pending_row_cur, ed->pending_col_cur) != 0)
     {
-        lines_release(after, n_after);
+        lines_release(ed, after, n_after);
         undo_abort(ed);
 
         return -1;
@@ -376,14 +376,14 @@ static int apply_lines(Ed *ed, int row, int n_remove, EdLine **src, int n_src)
 
         if (!copy[i])
         {
-            lines_release(copy, i);
+            lines_release(ed, copy, i);
             return -1;
         }
     }
 
     if (ed_lines_splice(ed, row, n_remove, copy, n_src) != 0)
     {
-        lines_release(copy, n_src);
+        lines_release(ed, copy, n_src);
         return -1;
     }
 
@@ -425,9 +425,9 @@ int ed_undo(Ed *ed)
 
     ed_clamp(ed);
 
-    if (stack_room(&ed->redo_stack, &ed->redo_top, &ed->redo_cap, ed->redo_max) != 0)
+    if (stack_room(ed, &ed->redo_stack, &ed->redo_top, &ed->redo_cap, ed->redo_max) != 0)
     {
-        group_release(g);
+        group_release(ed, g);
         return 0;
     }
 
@@ -469,9 +469,9 @@ int ed_redo(Ed *ed)
 
     ed_clamp(ed);
 
-    if (stack_room(&ed->undo_stack, &ed->undo_top, &ed->undo_cap, ed->undo_max) != 0)
+    if (stack_room(ed, &ed->undo_stack, &ed->undo_top, &ed->undo_cap, ed->undo_max) != 0)
     {
-        group_release(g);
+        group_release(ed, g);
         return 0;
     }
 

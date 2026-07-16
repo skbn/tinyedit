@@ -219,8 +219,72 @@ static int ed_char_vwidth(wchar_t ch)
 #define CHAR_VWIDTH(c) ((wcswidth(&(c), 1) > 0) ? wcswidth(&(c), 1) : 1)
 #endif
 
+/* Fill offsets[i] with the cumulative extra visual columns before char seg[i] to reach target_vw */
+int ui_justify_offsets(const wchar_t *seg, int seg_len, int cur_vw, int target_vw, int *offsets)
+{
+    int extra;
+    int n_gaps = 0;
+    int last_non_space = -1;
+    int i;
+    int per_gap;
+    int remainder;
+    int gap_idx = 0;
+    int shift;
+
+    if (!seg || !offsets || seg_len <= 0 || target_vw <= cur_vw)
+        return 0;
+
+    extra = target_vw - cur_vw;
+
+    /* Locate the last non space, tabs disable justification */
+    for (i = 0; i < seg_len; i++)
+    {
+        if (seg[i] == L'\t')
+            return 0;
+
+        if (seg[i] != L' ')
+            last_non_space = i;
+    }
+
+    if (last_non_space < 0)
+        return 0;
+
+    /* Count inter-word gaps up to and including last_non_space */
+    for (i = 1; i <= last_non_space; i++)
+    {
+        if (seg[i] == L' ' && seg[i - 1] != L' ')
+            n_gaps++;
+    }
+
+    if (n_gaps <= 0)
+        return 0;
+
+    per_gap = extra / n_gaps;
+    remainder = extra % n_gaps;
+    shift = 0;
+    gap_idx = 0;
+
+    for (i = 0; i < seg_len; i++)
+    {
+        offsets[i] = shift;
+
+        if (i > 0 && seg[i] == L' ' && seg[i - 1] != L' ' && i <= last_non_space)
+        {
+            shift += per_gap + (gap_idx < remainder ? 1 : 0);
+            gap_idx++;
+        }
+    }
+
+    return 1;
+}
+
 /* Repaint bold/underline runs over an already-drawn segment [seg_start, seg_end) */
 void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int seg_start, int seg_end, int seg_start_vcol, int tab_width)
+{
+    ui_draw_wcs_attr_runs_ex(y, x, l, ln, seg_start, seg_end, seg_start_vcol, tab_width, NULL);
+}
+
+void ui_draw_wcs_attr_runs_ex(int y, int x, const wchar_t *l, const EdLine *ln, int seg_start, int seg_end, int seg_start_vcol, int tab_width, const int *offsets)
 {
     const EdAttrRun *runs = NULL;
     int n_runs;
@@ -273,11 +337,15 @@ void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int
         for (c = ri_start; c < ri_end; c++)
         {
             int col_x;
+            int shift = 0;
 
             if (l[c] == L'\t')
                 continue;
 
-            col_x = x + wcs_vwidth_ex(l + seg_start, c - seg_start, seg_start_vcol, tab_width);
+            if (offsets)
+                shift = offsets[c - seg_start];
+
+            col_x = x + wcs_vwidth_ex(l + seg_start, c - seg_start, seg_start_vcol, tab_width) + shift;
             mvaddnwstr(y, col_x, l + c, 1);
         }
 
@@ -289,9 +357,15 @@ void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int
 /* Draw wide string with tab expansion */
 void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_width)
 {
+    ui_draw_wcs_line_with_tabs_ex(y, x, s, n, tab_width, NULL);
+}
+
+void ui_draw_wcs_line_with_tabs_ex(int y, int x, const wchar_t *s, int n, int tab_width, const int *offsets)
+{
     int i;
     int col = 0;
     int out_len = 0;
+    int prev_shift = 0;
     wchar_t buf[4096];
     int max_len = (int)(sizeof(buf) / sizeof(buf[0]));
 
@@ -303,6 +377,21 @@ void ui_draw_wcs_line_with_tabs(int y, int x, const wchar_t *s, int n, int tab_w
 
     for (i = 0; i < n && out_len < max_len - 1; i++)
     {
+        /* Insert extra spaces before this char to reach the justified column */
+        if (offsets)
+        {
+            int gap = offsets[i] - prev_shift;
+            int j;
+
+            for (j = 0; j < gap && out_len < max_len - 1; j++)
+            {
+                buf[out_len] = L' ';
+                out_len++;
+            }
+
+            prev_shift = offsets[i];
+        }
+
         if (s[i] == L'\t')
         {
             int w = tab_width - (col % tab_width);
@@ -395,6 +484,19 @@ void ui_draw_wcs_line_with_tabs_and_colors(int y, int x, const wchar_t *s, int n
     }
 
     attrset(COLOR_PAIR(COL_NORMAL));
+}
+
+/* Colored draw plus an optional justification offsets array */
+/* Falls back to the plain justified draw when offsets are given so the shifted layout stays consistent */
+void ui_draw_wcs_line_with_tabs_and_colors_ex(int y, int x, const wchar_t *s, int n, int tab_width, const SyntaxClass *classes, int start_col, const int *offsets)
+{
+    if (offsets)
+    {
+        ui_draw_wcs_line_with_tabs_ex(y, x, s, n, tab_width, offsets);
+        return;
+    }
+
+    ui_draw_wcs_line_with_tabs_and_colors(y, x, s, n, tab_width, classes, start_col);
 }
 
 /* Visual width with tab-stop support */

@@ -890,13 +890,32 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     int align_ind;
     int eff_ln_offset;
 
+    /* Justify offsets, filled when the sub-row is not the last of the paragraph */
+    int just_offsets[4096];
+    const int *just_ptr = NULL;
+    unsigned char cur_align;
+    int is_para_last;
+
     ed_get_info(ed, &info);
 
     if (seg_len < 0)
         seg_len = 0;
 
-    align_ind = line_align_indent(l ? ed->lines[li]->para_align : 0, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width);
+    cur_align = l ? ed->lines[li]->para_align : 0;
+
+    align_ind = line_align_indent(cur_align, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width);
     eff_ln_offset = ln_offset + align_ind;
+
+    /* Justify only intermediate sub-rows of a paragraph, the last one keeps its natural width */
+    is_para_last = (seg_end == len) && (ed->lines[li]->brk == LB_PARA);
+
+    if (cur_align == EA_ALIGN_JUST && !is_para_last && seg_len > 0 && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
+    {
+        int text_vw_now = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width);
+
+        if (ui_justify_offsets(&l[seg_start], seg_len, text_vw_now, width, just_offsets))
+            just_ptr = just_offsets;
+    }
 
     /* Line number on first painted sub-row */
     if (show_lnum && *first_seg)
@@ -913,11 +932,11 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     if (seg_len > 0)
     {
         if (line_classes)
-            ui_draw_wcs_line_with_tabs_and_colors(offset_y + sr, offset_x + eff_ln_offset, &l[seg_start], seg_len, s_tab_width, &line_classes[seg_start], seg_start_vcol);
+            ui_draw_wcs_line_with_tabs_and_colors_ex(offset_y + sr, offset_x + eff_ln_offset, &l[seg_start], seg_len, s_tab_width, &line_classes[seg_start], seg_start_vcol, just_ptr);
         else
-            ui_draw_wcs_line_with_tabs(offset_y + sr, offset_x + eff_ln_offset, &l[seg_start], seg_len, s_tab_width);
+            ui_draw_wcs_line_with_tabs_ex(offset_y + sr, offset_x + eff_ln_offset, &l[seg_start], seg_len, s_tab_width, just_ptr);
 
-        ui_draw_wcs_attr_runs(offset_y + sr, offset_x + eff_ln_offset, l, te_app_get_editor(app)->lines[li], seg_start, seg_end, seg_start_vcol, s_tab_width);
+        ui_draw_wcs_attr_runs_ex(offset_y + sr, offset_x + eff_ln_offset, l, te_app_get_editor(app)->lines[li], seg_start, seg_end, seg_start_vcol, s_tab_width, just_ptr);
     }
 
     /* Paint tabs and trailing spaces as visible glyphs */
