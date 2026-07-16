@@ -24,6 +24,7 @@
 #include "../components/editor.h"
 #include "../components/undo.h"
 #include "../components/ed_attr.h"
+#include "../spellchecker/spell.h"
 #include "te.h"
 #include "ui_files.h"
 #include "ui_spell.h"
@@ -71,9 +72,111 @@ typedef struct
 /* Static variables that need to be accessible */
 static int s_soft_vtop = 0;
 
+int ui_hyphen_word_find(Ed *ed, const EdInfo *info, const wchar_t *line, int line_len, int word_start, int word_end, UiHyphenWord *word)
+{
+    int word_len;
+    int i;
+    int j;
+
+    if (!ed || !info || !line || !word)
+        return 0;
+
+    word_len = word_end - word_start;
+
+    if (word_len <= 0 || word_len >= 128)
+        return 0;
+
+    memset(word, 0, sizeof(*word));
+
+    if (word_end == line_len && ed_line_break(ed, info->row) == LB_HYPHEN && info->row + 1 < info->line_count)
+    {
+        const wchar_t *next_line = ed_line_wcs(ed, info->row + 1);
+        int next_len = ed_line_len(ed, info->row + 1);
+        int next_end = 0;
+
+        while (next_line && next_end < next_len && te_is_word_char(next_line[next_end]))
+            next_end++;
+
+        if (next_end <= 0 || next_end > 255 - word_len || !iswlower(next_line[0]))
+            return 0;
+
+        word->first_row = info->row;
+        word->first_start = word_start;
+        word->first_end = word_end;
+        word->second_row = info->row + 1;
+        word->second_start = 0;
+        word->second_end = next_end;
+
+        for (i = 0; i < word_len; i++)
+            word->joined[word->joined_len++] = line[word_start + i];
+
+        for (j = 0; j < next_end; j++)
+            word->joined[word->joined_len++] = next_line[j];
+
+        word->joined[word->joined_len] = L'\0';
+
+        return 1;
+    }
+
+    if (word_start == 0 && info->row > 0 && word_end > 0 && iswlower(line[0]) && ed_line_break(ed, info->row - 1) == LB_HYPHEN)
+    {
+        const wchar_t *prev_line = ed_line_wcs(ed, info->row - 1);
+        int prev_len = ed_line_len(ed, info->row - 1);
+        int prev_start = prev_len;
+
+        while (prev_line && prev_start > 0 && te_is_word_char(prev_line[prev_start - 1]))
+            prev_start--;
+
+        if (prev_start >= prev_len || prev_len - prev_start > 255 - word_len)
+            return 0;
+
+        word->first_row = info->row - 1;
+        word->first_start = prev_start;
+        word->first_end = prev_len;
+        word->second_row = info->row;
+        word->second_start = word_start;
+        word->second_end = word_end;
+
+        for (j = prev_start; j < prev_len; j++)
+            word->joined[word->joined_len++] = prev_line[j];
+
+        for (i = 0; i < word_len; i++)
+            word->joined[word->joined_len++] = line[word_start + i];
+
+        word->joined[word->joined_len] = L'\0';
+
+        return 1;
+    }
+
+    return 0;
+}
+
+void ui_hyphen_word_replace(Ed *ed, const UiHyphenWord *word, const wchar_t *replacement, int replacement_len)
+{
+    int i;
+
+    if (!ed || !word || !replacement || replacement_len <= 0)
+        return;
+
+    ed_set_pos(ed, word->second_row, word->second_start);
+
+    for (i = word->second_start; i < word->second_end; i++)
+        ed_delete(ed);
+
+    ed_set_pos(ed, word->first_row, word->first_start);
+
+    for (i = word->first_start; i < word->first_end; i++)
+        ed_delete(ed);
+
+    for (i = 0; i < replacement_len; i++)
+        ed_insert_char(ed, replacement[i]);
+
+    ed_set_pos(ed, word->first_row, word->first_start + replacement_len);
+    ed_delete(ed);
+}
+
 #ifdef PLATFORM_WIN32
-/* Windows wcswidth() does not know East Asian Wide / Fullwidth / emoji /
- * box-drawing / block glyphs. Return 2 for those ranges, fall back otherwise */
+/* Windows wcswidth() does not know East Asian Wide / Fullwidth / emoji / box-drawing / block glyphs. Return 2 for those ranges, fall back otherwise */
 static int ed_char_vwidth(wchar_t ch)
 {
     unsigned int cp = (unsigned int)ch;

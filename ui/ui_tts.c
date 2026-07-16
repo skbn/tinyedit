@@ -191,7 +191,7 @@ static char *grab_text_for_speech(TeApp *app)
             used += (size_t)ll;
         }
 
-        if (row < last)
+        if (row < last && ed_line_break(ed, row) != LB_HYPHEN && ed_line_break(ed, row) != LB_WORD)
             joined[used++] = L' ';
     }
 

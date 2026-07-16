@@ -15,6 +15,21 @@
 #include "te.h"
 #include "ui_syntax.h"
 
+typedef struct
+{
+    int first_row;
+    int first_start;
+    int first_end;
+    int second_row;
+    int second_start;
+    int second_end;
+    wchar_t joined[256];
+    int joined_len;
+} UiHyphenWord;
+
+int ui_hyphen_word_find(Ed *ed, const EdInfo *info, const wchar_t *line, int line_len, int word_start, int word_end, UiHyphenWord *word);
+void ui_hyphen_word_replace(Ed *ed, const UiHyphenWord *word, const wchar_t *replacement, int replacement_len);
+
 /* Additional helper functions */
 int charset_select(TeApp *app);
 

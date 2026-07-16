@@ -19,6 +19,7 @@
 #include "ui_editor_helper.h"
 #include "../core/utf8.h"
 #include "../components/editor.h"
+#include "../components/undo.h"
 #include "../spellchecker/spell.h"
 
 #ifdef HAVE_TRANSLATE
@@ -219,7 +220,10 @@ int ui_dict_picker(TeApp *app)
     const char *from_lang = NULL;
     const char *to_lang = NULL;
     wchar_t *replace_wcs = NULL;
+    char *joined = NULL;
     int replace_len;
+    int hyphen_split = 0;
+    UiHyphenWord hyphen_word;
     char title[160];
 
     if (!app)
@@ -283,6 +287,19 @@ int ui_dict_picker(TeApp *app)
     {
         te_status(app, "Word encoding failed");
         return 1;
+    }
+
+    if (ui_hyphen_word_find(ed, &info, line, line_len, word_start, word_end, &hyphen_word))
+    {
+        joined = wcs_to_utf8(hyphen_word.joined, hyphen_word.joined_len);
+
+        if (joined)
+        {
+            free(word_buf);
+
+            word_buf = joined;
+            hyphen_split = 1;
+        }
     }
 
     /* Run the lookup */
@@ -377,7 +394,34 @@ int ui_dict_picker(TeApp *app)
 
         if (replace_wcs)
         {
-            if (ed->hard_wrap)
+            if (hyphen_split)
+            {
+                if (ed->hard_wrap)
+                {
+                    ed_auto_rewrap_capture_pre_snapshot(ed);
+
+                    ed->undo_snapshot_mode = 1;
+
+                    ui_hyphen_word_replace(ed, &hyphen_word, replace_wcs, replace_len);
+                    ed_auto_rewrap_after_edit(app);
+                }
+                else
+                {
+                    undo_abort(ed);
+
+                    if (undo_begin(ed, hyphen_word.first_row, 2) == 0)
+                    {
+                        ed->undo_snapshot_mode = 1;
+
+                        ui_hyphen_word_replace(ed, &hyphen_word, replace_wcs, replace_len);
+
+                        ed->undo_snapshot_mode = 0;
+                        undo_commit(ed, 1);
+                        ed_save_undo(ed);
+                    }
+                }
+            }
+            else if (ed->hard_wrap)
             {
                 /* Capture paragraph, replace silently, reflow commits */
                 ed_auto_rewrap_capture_pre_snapshot(ed);

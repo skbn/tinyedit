@@ -223,7 +223,7 @@ static int grab_source_text(TeApp *app, char **out_text, int *out_row_first, int
             used += (size_t)ll;
         }
 
-        if (row < last)
+        if (row < last && ed_line_break(ed, row) != LB_HYPHEN && ed_line_break(ed, row) != LB_WORD)
             joined[used++] = L' ';
     }
 

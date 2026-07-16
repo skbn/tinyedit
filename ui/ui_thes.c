@@ -464,9 +464,6 @@ int ui_thes_lookup_word(UI_APP_T *app)
             {
                 if (is_hyphen_split)
                 {
-                    int del_count;
-
-                    /* Hard commits via the reflow, soft is one delta */
                     if (ed->hard_wrap)
                         ed_auto_rewrap_capture_pre_snapshot(ed);
                     else
@@ -476,35 +473,28 @@ int ui_thes_lookup_word(UI_APP_T *app)
                     }
 
                     ed->undo_snapshot_mode = 1;
+                    ed_set_pos(ed, hs.second_row, hs.second_start);
 
-                    /* Remove first half (including the hyphen) on the first row */
+                    for (i = hs.second_start; i < hs.second_end; i++)
+                        ed_delete(ed);
+
                     ed_set_pos(ed, hs.first_row, hs.first_start);
-                    del_count = (hs.first_end + 1) - hs.first_start;
 
-                    for (i = 0; i < del_count; i++)
+                    for (i = hs.first_start; i < hs.first_end; i++)
                         ed_delete(ed);
 
                     for (i = 0; i < wlen; i++)
                         ed_insert_char(ed, wsyn[i]);
 
-                    /* Remove the second half on the following row */
-                    ed_set_pos(ed, hs.second_row, hs.second_start);
-
-                    del_count = hs.second_end - hs.second_start;
-
-                    for (i = 0; i < del_count; i++)
-                        ed_delete(ed);
+                    ed_set_pos(ed, hs.first_row, hs.first_start + wlen);
+                    ed_delete(ed);
 
                     if (ed->hard_wrap)
-                    {
-                        /* The reflow commits the paragraph delta */
                         ed_auto_rewrap_after_edit(app);
-                    }
                     else
                     {
                         ed->undo_snapshot_mode = 0;
-
-                        undo_commit(ed, 2);
+                        undo_commit(ed, 1);
                         ed_save_undo(ed);
                     }
                 }
