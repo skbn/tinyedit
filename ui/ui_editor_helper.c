@@ -278,6 +278,50 @@ int ui_justify_offsets(const wchar_t *seg, int seg_len, int cur_vw, int target_v
     return 1;
 }
 
+/* Paint wl[c_start, c_end) on screen_y using the base coordinate map and optional per-char offsets */
+void ui_paint_shifted_range(int screen_y, int col_offset, const wchar_t *wl, int seg_start, int seg_end, int seg_start_vcol, int tab_width, const int *offsets, int c_start, int c_end, unsigned int attr)
+{
+    int c;
+
+    if (!wl || seg_end <= seg_start)
+        return;
+
+    if (c_start < seg_start)
+        c_start = seg_start;
+
+    if (c_end > seg_end)
+        c_end = seg_end;
+
+    if (c_start >= c_end)
+        return;
+
+    if (attr)
+        attron(attr);
+
+    for (c = c_start; c < c_end; c++)
+    {
+        int rel = c - seg_start;
+        int nat = wcs_vwidth_ex(&wl[seg_start], rel, seg_start_vcol, tab_width);
+        int x = col_offset + nat + (offsets ? offsets[rel] : 0);
+
+        if (wl[c] == L'\t')
+        {
+            int stop = tab_width - ((nat + seg_start_vcol) % tab_width);
+            int j;
+
+            for (j = 0; j < stop; j++)
+                mvaddch(screen_y, x + j, ' ');
+        }
+        else
+        {
+            mvaddnwstr(screen_y, x, &wl[c], 1);
+        }
+    }
+
+    if (attr)
+        attroff(attr);
+}
+
 /* Repaint bold/underline runs over an already-drawn segment [seg_start, seg_end) */
 void ui_draw_wcs_attr_runs(int y, int x, const wchar_t *l, const EdLine *ln, int seg_start, int seg_end, int seg_start_vcol, int tab_width)
 {

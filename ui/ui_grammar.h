@@ -51,6 +51,9 @@ void ui_grammar_draw_row(TeApp *app, int screen_y, int col_offset, int tab_width
 /* Soft-wrap variant: draw only issues intersecting sub-row segment [seg_start, seg_end) of logical line, visual column of seg_start within sub-row is seg_start_vcol (0 for first sub-row, non-zero if tab stop mid-line), grammar check runs on FULL line, cache-friendly across sub-rows */
 void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int seg_start, int seg_end, int seg_start_vcol, int line_idx);
 
+/* Same but with an optional justify offsets array, offsets[i] gives extra columns before char seg_start+i */
+void ui_grammar_draw_row_segment_ex(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int seg_start, int seg_end, int seg_start_vcol, int line_idx, const int *offsets);
+
 /* Prewarm LRU cache for lines just outside viewport, call once after visible-row render loop completes, top = first visible line index, body_rows = number of visible rows, line_count = total logical lines in buffer, does nothing if grammar checker inactive */
 void ui_grammar_prewarm(TeApp *app, int top, int body_rows, int line_count);
 
@@ -74,6 +77,7 @@ int ui_grammar_color_for_severity(unsigned char sev);
 #define ui_grammar_check_row(app, wl, len, idx, out, cap) (0)
 #define ui_grammar_draw_row(app, y, x, tw, wl, len, idx) ((void)0)
 #define ui_grammar_draw_row_segment(app, y, x, tw, wl, len, s, e, v, idx) ((void)0)
+#define ui_grammar_draw_row_segment_ex(app, y, x, tw, wl, len, s, e, v, idx, off) ((void)0)
 #define ui_grammar_prewarm(app, t, b, c) ((void)0)
 #define ui_grammar_invalidate_row(app, wl, len) ((void)0)
 #define ui_grammar_flush(app) ((void)0)

@@ -90,6 +90,18 @@ typedef struct
     int b_c2;
 } PaintCtx;
 
+/* Sub-row coordinate map shared by overlays: base screen x, segment bounds, tab width and optional justification offsets */
+typedef struct
+{
+    int base_x;
+    int seg_start;
+    int seg_end;
+    int seg_start_vcol;
+    int tab_width;
+    const int *just_offsets;
+    int just_total_shift;
+} SegLayout;
+
 /* Whitespace marker glyphs (hex escapes keep this C89-valid) */
 static const wchar_t s_ws_arrow[2] = {0x2192, 0}; /* Rightwards arrow */
 static const wchar_t s_ws_dot[2] = {0xB7, 0};     /* Middle dot */
@@ -860,6 +872,29 @@ static void find_bracket_match(TeApp *app, const EdInfo *info, int *out_row, int
     }
 }
 
+/* Screen column of the character at seg_start + i, respects tabs, alignment indent and justification */
+static int seg_x_at(const SegLayout *sl, const wchar_t *l, int i)
+{
+    return sl->base_x + wcs_vwidth_ex(&l[sl->seg_start], i, sl->seg_start_vcol, sl->tab_width) + (sl->just_offsets ? sl->just_offsets[i] : 0);
+}
+
+/* Screen column where the drawn text of this seg ends, this is where fills, hyphen and wrap markers anchor */
+static int seg_x_end(const SegLayout *sl, const wchar_t *l)
+{
+    int seg_len = sl->seg_end - sl->seg_start;
+
+    if (seg_len <= 0)
+        return sl->base_x;
+
+    return sl->base_x + wcs_vwidth_ex(&l[sl->seg_start], seg_len, sl->seg_start_vcol, sl->tab_width) + sl->just_total_shift;
+}
+
+/* Paint [c_start, c_end) cell by cell with the given attribute, handling tabs and per-char justify shifts */
+static void seg_paint_range(const SegLayout *sl, int screen_y, const wchar_t *l, int c_start, int c_end, unsigned int attr)
+{
+    ui_paint_shifted_range(screen_y, sl->base_x, l, sl->seg_start, sl->seg_end, sl->seg_start_vcol, sl->tab_width, sl->just_offsets, c_start, c_end, attr);
+}
+
 /* Paint one sub-row of a logical line: text, syntax, rich attrs and every overlay */
 static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int seg_start, int seg_end, int sr, int first_painted, int *first_seg, SyntaxClass *line_classes)
 {
@@ -893,8 +928,14 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     /* Justify offsets, filled when the sub-row is not the last of the paragraph */
     int just_offsets[4096];
     const int *just_ptr = NULL;
+    int just_total_shift = 0;
     unsigned char cur_align;
+    unsigned char cur_brk;
     int is_para_last;
+    int hyph_reserve;
+
+    /* Single source of truth for every overlay in this sub-row */
+    SegLayout sl;
 
     ed_get_info(ed, &info);
 
@@ -902,20 +943,38 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
         seg_len = 0;
 
     cur_align = l ? ed->lines[li]->para_align : 0;
+    cur_brk = l ? ed->lines[li]->brk : LB_PARA;
 
     align_ind = line_align_indent(cur_align, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width);
     eff_ln_offset = ln_offset + align_ind;
 
     /* Justify only intermediate sub-rows of a paragraph, the last one keeps its natural width */
-    is_para_last = (seg_end == len) && (ed->lines[li]->brk == LB_PARA);
+    is_para_last = (seg_end == len) && (cur_brk == LB_PARA);
+
+    /* When the tail of this EdLine breaks with a hyphen the glyph goes into the last column */
+    hyph_reserve = (seg_end == len && cur_brk == LB_HYPHEN) ? 1 : 0;
 
     if (cur_align == EA_ALIGN_JUST && !is_para_last && seg_len > 0 && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
     {
         int text_vw_now = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width);
+        int target_vw = width - hyph_reserve;
 
-        if (ui_justify_offsets(&l[seg_start], seg_len, text_vw_now, width, just_offsets))
+        if (target_vw > text_vw_now && ui_justify_offsets(&l[seg_start], seg_len, text_vw_now, target_vw, just_offsets))
+        {
             just_ptr = just_offsets;
+            just_total_shift = target_vw - text_vw_now;
+        }
     }
+
+    sl.base_x = offset_x + eff_ln_offset;
+    sl.seg_start = seg_start;
+    sl.seg_end = seg_end;
+    sl.seg_start_vcol = seg_start_vcol;
+    sl.tab_width = s_tab_width;
+    sl.just_offsets = just_ptr;
+    sl.just_total_shift = just_total_shift;
+
+    /* Trailing hyphen is drawn after the base draw; its slot was reserved when justifying */
 
     /* Line number on first painted sub-row */
     if (show_lnum && *first_seg)
@@ -959,7 +1018,7 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
         for (k = 0; k < seg_len; k++)
         {
             wchar_t ch = l[seg_start + k];
-            int col_x = offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], k, seg_start_vcol, s_tab_width);
+            int col_x = seg_x_at(&sl, l, k);
 
             if (ch == L'\t')
             {
@@ -988,7 +1047,7 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     if (app->cfg.show_brackets && seg_len > 0 && app->bracket_match_row == li && app->bracket_match_col >= seg_start && app->bracket_match_col < seg_end)
     {
         int tc = app->bracket_match_col;
-        int col_x = offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], tc - seg_start, seg_start_vcol, s_tab_width);
+        int col_x = seg_x_at(&sl, l, tc - seg_start);
 
         attron(COLOR_PAIR(COL_BRACKET_MATCH) | A_BOLD);
         mvaddnwstr(offset_y + sr, col_x, &l[tc], 1);
@@ -1010,28 +1069,9 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
                 int match_col = app->search.cols[j];
                 int match_end = match_col + match_len;
 
-                if (match_col >= seg_start && match_end <= seg_end)
-                {
-                    attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], match_col - seg_start, seg_start_vcol, s_tab_width), &l[match_col], match_len);
-                    attroff(COLOR_PAIR(COL_SEARCH_MATCH));
-                }
-                else if (match_col >= seg_start && match_col < seg_end)
-                {
-                    int partial_len = seg_end - match_col;
-
-                    attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], match_col - seg_start, seg_start_vcol, s_tab_width), &l[match_col], partial_len);
-                    attroff(COLOR_PAIR(COL_SEARCH_MATCH));
-                }
-                else if (match_end > seg_start && match_end <= seg_end)
-                {
-                    int partial_len = match_end - seg_start;
-
-                    attron(COLOR_PAIR(COL_SEARCH_MATCH));
-                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset, &l[seg_start], partial_len);
-                    attroff(COLOR_PAIR(COL_SEARCH_MATCH));
-                }
+                /* Only touches this seg? Draw the intersection with the segment */
+                if (match_end > seg_start && match_col < seg_end)
+                    seg_paint_range(&sl, offset_y + sr, l, match_col, match_end, COLOR_PAIR(COL_SEARCH_MATCH));
             }
         }
         standend();
@@ -1070,20 +1110,15 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
                 /* Ignore single-character words */
                 if (spell_on && word_len > 1 && spell_word_incorrect(app, li, l, len, word_start, word_end))
                 {
-                    attron(COLOR_PAIR(COL_SPELL_CURRENT));
-                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], word_start - seg_start, seg_start_vcol, s_tab_width), &l[word_start], word_len);
-                    attroff(COLOR_PAIR(COL_SPELL_CURRENT));
-
+                    seg_paint_range(&sl, offset_y + sr, l, word_start, word_end, COLOR_PAIR(COL_SPELL_CURRENT));
                     marked = 1;
                 }
 
                 /* Repeated-word check (independent of spell) Highlight if previous word on same line is the same */
                 if (!marked && app->cfg.assist_repeat_check && ui_assist_check_repeat(app, li, word_start, word_len))
-                {
-                    attron(A_REVERSE);
-                    mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], word_start - seg_start, seg_start_vcol, s_tab_width), &l[word_start], word_len);
-                    attroff(A_REVERSE);
-                }
+                    seg_paint_range(&sl, offset_y + sr, l, word_start, word_end, A_REVERSE);
+
+                (void)word_len;
             }
 
             word_start = word_end;
@@ -1094,7 +1129,7 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
 #ifdef HAVE_GRAMMAR
     /* Grammar overlay for this sub-row segment, runs once per logical line (LRU cache absorbs subsequent sub-rows) */
     if (app->grammar_active && app->grammar_handle && l && len > 0 && seg_start < seg_end)
-        ui_grammar_draw_row_segment(app, offset_y + sr, offset_x + eff_ln_offset, s_tab_width, l, len, seg_start, seg_end, seg_start_vcol, li);
+        ui_grammar_draw_row_segment_ex(app, offset_y + sr, offset_x + eff_ln_offset, s_tab_width, l, len, seg_start, seg_end, seg_start_vcol, li, just_ptr);
 
 #endif
 
@@ -1114,14 +1149,12 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
 
         if (hs < he)
         {
-            attron(A_REVERSE);
-            mvaddnwstr(offset_y + sr, offset_x + eff_ln_offset + wcs_vwidth_ex(&l[seg_start], hs - seg_start, seg_start_vcol, s_tab_width), &l[hs], he - hs);
-            attroff(A_REVERSE);
+            seg_paint_range(&sl, offset_y + sr, l, hs, he, A_REVERSE);
         }
         else if (hs == seg_start && he == seg_start)
         {
             attron(A_REVERSE);
-            mvaddch(offset_y + sr, offset_x + eff_ln_offset, ' ');
+            mvaddch(offset_y + sr, sl.base_x, ' ');
             attroff(A_REVERSE);
         }
     }
@@ -1129,7 +1162,7 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     standend();
 
     /* Visual overlays using colour-pairs */
-    text_vw = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width);
+    text_vw = seg_x_end(&sl, l) - sl.base_x;
     x_text_end = offset_x + eff_ln_offset + text_vw;
     x_screen_end = offset_x + ln_offset + width;
     has_more_subrows = (seg_end < len);
@@ -1226,6 +1259,21 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
             }
 
             attroff(COLOR_PAIR(COL_GUIDE));
+        }
+    }
+
+    /* Wrap hyphen glyph, drawn once for the last sub-row; justify pass reserved its column via hyph_reserve */
+    if (seg_end == len && cur_brk == LB_HYPHEN)
+    {
+        int hx = seg_x_end(&sl, l);
+        int left = offset_x + ln_offset;
+        int right = left + width;
+
+        if (hx >= left && hx < right)
+        {
+            attron(COLOR_PAIR(COL_NORMAL));
+            mvaddwstr(offset_y + sr, hx, L"-");
+            standend();
         }
     }
 }
@@ -1510,24 +1558,8 @@ void ui_editor_draw_body(TeApp *app)
                 }
             }
 
-            /* One segment covering the whole line, so no wrap indicator */
+            /* One segment covering the whole line */
             paint_segment(&pc, line_idx, wl ? wl : L"", line_len, 0, line_len, i, 1, &first_seg, line_classes);
-
-            /* Wrap hyphen follows the alignment indent of the text */
-            if (ed_line_break(ed, line_idx) == LB_HYPHEN)
-            {
-                int text_vw = wcs_vwidth_ex(wl ? wl : L"", line_len, 0, ed_get_tab_width());
-                int align_ind = line_align_indent(ed->lines[line_idx]->para_align, text_vw, pc.width);
-                int hx = pc.offset_x + pc.ln_offset + align_ind + text_vw;
-                int left = pc.offset_x + pc.ln_offset;
-                int right = left + pc.width;
-
-                if (hx >= left && hx < right)
-                {
-                    attron(COLOR_PAIR(COL_NORMAL));
-                    mvaddwstr(pc.offset_y + i, hx, L"-");
-                }
-            }
         }
     }
 
@@ -1599,7 +1631,7 @@ static void position_cursor(TeApp *app)
         vcol = soft_cursor_vcol(te_app_get_editor(app), width);
 
         cy = offset_y + screen_row;
-        cx = offset_x + ln_offset + vcol + soft_cursor_align_indent(te_app_get_editor(app), width);
+        cx = offset_x + ln_offset + vcol + soft_cursor_align_indent(te_app_get_editor(app), width) + view_cursor_justify_shift(te_app_get_editor(app), width);
 
         /* Clamp to body region */
         max_y = offset_y + body_rows - 1;
@@ -1640,6 +1672,9 @@ static void position_cursor(TeApp *app)
 
         /* Follow paragraph alignment so the cursor sits with the text */
         cx += line_align_indent(te_app_get_editor(app)->lines[info.row]->para_align, (wl && line_len > 0) ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0, width);
+
+        /* If the line is being visually justified, shift the cursor by the accumulated gap width */
+        cx += view_cursor_justify_shift(te_app_get_editor(app), width);
 
         if (cy >= LINES - 1)
             cy = LINES - 2;

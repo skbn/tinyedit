@@ -397,6 +397,63 @@ int view_cursor_align_indent(Ed *ed, int width)
     return view_align_indent(ed->lines[info.row]->para_align, seg_vw, width);
 }
 
+/* Extra columns to add to the cursor when its sub-row is being justified */
+int view_cursor_justify_shift(Ed *ed, int width)
+{
+    EdInfo info;
+    EdLine *ln = NULL;
+    const wchar_t *l = NULL;
+    int len;
+    int seg_start = 0;
+    int seg_end = 0;
+    int seg_len;
+    int seg_vw;
+    int offsets[4096];
+    int col_in_seg;
+
+    ed_get_info(ed, &info);
+
+    if (info.row < 0 || info.row >= ed->count)
+        return 0;
+
+    ln = ed->lines[info.row];
+
+    if (ln->para_align != EA_ALIGN_JUST)
+        return 0;
+
+    l = ed_line_wcs(ed, info.row);
+    len = ed_line_len(ed, info.row);
+
+    if (!l || len <= 0)
+        return 0;
+
+    view_subrow_range(l, len, width, view_subrow_of_col(l, len, width, info.col), &seg_start, &seg_end);
+
+    seg_len = seg_end - seg_start;
+
+    if (seg_len <= 0 || seg_len > (int)(sizeof(offsets) / sizeof(offsets[0])))
+        return 0;
+
+    /* The last sub-row of the paragraph keeps its natural width, no shift */
+    if (seg_end == len && ln->brk == LB_PARA)
+        return 0;
+
+    seg_vw = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab);
+
+    if (!ui_justify_offsets(&l[seg_start], seg_len, seg_vw, width, offsets))
+        return 0;
+
+    col_in_seg = info.col - seg_start;
+
+    if (col_in_seg < 0)
+        col_in_seg = 0;
+
+    if (col_in_seg >= seg_len)
+        col_in_seg = seg_len - 1;
+
+    return offsets[col_in_seg];
+}
+
 int view_cursor_screen_row(TeApp *app, int width)
 {
     Ed *ed = te_app_get_editor(app);

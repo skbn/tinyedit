@@ -22,8 +22,6 @@
 #include "../components/editor.h"
 #include "ui_editor_helper.h"
 
-/* ncurses is pulled in by te.h -> ncursesw shim, which gives us attron/attroff/COLOR_PAIR/mvaddnwstr and the COL_* macros */
-
 #ifndef UI_GRAM_MAX_UTF8
 #define UI_GRAM_MAX_UTF8 4096 /* max UTF-8 bytes for one line snapshot */
 #endif
@@ -306,6 +304,11 @@ void ui_grammar_draw_row(TeApp *app, int screen_y, int col_offset, int tab_width
 
 void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int seg_start, int seg_end, int seg_start_vcol, int line_idx)
 {
+    ui_grammar_draw_row_segment_ex(app, screen_y, col_offset, tab_width, wl, line_len, seg_start, seg_end, seg_start_vcol, line_idx, NULL);
+}
+
+void ui_grammar_draw_row_segment_ex(TeApp *app, int screen_y, int col_offset, int tab_width, const wchar_t *wl, int line_len, int seg_start, int seg_end, int seg_start_vcol, int line_idx, const int *offsets)
+{
     GcIssue gis[GC_MAX_ISSUES_PER_LINE];
     int gn, k;
     int wcs_off, wcs_end;
@@ -334,7 +337,6 @@ void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int t
     for (k = 0; k < gn; k++)
     {
         int cp_pair;
-        int vcol;
         int wlen;
         int clip_start, clip_end;
 
@@ -349,12 +351,11 @@ void ui_grammar_draw_row_segment(TeApp *app, int screen_y, int col_offset, int t
             continue;
 
         wlen = clip_end - clip_start;
-        vcol = wcs_vwidth_ex(&wl[seg_start], clip_start - seg_start, seg_start_vcol, tab_width);
         cp_pair = ui_grammar_color_for_severity(gis[k].severity);
 
-        attron(A_UNDERLINE | COLOR_PAIR(cp_pair));
-        mvaddnwstr(screen_y, col_offset + vcol, &wl[clip_start], wlen);
-        attroff(A_UNDERLINE | COLOR_PAIR(cp_pair));
+        ui_paint_shifted_range(screen_y, col_offset, wl, seg_start, seg_end, seg_start_vcol, tab_width, offsets, clip_start, clip_end, A_UNDERLINE | COLOR_PAIR(cp_pair));
+
+        (void)wlen;
     }
 }
 

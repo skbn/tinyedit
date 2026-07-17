@@ -129,4 +129,7 @@ void ui_draw_wcs_line_with_tabs_and_colors_ex(int y, int x, const wchar_t *s, in
 /* Compute per-char cumulative extra column offsets to justify seg to target_vw */
 int ui_justify_offsets(const wchar_t *seg, int seg_len, int cur_vw, int target_vw, int *offsets);
 
+/* Paint an overlay sub-row range, handling tabs and per-char justify shifts */
+void ui_paint_shifted_range(int screen_y, int col_offset, const wchar_t *wl, int seg_start, int seg_end, int seg_start_vcol, int tab_width, const int *offsets, int c_start, int c_end, unsigned int attr);
+
 #endif /* UI_EDITOR_HELPER_H */

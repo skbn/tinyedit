@@ -45,6 +45,9 @@ int view_vrows_between(Ed *ed, int width, int a_line, int a_sub, int b_line, int
 /* Cursor geometry */
 int view_cursor_vcol(Ed *ed, int width);
 int view_cursor_align_indent(Ed *ed, int width);
+
+/* Extra columns to shift the cursor by when its sub-row is being visually justified */
+int view_cursor_justify_shift(Ed *ed, int width);
 int view_cursor_screen_row(TeApp *app, int width);
 void view_ensure_visible(TeApp *app, int width, int body_rows);
 
