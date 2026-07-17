@@ -1271,20 +1271,7 @@ static int para_join_into(Ed *ed, int first, int last, int cur_row, int cur_col,
     {
         EdLine *ln = ed->lines[i];
         int len = ln->len;
-        int last_ch;
-        int stripped;
         int j;
-
-        /* Read chars from the packed line directly, no per-line wcs alloc */
-        last_ch = (len > 0) ? (int)ed_line_char(ln, len - 1) : 0;
-        stripped = 0;
-
-        /* A stored trailing hyphen is legacy layout from disk, drop it once */
-        if (ln->brk != LB_HYPHEN && len > 0 && last_ch == (int)L'-' && i < last)
-        {
-            len--;
-            stripped = 1;
-        }
 
         if (cur_row == i)
             *out_cursor = n + (cur_col < len ? cur_col : len);
@@ -1303,7 +1290,7 @@ static int para_join_into(Ed *ed, int first, int last, int cur_row, int cur_col,
         }
 
         /* Eaten space returns, breaks inside a word join with nothing */
-        if (i < last && ln->brk != LB_HYPHEN && ln->brk != LB_WORD && !stripped && n > 0)
+        if (i < last && ln->brk != LB_HYPHEN && ln->brk != LB_WORD && n > 0)
         {
             int prev = n - 1;
 
