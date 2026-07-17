@@ -682,6 +682,49 @@ void view_reset_viewport_to_cursor(TeApp *app, int width)
     view_reset_to_cursor(app, width);
 }
 
+/* Map a screen cell inside a sub-row segment to a char index, honouring justify shifts */
+static int hittest_seg(const wchar_t *l, int len, int seg_start, int seg_end, unsigned char brk, unsigned char para_align, int width, int screen_x)
+{
+    int seg_len = seg_end - seg_start;
+    int just_offsets[4096];
+    const int *offsets = NULL;
+    int is_para_last;
+    int hyph_reserve;
+    int acc;
+    int j;
+
+    if (seg_len <= 0)
+        return seg_start;
+
+    /* Same rule as paint_segment: justify only intermediate sub-rows of a paragraph */
+    is_para_last = (seg_end == len) && (brk == LB_PARA);
+    hyph_reserve = (seg_end == len && brk == LB_HYPHEN) ? 1 : 0;
+
+    if (para_align == EA_ALIGN_JUST && !is_para_last && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
+    {
+        int text_vw_now = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab);
+        int target_vw = width - hyph_reserve;
+
+        if (target_vw > text_vw_now && ui_justify_offsets(&l[seg_start], seg_len, text_vw_now, target_vw, just_offsets))
+            offsets = just_offsets;
+    }
+
+    acc = 0;
+
+    for (j = 0; j < seg_len; j++)
+    {
+        int cw = wcs_vwidth_ex(&l[seg_start + j], 1, acc, s_tab);
+        int shift = offsets ? offsets[j] : 0;
+
+        if (acc + shift + cw > screen_x)
+            break;
+
+        acc += cw;
+    }
+
+    return seg_start + j;
+}
+
 /* Map a screen cell to a buffer position, both wrap modes */
 int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_x, int *out_line, int *out_col)
 {
@@ -693,8 +736,6 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
     int sub;
     int left;
     int soft;
-    int j;
-    int acc;
     int indent;
 
     if (!app || !out_line || !out_col)
@@ -751,20 +792,8 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
         if (screen_x < 0)
             screen_x = 0;
 
-        acc = 0;
-
-        for (j = 0; j < len; j++)
-        {
-            int cw = wcs_vwidth_ex(&l[j], 1, acc, s_tab);
-
-            if (acc + cw > screen_x)
-                break;
-
-            acc += cw;
-        }
-
         *out_line = line;
-        *out_col = j;
+        *out_col = hittest_seg(l ? l : L"", len, 0, len, ed->lines[line]->brk, ed->lines[line]->para_align, width, screen_x);
 
         return 0;
     }
@@ -796,20 +825,8 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
             if (screen_x < 0)
                 screen_x = 0;
 
-            acc = 0;
-
-            for (j = seg_start; j < seg_end; j++)
-            {
-                int cw = wcs_vwidth_ex(&l[j], 1, acc, s_tab);
-
-                if (acc + cw > screen_x)
-                    break;
-
-                acc += cw;
-            }
-
             *out_line = line;
-            *out_col = j;
+            *out_col = hittest_seg(l ? l : L"", len, seg_start, seg_end, ed->lines[line]->brk, ed->lines[line]->para_align, width, screen_x);
 
             return 0;
         }
