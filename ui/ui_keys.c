@@ -1018,17 +1018,17 @@ int handle_control_keys(TeApp *app, int ch, int is_key)
             return 1;
         }
 
-        if (app->hard_wrap)
-        {
-            app->hyph_wrap_enabled = !app->hyph_wrap_enabled;
-            te_status(app, "Hyphen wrap %s", app->hyph_wrap_enabled ? "ON" : "OFF");
+        /*if (app->hard_wrap)
+        {*/
+        app->hyph_wrap_enabled = !app->hyph_wrap_enabled;
+        te_status(app, "Hyphen wrap %s", app->hyph_wrap_enabled ? "ON" : "OFF");
 
-            ed_auto_rewrap_after_edit(app);
-        }
+        ed_auto_rewrap_after_edit(app);
+        /*}
         else
         {
             te_status(app, "Hyphen wrap requires hard-wrap mode");
-        }
+        }*/
 
         return 1;
     }
