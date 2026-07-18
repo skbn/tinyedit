@@ -77,7 +77,7 @@ CORE_OBJS = $(OBJDIR)/utf8.o $(OBJDIR)/charset.o \
             $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
             $(OBJDIR)/search.o $(OBJDIR)/portable.o $(OBJDIR)/ncursesw_win32.o \
             $(OBJDIR)/te_rastport_win32.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
 UI_OBJS   = $(OBJDIR)/te_app.o \
             $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_editor.o \
@@ -522,6 +522,9 @@ $(OBJDIR)/fmt_rtf.o: $(COMPDIR)/fmt_rtf.c $(COMPDIR)/fmt_rtf.h $(COMPDIR)/ed_att
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c $(COMPDIR)/fmt_pdf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)

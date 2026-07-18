@@ -1450,6 +1450,19 @@ int ui_files_is_wp4(const char *path)
     return n > 3 && strcasecmp(path + n - 3, ".wp") == 0;
 }
 
+/* PDF is export-only: we save by extension but never open it back */
+int ui_files_is_pdf(const char *path)
+{
+    size_t n;
+
+    if (!path)
+        return 0;
+
+    n = strlen(path);
+
+    return n > 4 && strcasecmp(path + n - 4, ".pdf") == 0;
+}
+
 int ui_files_open_path(TeApp *app, const char *path)
 {
     FILE *fp = NULL;
@@ -1549,10 +1562,6 @@ int ui_files_open_path(TeApp *app, const char *path)
         ed_clear_undo_redo(te_app_get_editor(app));
 
         rc = wp4_import(te_app_get_editor(app), fp, app->charset_in, err, sizeof(err), warn, sizeof(warn));
-
-        /* WP is a paragraph format: join the wraps, hard mode reflows them */
-        if (rc == 0)
-            ed_join_breaks(te_app_get_editor(app));
 
         fclose(fp);
 

@@ -22,6 +22,11 @@
 #include "../core/utf8.h"
 #include "../core/charset.h"
 
+/* WP 4.2 default margin settings (from WP 4.2 format documentation and Amiga WP 4.2 files) */
+#define WP4_DEFAULT_LEFT_MARGIN 10
+#define WP4_DEFAULT_RIGHT_MARGIN 75
+#define WP4_CENTER_COL ((WP4_DEFAULT_LEFT_MARGIN + WP4_DEFAULT_RIGHT_MARGIN) / 2)
+
 /* One recorded styled run, document-wide */
 struct wp4_run
 {
@@ -636,7 +641,7 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
     return ok ? 0 : -1;
 }
 
-/* Emit style toggles between two masks */
+/* Emit style toggles between two masks - order matches Amiga WP 4.2: Bold, Italic, Underline */
 static int wp4_toggles(FILE *fp, unsigned short cur, unsigned short want)
 {
     if ((want & EA_BOLD) != (cur & EA_BOLD))
@@ -645,15 +650,15 @@ static int wp4_toggles(FILE *fp, unsigned short cur, unsigned short want)
             return -1;
     }
 
-    if ((want & EA_UNDERLINE) != (cur & EA_UNDERLINE))
-    {
-        if (fputc(want & EA_UNDERLINE ? 0x94 : 0x95, fp) == EOF)
-            return -1;
-    }
-
     if ((want & EA_ITALIC) != (cur & EA_ITALIC))
     {
         if (fputc(want & EA_ITALIC ? 0xB2 : 0xB3, fp) == EOF)
+            return -1;
+    }
+
+    if ((want & EA_UNDERLINE) != (cur & EA_UNDERLINE))
+    {
+        if (fputc(want & EA_UNDERLINE ? 0x94 : 0x95, fp) == EOF)
             return -1;
     }
 
@@ -705,12 +710,14 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
         }
         else if (align == EA_ALIGN_CENTER)
         {
-            if (fputc(0xC3, fp) == EOF || fputc(0x00, fp) == EOF || fputc(0x00, fp) == EOF || fputc(0x00, fp) == EOF || fputc(0xC3, fp) == EOF)
+            /* <C3><type><center col><start col><C3> - type=0, center col=42, start col=left margin */
+            if (fputc(0xC3, fp) == EOF || fputc(0x00, fp) == EOF || fputc(WP4_CENTER_COL, fp) == EOF || fputc(WP4_DEFAULT_LEFT_MARGIN, fp) == EOF || fputc(0xC3, fp) == EOF)
                 return -1;
         }
         else if (align == EA_ALIGN_RIGHT)
         {
-            if (fputc(0xC4, fp) == EOF || fputc(0x0C, fp) == EOF || fputc(0x4A, fp) == EOF || fputc(0x00, fp) == EOF || fputc(0xC4, fp) == EOF)
+            /* <C4><align char><align col><start col><C4> - 0x0A hard new line, align col=75, start col=left margin */
+            if (fputc(0xC4, fp) == EOF || fputc(0x0A, fp) == EOF || fputc(WP4_DEFAULT_RIGHT_MARGIN, fp) == EOF || fputc(WP4_DEFAULT_LEFT_MARGIN, fp) == EOF || fputc(0xC4, fp) == EOF)
                 return -1;
         }
 

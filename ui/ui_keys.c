@@ -29,6 +29,7 @@
 #include "ui_files.h"
 #include "../components/fmt_rtf.h"
 #include "../components/fmt_wp4.h"
+#include "../components/fmt_pdf.h"
 #include "ui_editor_helper.h"
 #include "ui_view.h"
 #include "ui_keys.h"
@@ -348,6 +349,34 @@ int do_save(TeApp *app)
 
         if (wwarn[0])
             te_status(app, "Saved: %s (%s)", te_app_get_filename(app), wwarn);
+    }
+    else if (ui_files_is_pdf(te_app_get_filename(app)))
+    {
+        /* PDF export: no round-trip charset handled inside pdf_export */
+        FILE *fp = NULL;
+        char perr[128];
+        char pwarn[128];
+        int rc = -1;
+
+        perr[0] = '\0';
+        pwarn[0] = '\0';
+
+        fp = fopen(te_app_get_filename(app), "wb");
+
+        if (fp)
+        {
+            rc = pdf_export(te_app_get_editor(app), fp, &app->cfg, perr, sizeof(perr), pwarn, sizeof(pwarn));
+            fclose(fp);
+        }
+
+        if (rc != 0)
+        {
+            te_status(app, "PDF error: %s", perr[0] ? perr : "cannot write");
+            return -1;
+        }
+
+        if (pwarn[0])
+            te_status(app, "Saved: %s (%s)", te_app_get_filename(app), pwarn);
     }
     else if (ed_save_to_file(te_app_get_editor(app), te_app_get_filename(app), app->charset_out) != 0)
     {

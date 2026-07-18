@@ -26,6 +26,7 @@ int ui_files_save(const char *title, const char *start_dir, const char *init_nam
 int ui_files_open(TeApp *app);
 int ui_files_is_rtf(const char *path);
 int ui_files_is_wp4(const char *path);
+int ui_files_is_pdf(const char *path);
 int ui_files_open_path(TeApp *app, const char *path);
 
 #endif /* UI_FILES_H */

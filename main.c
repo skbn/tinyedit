@@ -45,6 +45,7 @@ extern int amiga_add_ttf_fallback(const char *path, int size);
 #include "components/fmt_rtf.h"
 #include "components/fmt_wp4.h"
 #include "ui/ui_editor_helper.h"
+#include "ui/ui_view.h"
 #include "core/charset.h"
 #include "components/config.h"
 #include "core/clipboard.h"
@@ -240,6 +241,7 @@ int main(int argc, char **argv)
     keypad(stdscr, TRUE);
 
     set_tabsize(cfg.tab_width > 0 ? cfg.tab_width : 4);
+    view_set_tab_width(cfg.tab_width > 0 ? cfg.tab_width : 4);
 
 #if !defined(PLATFORM_AMIGA) && !defined(PLATFORM_WIN32)
     /* Enable mouse if configured */
@@ -560,10 +562,6 @@ int main(int argc, char **argv)
                         ed_clear_undo_redo(tab->editor);
 
                         rc = wp4_import(tab->editor, fp, app->charset_in, werr, sizeof(werr), wwarn, sizeof(wwarn));
-
-                        /* Paragraph format: join the wraps, hard mode reflows them */
-                        if (rc == 0)
-                            ed_join_breaks(tab->editor);
 
                         fclose(fp);
 

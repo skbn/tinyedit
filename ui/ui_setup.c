@@ -1647,6 +1647,11 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
                 continue;
             }
 
+            *cfg = work;
+
+            view_set_tab_width(cfg->tab_width > 0 ? cfg->tab_width : 4);
+            ed_set_tab_width(view_tab_width());
+
 #ifdef HAVE_TTF_TAB
             /* Detect changes that require a font backend reload or window restart */
             font_mode_changed = (cfg->ttf_enabled != work.ttf_enabled) || (strcmp(cfg->font, work.font) != 0) || (cfg->ttf_size != work.ttf_size);
