@@ -309,7 +309,10 @@ static int wp4_par_brk(struct wp4_ctx *c, unsigned char brk)
     c->col = 0;
     c->run_start = 0;
     c->run_mask = c->mask;
-    c->para_align = EA_ALIGN_LEFT;
+
+    /* Alignment is a paragraph attribute; only a hard break clears it so a soft-wrapped line stays inside the same alignment run */
+    if (brk == LB_PARA)
+        c->para_align = EA_ALIGN_LEFT;
 
     return 0;
 }
@@ -434,11 +437,14 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
             ok = (wp4_style_edge(&c) == 0);
             break;
 
-        case 0x81: /* Full justification */
+        case 0x81: /* Full justification (WP 4.2 DOS spec) */
             c.para_align = EA_ALIGN_JUST;
             break;
         case 0x82: /* Left justification */
             c.para_align = EA_ALIGN_LEFT;
+            break;
+        case 0x86: /* Full justification (WP 4.1 Amiga variant of 0x81) */
+            c.para_align = EA_ALIGN_JUST;
             break;
 
         case 0xC3: /* Center the following text: <C3><type><center col><start col><C3> */
@@ -703,12 +709,14 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
                 return -1;
         }
 
-        if (align == EA_ALIGN_JUST)
+        if (prev_align != EA_ALIGN_JUST && align == EA_ALIGN_JUST)
         {
-            if (fputc(0x81, fp) == EOF)
+            /* 0x86 is the WP 4.1 Amiga justify-on marker, emitted at the transition only, matching how real WP 4.1 files are laid out */
+            if (fputc(0x86, fp) == EOF)
                 return -1;
         }
-        else if (align == EA_ALIGN_CENTER)
+
+        if (align == EA_ALIGN_CENTER)
         {
             /* <C3><type><center col><start col><C3> - type=0, center col=42, start col=left margin */
             if (fputc(0xC3, fp) == EOF || fputc(0x00, fp) == EOF || fputc(WP4_CENTER_COL, fp) == EOF || fputc(WP4_DEFAULT_LEFT_MARGIN, fp) == EOF || fputc(0xC3, fp) == EOF)
