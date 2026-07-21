@@ -112,10 +112,7 @@ static void setup_font_start_dir(char *out, int out_sz)
 #endif
 }
 
-/* Tabs: TTF tab exists on Amiga and on Win32 */
-#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
 #define HAVE_TTF_TAB 1
-#endif
 
 #if defined(HAVE_HUNSPELL) || defined(HAVE_GRAMMAR)
 #define HAVE_SPELL_TAB 1
@@ -250,7 +247,7 @@ static const SetupField st_fields[] =
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "Font", FT_STR, F_OFF(font), TE_CFG_STR_MAX},
 #endif
-#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
+#ifdef HAVE_TTF_TAB
         {1, "TTF Enabled", FT_BOOL, F_OFF(ttf_enabled), 0},
         {1, "TTF Font", FT_STR, F_OFF(ttf_font), TE_CFG_STR_MAX},
         {1, "TTF Size", FT_INT, F_OFF(ttf_size), 0},
@@ -1628,7 +1625,7 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 
         if (key == KEY_F(10) || key == 'S' || key == 's')
         {
-#ifdef HAVE_TTF_TAB
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
             int fi;
             int fallbacks_changed = 0;
             int ttf_details_changed = 0;
@@ -1652,7 +1649,7 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
             view_set_tab_width(cfg->tab_width > 0 ? cfg->tab_width : 4);
             ed_set_tab_width(view_tab_width());
 
-#ifdef HAVE_TTF_TAB
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
             /* Detect changes that require a font backend reload or window restart */
             font_mode_changed = (cfg->ttf_enabled != work.ttf_enabled) || (strcmp(cfg->font, work.font) != 0) || (cfg->ttf_size != work.ttf_size);
 
