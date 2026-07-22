@@ -25,6 +25,7 @@ USE_GRAMMAR ?= 0
 USE_TRANSLATE ?= 0
 USE_STARDICT ?= 0
 USE_TTS ?= 0
+USE_IPP ?= 0
 
 # Detect OS and warn if BSD make is used instead of gmake
 OS := $(shell uname -s)
@@ -43,7 +44,7 @@ CXXFLAGS += -I$(HERE).. -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui 
 AR = ar
 
 # Platform define
-CDEFS = -DPLATFORM_UNIX
+CDEFS = -DPLATFORM_UNIX -DTE_HAVE_ZLIB
 ifneq ($(BSD_OS),)
   CDEFS += -DPLATFORM_BSD
 endif
@@ -157,19 +158,38 @@ ifeq ($(USE_GRAMMAR),1)
                  $(OBJDIR)/ui_grammar.o
 endif
 
-# Translator support (HTTP backends via libcurl on Unix/Windows, external curl on Amiga)
+# HTTP client layer (used by translate and by IPP printing).
+# Backends: libcurl on Unix/Windows, bsdsocket + AmiSSL on Amiga.
+# Activated whenever either USE_TRANSLATE=1 or USE_IPP=1
+USE_IPP ?= 1
+
+ifeq ($(USE_IPP),1)
+  CFLAGS += -DHAVE_IPP
+  CDEFS += -DHAVE_IPP
+endif
+
+ifneq (,$(filter 1,$(USE_TRANSLATE) $(USE_IPP)))
+  CFLAGS += -DHAVE_HTTP
+  CDEFS += -DHAVE_HTTP
+  HTTP_OBJS = $(OBJDIR)/http_client.o
+  # Use pkg-config for libcurl on Unix (multi-platform detection)
+  HTTP_CFLAGS = $(shell pkg-config --cflags libcurl 2>/dev/null)
+  HTTP_LIB = $(shell pkg-config --libs libcurl 2>/dev/null)
+  ifeq ($(HTTP_LIB),)
+    HTTP_LIB = -lcurl
+  endif
+  CFLAGS += $(HTTP_CFLAGS)
+endif
+
+ifeq ($(USE_IPP),1)
+  IPP_OBJS = $(OBJDIR)/ipp.o
+endif
+
+# Translator support (uses the HTTP client above)
 ifeq ($(USE_TRANSLATE),1)
   CFLAGS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP -I$(HERE)translate
   CDEFS += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
-  TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
-  # Use pkg-config for libcurl on Unix (multi-platform detection)
-  TRANSLATE_CFLAGS = $(shell pkg-config --cflags libcurl 2>/dev/null)
-  TRANSLATE_LIB = $(shell pkg-config --libs libcurl 2>/dev/null)
-  # Fallback to -lcurl if pkg-config fails
-  ifeq ($(TRANSLATE_LIB),)
-    TRANSLATE_LIB = -lcurl
-  endif
-  CFLAGS += $(TRANSLATE_CFLAGS)
+  TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/json_utils.o
 
   # StarDict offline backend (pure C, no extra library)
   ifeq ($(USE_STARDICT),1)
@@ -178,6 +198,9 @@ ifeq ($(USE_TRANSLATE),1)
     TRANSLATE_OBJS += $(OBJDIR)/translate_stardict.o
   endif
 endif
+
+# Backward-compatible alias for the link step
+TRANSLATE_LIB = $(HTTP_LIB)
 
 # Text-To-Speech support. Zero build-time dependency: the module spawns
 # espeak-ng (or espeak, or macOS `say`, or festival) as a subprocess.
@@ -211,10 +234,10 @@ UIDIR = $(HERE)ui
 # Object files in objs/
 CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
             $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/portable.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/print.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_view.o $(OBJDIR)/ui_keys.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
-            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o $(OBJDIR)/ui_assist.o \
+            $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o $(OBJDIR)/ui_assist.o $(OBJDIR)/ui_print.o \
             $(OBJDIR)/ui_syntax.o
 
 # spell_utils.o is always needed (te_is_word_char used by ui_mouse.c)
@@ -240,7 +263,7 @@ endif
 ifeq ($(USE_TTS),1)
 UI_OBJS   += $(OBJDIR)/ui_tts.o
 endif
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPH_OBJS) $(THES_OBJS) $(GRAMMAR_OBJS) $(TRANSLATE_OBJS) $(TTS_OBJS)
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_UTILS_OBJS) $(SPELL_OBJS) $(HYPH_OBJS) $(THES_OBJS) $(GRAMMAR_OBJS) $(HTTP_OBJS) $(TRANSLATE_OBJS) $(IPP_OBJS) $(TTS_OBJS)
 
 all: $(TARGET) tinyedit
 
@@ -294,6 +317,9 @@ $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_att
 $(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c $(COMPDIR)/fmt_pdf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/fmt_pdf.c -o $@
 
+$(OBJDIR)/print.o: $(COMPDIR)/print.c $(COMPDIR)/print.h $(COMPDIR)/fmt_pdf.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print.c -o $@
+
 $(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
@@ -341,6 +367,9 @@ $(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_assist.o: $(UIDIR)/ui_assist.c $(UIDIR)/ui_assist.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/ui_print.o: $(UIDIR)/ui_print.c $(UIDIR)/ui_print.h $(UIDIR)/te.h $(COMPDIR)/config.h $(COMPDIR)/print.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_syntax.o: $(UIDIR)/ui_syntax.c $(UIDIR)/ui_syntax.h | $(OBJDIR)
@@ -416,15 +445,24 @@ $(OBJDIR)/grammar_api.o: $(HERE)grammar/grammar_api.c $(GRAMPRIV) | $(OBJDIR)
 $(OBJDIR)/ui_grammar.o: $(UIDIR)/ui_grammar.c $(UIDIR)/ui_grammar.h $(GRAMPRIV) | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+# HTTP client (shared by translate and IPP printing)
+ifneq (,$(filter 1,$(USE_TRANSLATE) $(USE_IPP)))
+$(OBJDIR)/http_client.o: $(COREDIR)/http_client.c $(COREDIR)/http_client.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
+
+# IPP printing (uses http_client)
+ifeq ($(USE_IPP),1)
+$(OBJDIR)/ipp.o: $(COMPDIR)/ipp.c $(COMPDIR)/ipp.h $(COREDIR)/http_client.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
+
 # Translator objects (only if USE_TRANSLATE=1)
 ifeq ($(USE_TRANSLATE),1)
 $(OBJDIR)/translate.o: $(HERE)translate/translate.c $(HERE)translate/translate.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/translate_http.o: $(HERE)translate/translate_http.c $(HERE)translate/translate.h $(HERE)translate/http_client.h $(HERE)translate/json_utils.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/http_client.o: $(HERE)translate/http_client.c $(HERE)translate/http_client.h | $(OBJDIR)
+$(OBJDIR)/translate_http.o: $(HERE)translate/translate_http.c $(HERE)translate/translate.h $(COREDIR)/http_client.h $(HERE)translate/json_utils.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/json_utils.o: $(HERE)translate/json_utils.c $(HERE)translate/json_utils.h | $(OBJDIR)
@@ -461,11 +499,11 @@ $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 
 $(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
 	$(CXX) $(CFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB) $(TRANSLATE_LIB)
+	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB) $(TRANSLATE_LIB) -lz
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HYPHEN_LIB) $(TRANSLATE_LIB)
+	      -o $@ $(NCURSES_LIB) $(HYPHEN_LIB) $(TRANSLATE_LIB) -lz
 endif
 
 clean:

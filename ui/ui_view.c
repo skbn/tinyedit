@@ -434,8 +434,8 @@ int view_cursor_justify_shift(Ed *ed, int width)
     if (seg_len <= 0 || seg_len > (int)(sizeof(offsets) / sizeof(offsets[0])))
         return 0;
 
-    /* The last sub-row of the paragraph keeps its natural width, no shift */
-    if (seg_end == len && ln->brk == LB_PARA)
+    /* Single-line paragraphs justify, last row of multi-line paragraph does not */
+    if (!ed_segment_should_justify(EA_ALIGN_JUST, seg_end == len && ln->brk == LB_PARA, seg_start == 0 && seg_end == len))
         return 0;
 
     seg_vw = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab);
@@ -700,7 +700,7 @@ static int hittest_seg(const wchar_t *l, int len, int seg_start, int seg_end, un
     is_para_last = (seg_end == len) && (brk == LB_PARA);
     hyph_reserve = (seg_end == len && brk == LB_HYPHEN) ? 1 : 0;
 
-    if (para_align == EA_ALIGN_JUST && !is_para_last && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
+    if (ed_segment_should_justify(para_align, is_para_last, seg_start == 0 && seg_end == len) && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
     {
         int text_vw_now = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab);
         int target_vw = width - hyph_reserve;

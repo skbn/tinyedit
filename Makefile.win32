@@ -35,6 +35,7 @@ USE_GRAMMAR ?= 0
 USE_TRANSLATE ?= 0
 USE_STARDICT ?= 0
 USE_TTS ?= 0
+USE_IPP ?= 0
 
 # Compiler (native MSYS2 MinGW)
 CC = gcc
@@ -77,7 +78,7 @@ CORE_OBJS = $(OBJDIR)/utf8.o $(OBJDIR)/charset.o \
             $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
             $(OBJDIR)/search.o $(OBJDIR)/portable.o $(OBJDIR)/ncursesw_win32.o \
             $(OBJDIR)/te_rastport_win32.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/print.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
 UI_OBJS   = $(OBJDIR)/te_app.o \
             $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_editor.o \
@@ -85,6 +86,7 @@ UI_OBJS   = $(OBJDIR)/te_app.o \
             $(OBJDIR)/ui_view.o \
             $(OBJDIR)/ui_keys.o \
             $(OBJDIR)/ui_assist.o \
+            $(OBJDIR)/ui_print.o \
             $(OBJDIR)/ui_files.o \
             $(OBJDIR)/ui_setup.o \
             $(OBJDIR)/ui_glyph_picker.o \
@@ -163,12 +165,33 @@ SPELL_OBJS :=
 SPELL_LIB :=
 endif
 
+# HTTP client layer (used by translate and IPP printing).
+USE_IPP ?= 1
+
+ifeq ($(USE_IPP),1)
+CDEFS    += -DHAVE_IPP
+endif
+
+ifneq (,$(filter 1,$(USE_TRANSLATE) $(USE_IPP)))
+CDEFS    += -DHAVE_HTTP
+HTTP_OBJS = $(OBJDIR)/http_client.o
+HTTP_LIB  = -lcurl
+else
+HTTP_OBJS =
+HTTP_LIB  =
+endif
+
+ifeq ($(USE_IPP),1)
+IPP_OBJS  = $(OBJDIR)/ipp.o
+else
+IPP_OBJS  =
+endif
+
 # Translator -- opt-in. Uses HTTP backends (MyMemory, LibreTranslate, Lingva).
 ifeq ($(USE_TRANSLATE),1)
 CDEFS    += -DHAVE_TRANSLATE -DHAVE_TRANSLATE_HTTP
 CFLAGS   += -I$(HERE)translate
-TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/http_client.o $(OBJDIR)/json_utils.o
-TRANSLATE_LIB = -lm -lcurl
+TRANSLATE_OBJS = $(OBJDIR)/translate.o $(OBJDIR)/translate_http.o $(OBJDIR)/json_utils.o
 
 # StarDict offline backend (pure C, no extra library)
 ifeq ($(USE_STARDICT),1)
@@ -177,8 +200,10 @@ TRANSLATE_OBJS += $(OBJDIR)/translate_stardict.o
 endif
 else
 TRANSLATE_OBJS =
-TRANSLATE_LIB =
 endif
+
+# Backward-compatible alias for the link step
+TRANSLATE_LIB = $(HTTP_LIB) $(if $(HTTP_LIB),-lm,)
 
 # Text-To-Speech via SAPI 5.
 #
@@ -197,7 +222,7 @@ TTS_OBJS  =
 TTS_LIB   =
 endif
 
-ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(GRAMMAR_OBJS) $(TRANSLATE_OBJS) $(TTS_OBJS) \
+ALL_OBJS = $(CORE_OBJS) $(COMP_OBJS) $(UI_OBJS) $(SPELL_OBJS) $(GRAMMAR_OBJS) $(HTTP_OBJS) $(TRANSLATE_OBJS) $(IPP_OBJS) $(TTS_OBJS) \
            $(OBJDIR)/spellchecker_utils.o \
            $(FT_OBJS) $(ZLIB_OBJS) $(PNG_OBJS)
 
@@ -273,18 +298,30 @@ $(OBJDIR)/ui_mouse.o: $(UIDIR)/ui_mouse.c $(UIDIR)/ui_mouse.h | $(OBJDIR)
 $(OBJDIR)/ui_assist.o: $(UIDIR)/ui_assist.c $(UIDIR)/ui_assist.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/ui_print.o: $(UIDIR)/ui_print.c $(UIDIR)/ui_print.h $(UIDIR)/te.h $(COMPDIR)/config.h $(COMPDIR)/print.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 $(OBJDIR)/ui_syntax.o: $(UIDIR)/ui_syntax.c $(UIDIR)/ui_syntax.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+# HTTP client (shared by translate and IPP printing)
+ifneq (,$(filter 1,$(USE_TRANSLATE) $(USE_IPP)))
+$(OBJDIR)/http_client.o: $(COREDIR)/http_client.c $(COREDIR)/http_client.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
+
+# IPP printing (uses http_client)
+ifeq ($(USE_IPP),1)
+$(OBJDIR)/ipp.o: $(COMPDIR)/ipp.c $(COMPDIR)/ipp.h $(COREDIR)/http_client.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+endif
 
 # Translator objects (only if USE_TRANSLATE=1)
 ifeq ($(USE_TRANSLATE),1)
 $(OBJDIR)/translate.o: $(HERE)translate/translate.c $(HERE)translate/translate.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
-$(OBJDIR)/translate_http.o: $(HERE)translate/translate_http.c $(HERE)translate/translate.h $(HERE)translate/http_client.h $(HERE)translate/json_utils.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
-
-$(OBJDIR)/http_client.o: $(HERE)translate/http_client.c $(HERE)translate/http_client.h | $(OBJDIR)
+$(OBJDIR)/translate_http.o: $(HERE)translate/translate_http.c $(HERE)translate/translate.h $(COREDIR)/http_client.h $(HERE)translate/json_utils.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/json_utils.o: $(HERE)translate/json_utils.c $(HERE)translate/json_utils.h | $(OBJDIR)
@@ -525,6 +562,9 @@ $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_att
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c $(COMPDIR)/fmt_pdf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/print.o: $(COMPDIR)/print.c $(COMPDIR)/print.h $(COMPDIR)/fmt_pdf.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)

@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <zlib.h>
 
 #include "editor.h"
 #include "ed_attr.h"
@@ -117,9 +118,19 @@ struct ttf_face
     unsigned int off_hmtx, len_hmtx;
     unsigned int off_cmap, len_cmap;
 
+    /* Extra subset tables, 0 if absent, loca/glyf required for TTF, others kept verbatim */
+    unsigned int off_loca, len_loca;
+    unsigned int off_glyf, len_glyf;
+    unsigned int off_name, len_name;
+    unsigned int off_os2, len_os2;
+    unsigned int off_cvt, len_cvt;
+    unsigned int off_fpgm, len_fpgm;
+    unsigned int off_prep, len_prep;
+
     /* Parsed head */
     int units_per_em;
     int bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max;
+    int loca_format; /* 0 = short (uint16*2 offsets), 1 = long (uint32) */
 
     /* Parsed hhea */
     int ascent, descent;
@@ -134,6 +145,24 @@ struct ttf_face
     /* Selected cmap subtables (offsets relative to the file, 0 = absent) */
     unsigned int off_cmap4;
     unsigned int off_cmap12;
+
+    /* GID to Unicode reverse map, 0 = unmapped, used for /ToUnicode CMap */
+    unsigned int *gid_to_cp;
+
+    /* TTF subset usage flags per GID, 0=unused, 1=used, NULL for OTF/disabled */
+    unsigned char *used_gids;
+
+    /* GID renumbering tables, old->new, new->old, count, NULL when off */
+    int *gid_map;
+    int *gid_rev;
+    int n_sub_gids;
+
+    /* 1 if the document used this face, unused faces are skipped at embed */
+    int was_used;
+
+    /* Rebuilt TTF subset bytes, NULL until ttf_face_subset(), used by FontFile2 */
+    unsigned char *subset_bytes;
+    size_t subset_len;
 };
 
 /* Shared font context; mode 0 = base-14 Helvetica, mode 1 = TTF with fallback */
@@ -144,6 +173,16 @@ typedef struct pdf_font_ctx_tag
     int n_faces;
     int face_type0_id[PDF_MAX_TTF_FACES]; /* obj id of the Type0 font per face */
 } pdf_font_ctx;
+
+/* Descriptor for one table going into the subset output */
+struct sub_table
+{
+    unsigned int tag;
+    const unsigned char *data;
+    unsigned int len;
+    unsigned int checksum;
+    unsigned int out_offset; /* filled in during layout */
+};
 
 /* Helvetica widths at 1000-unit em, WinAnsi 0x20..0xFF, Adobe base-14 */
 static const short pdf_w_helv[224] =
@@ -197,6 +236,7 @@ static const short pdf_w_helv_bold[224] =
 /* Forward declarations of base-14 helpers, used as fallback path */
 static int pdf_glyph_width(unsigned char b, unsigned short mask);
 static int pdf_cp_to_winansi(unsigned int cp, unsigned char *out);
+static int ttf_cmap_lookup_fmt4(const struct ttf_face *f, unsigned int cp);
 
 static unsigned int ttf_be16(const unsigned char *p)
 {
@@ -220,8 +260,84 @@ static void ttf_face_free(struct ttf_face *f)
     if (f && f->bytes)
         free(f->bytes);
 
+    if (f && f->gid_to_cp)
+        free(f->gid_to_cp);
+
+    if (f && f->used_gids)
+        free(f->used_gids);
+
+    if (f && f->gid_map)
+        free(f->gid_map);
+
+    if (f && f->gid_rev)
+        free(f->gid_rev);
+
+    if (f && f->subset_bytes)
+        free(f->subset_bytes);
+
     if (f)
         memset(f, 0, sizeof(*f));
+}
+
+/* Build reverse GID->codepoint map from cmap subtables, format 12 first */
+static void ttf_face_build_reverse(struct ttf_face *f)
+{
+    unsigned int cp;
+    int gid;
+    const unsigned char *sub = NULL;
+
+    if (f->num_glyphs <= 0)
+        return;
+
+    f->gid_to_cp = (unsigned int *)calloc((size_t)f->num_glyphs, sizeof(unsigned int));
+
+    if (!f->gid_to_cp)
+        return;
+
+    /* Format 12: full Unicode ranges */
+    if (f->off_cmap12)
+    {
+        unsigned int num_groups;
+        unsigned int i;
+
+        sub = f->bytes + f->off_cmap12;
+        num_groups = ttf_be32(sub + 12);
+
+        for (i = 0; i < num_groups; i++)
+        {
+            unsigned int start_char, end_char, start_gid;
+
+            if (16 + i * 12 + 12 > f->len_cmap - (f->off_cmap12 - f->off_cmap))
+                break;
+
+            start_char = ttf_be32(sub + 16 + i * 12);
+            end_char = ttf_be32(sub + 16 + i * 12 + 4);
+            start_gid = ttf_be32(sub + 16 + i * 12 + 8);
+
+            for (cp = start_char; cp <= end_char; cp++)
+            {
+                gid = (int)(start_gid + (cp - start_char));
+
+                if (gid > 0 && gid < f->num_glyphs && f->gid_to_cp[gid] == 0)
+                    f->gid_to_cp[gid] = cp;
+
+                if (cp == 0xFFFFFFFF)
+                    break;
+            }
+        }
+    }
+
+    /* Format 4: fills any BMP gap the fmt 12 pass did not cover */
+    if (f->off_cmap4)
+    {
+        for (cp = 0x20; cp <= 0xFFFF; cp++)
+        {
+            gid = ttf_cmap_lookup_fmt4(f, cp);
+
+            if (gid > 0 && gid < f->num_glyphs && f->gid_to_cp[gid] == 0)
+                f->gid_to_cp[gid] = cp;
+        }
+    }
 }
 
 /* Try to locate a usable cmap subtable in the font, filling off_cmap4/off_cmap12 */
@@ -395,6 +511,41 @@ static int ttf_face_load(struct ttf_face *f, const char *path)
             f->off_cmap = tbl_off;
             f->len_cmap = tbl_len;
         }
+        else if (tag == 0x6C6F6361) /* 'loca' */
+        {
+            f->off_loca = tbl_off;
+            f->len_loca = tbl_len;
+        }
+        else if (tag == 0x676C7966) /* 'glyf' */
+        {
+            f->off_glyf = tbl_off;
+            f->len_glyf = tbl_len;
+        }
+        else if (tag == 0x6E616D65) /* 'name' */
+        {
+            f->off_name = tbl_off;
+            f->len_name = tbl_len;
+        }
+        else if (tag == 0x4F532F32) /* 'OS/2' */
+        {
+            f->off_os2 = tbl_off;
+            f->len_os2 = tbl_len;
+        }
+        else if (tag == 0x63767420) /* 'cvt ' */
+        {
+            f->off_cvt = tbl_off;
+            f->len_cvt = tbl_len;
+        }
+        else if (tag == 0x6670676D) /* 'fpgm' */
+        {
+            f->off_fpgm = tbl_off;
+            f->len_fpgm = tbl_len;
+        }
+        else if (tag == 0x70726570) /* 'prep' */
+        {
+            f->off_prep = tbl_off;
+            f->len_prep = tbl_len;
+        }
     }
 
     if (!f->off_head || !f->off_hhea || !f->off_maxp || !f->off_hmtx || !f->off_cmap || f->len_head < 54 || f->len_hhea < 36 || f->len_maxp < 6 || f->len_cmap < 4)
@@ -412,6 +563,7 @@ static int ttf_face_load(struct ttf_face *f, const char *path)
     f->bbox_y_min = ttf_bes16(head + 38);
     f->bbox_x_max = ttf_bes16(head + 40);
     f->bbox_y_max = ttf_bes16(head + 42);
+    f->loca_format = (int)ttf_be16(head + 50);
 
     f->ascent = ttf_bes16(hhea + 4);
     f->descent = ttf_bes16(hhea + 6);
@@ -438,6 +590,8 @@ static int ttf_face_load(struct ttf_face *f, const char *path)
         ttf_face_free(f);
         return -1;
     }
+
+    ttf_face_build_reverse(f);
 
     return 0;
 }
@@ -590,10 +744,11 @@ static void pdf_font_ctx_free(pdf_font_ctx *fc)
     memset(fc, 0, sizeof(*fc));
 }
 
-/* Load primary TTF and all configured fallbacks */
+/* Load primary TTF and fallbacks, allocate used_gids tracking, skip OTF/CFF */
 static int pdf_font_ctx_try_ttf(pdf_font_ctx *fc, const TeConfig *cfg)
 {
     int i;
+    int fi;
 
     if (!cfg || !cfg->ttf_font[0])
         return -1;
@@ -610,6 +765,42 @@ static int pdf_font_ctx_try_ttf(pdf_font_ctx *fc, const TeConfig *cfg)
 
         if (ttf_face_load(&fc->faces[fc->n_faces], cfg->ttf_fallback[i]) == 0)
             fc->n_faces++;
+    }
+
+    /* Set up subset tracking and GID renumbering for loaded TTF faces */
+    for (fi = 0; fi < fc->n_faces; fi++)
+    {
+        struct ttf_face *fp2 = &fc->faces[fi];
+        int k;
+
+        if (fp2->is_otf || fp2->num_glyphs <= 0)
+            continue;
+
+        fp2->used_gids = (unsigned char *)calloc((size_t)fp2->num_glyphs, 1);
+        fp2->gid_map = (int *)malloc((size_t)fp2->num_glyphs * sizeof(int));
+        fp2->gid_rev = (int *)malloc((size_t)fp2->num_glyphs * sizeof(int));
+
+        if (!fp2->used_gids || !fp2->gid_map || !fp2->gid_rev)
+        {
+            free(fp2->used_gids);
+            free(fp2->gid_map);
+            free(fp2->gid_rev);
+
+            fp2->used_gids = NULL;
+            fp2->gid_map = NULL;
+            fp2->gid_rev = NULL;
+
+            continue;
+        }
+
+        for (k = 0; k < fp2->num_glyphs; k++)
+            fp2->gid_map[k] = -1;
+
+        /* .notdef is always subset glyph 0 */
+        fp2->gid_map[0] = 0;
+        fp2->gid_rev[0] = 0;
+        fp2->n_sub_gids = 1;
+        fp2->used_gids[0] = 1;
     }
 
     fc->mode = 1;
@@ -680,6 +871,535 @@ static int pdf_ctx_cp_advance(const pdf_font_ctx *fc, unsigned int cp, unsigned 
         b = '?';
 
     return pdf_glyph_width(b, mask);
+}
+
+/* Big-endian writers for building subset table data */
+static void ttf_put_be16(unsigned char *p, unsigned int v)
+{
+    p[0] = (unsigned char)((v >> 8) & 0xFF);
+    p[1] = (unsigned char)(v & 0xFF);
+}
+
+static void ttf_put_be32(unsigned char *p, unsigned int v)
+{
+    p[0] = (unsigned char)((v >> 24) & 0xFF);
+    p[1] = (unsigned char)((v >> 16) & 0xFF);
+    p[2] = (unsigned char)((v >> 8) & 0xFF);
+    p[3] = (unsigned char)(v & 0xFF);
+}
+
+/* Table/file checksum, sum of 32-bit big-endian words, zero-padded to 4 bytes */
+static unsigned int ttf_checksum(const unsigned char *data, unsigned int len)
+{
+    unsigned int sum = 0;
+    unsigned int i;
+
+    for (i = 0; i + 3 < len; i += 4)
+        sum += ttf_be32(data + i);
+
+    if (i < len)
+    {
+        unsigned char pad[4];
+
+        pad[0] = pad[1] = pad[2] = pad[3] = 0;
+
+        while (i < len)
+        {
+            pad[i & 3] = data[i];
+            i++;
+        }
+
+        sum += ttf_be32(pad);
+    }
+
+    return sum;
+}
+
+/* Offset into the original glyf table for a given GID, from loca */
+static unsigned int ttf_loca_offset(const struct ttf_face *f, int gid)
+{
+    const unsigned char *loca = NULL;
+
+    if (gid < 0 || gid > f->num_glyphs)
+        return 0;
+
+    loca = f->bytes + f->off_loca;
+
+    if (f->loca_format == 0)
+        return (unsigned int)ttf_be16(loca + gid * 2) * 2;
+
+    return ttf_be32(loca + gid * 4);
+}
+
+/* Mark GID as used and set the face used flag, including OTF faces */
+static void ttf_face_mark_used(struct ttf_face *f, int gid)
+{
+    if (!f)
+        return;
+
+    f->was_used = 1;
+
+    if (f->used_gids && gid >= 0 && gid < f->num_glyphs)
+        f->used_gids[(unsigned)gid] = 1;
+}
+
+/* Map an original GID to a compact subset id, assigning the next id on first use */
+static int ttf_face_map_gid(struct ttf_face *f, int gid)
+{
+    if (!f || !f->gid_map || gid < 0 || gid >= f->num_glyphs)
+        return gid;
+
+    if (f->gid_map[gid] >= 0)
+        return f->gid_map[gid];
+
+    f->gid_map[gid] = f->n_sub_gids;
+    f->gid_rev[f->n_sub_gids] = gid;
+    f->n_sub_gids++;
+
+    return f->gid_map[gid];
+}
+
+/* Recursively include component GIDs of used composite glyphs in the subset */
+static void ttf_face_close_composites(struct ttf_face *f)
+{
+    int changed;
+    int gid;
+    unsigned int glen;
+    unsigned int start, end;
+    const unsigned char *g = NULL;
+    int nc;
+    unsigned int p;
+    unsigned int flags;
+    int comp_gid;
+
+    if (!f->used_gids || !f->off_glyf || !f->off_loca)
+        return;
+
+    do
+    {
+        changed = 0;
+
+        for (gid = 0; gid < f->num_glyphs; gid++)
+        {
+            if (!f->used_gids[gid])
+                continue;
+
+            start = ttf_loca_offset(f, gid);
+            end = ttf_loca_offset(f, gid + 1);
+
+            if (start >= end)
+                continue;
+
+            if (end > f->len_glyf)
+                continue;
+
+            g = f->bytes + f->off_glyf + start;
+            glen = end - start;
+
+            if (glen < 10)
+                continue;
+
+            nc = ttf_bes16(g);
+
+            if (nc >= 0)
+                continue; /* Simple glyph, no components */
+
+            /* Composite: walk component records starting at offset 10 */
+            p = 10;
+
+            while (p + 4 <= glen)
+            {
+                flags = ttf_be16(g + p);
+                comp_gid = (int)ttf_be16(g + p + 2);
+                p += 4;
+
+                if (comp_gid >= 0 && comp_gid < f->num_glyphs && !f->used_gids[comp_gid])
+                {
+                    f->used_gids[comp_gid] = 1;
+
+                    /* Components need subset ids too so composite glyph data can be patched to reference them after renumbering */
+                    ttf_face_map_gid(f, comp_gid);
+
+                    changed = 1;
+                }
+
+                /* Skip arg1/arg2 */
+                if (flags & 0x0001) /* ARG_1_AND_2_ARE_WORDS */
+                    p += 4;
+                else
+                    p += 2;
+
+                /* Skip optional transformation */
+                if (flags & 0x0008) /* WE_HAVE_A_SCALE */
+                    p += 2;
+                else if (flags & 0x0040) /* WE_HAVE_AN_X_AND_Y_SCALE */
+                    p += 4;
+                else if (flags & 0x0080) /* WE_HAVE_A_TWO_BY_TWO */
+                    p += 8;
+
+                if (!(flags & 0x0020)) /* MORE_COMPONENTS */
+                    break;
+            }
+        }
+    } while (changed);
+}
+
+/* Build subset TTF with GID renumbering, dropping cmap, preserving .notdef */
+static int ttf_face_subset(struct ttf_face *f)
+{
+    unsigned char *new_glyf = NULL;
+    unsigned char *new_loca = NULL;
+    unsigned char *new_head = NULL;
+    unsigned char *new_post = NULL;
+    unsigned char *new_maxp = NULL;
+    unsigned char *new_hhea = NULL;
+    unsigned char *new_hmtx = NULL;
+    unsigned char *new_name = NULL;
+    unsigned int *offsets = NULL;
+    unsigned int new_glyf_len = 0;
+    unsigned int new_loca_len;
+    unsigned int new_hmtx_len;
+    unsigned int new_name_len;
+    unsigned int cur;
+    int new_gid;
+    int i;
+    int n_sub;
+    struct sub_table tbl[16];
+    int n_tbl;
+    unsigned char *out;
+    unsigned int out_size;
+    unsigned int header_size;
+    unsigned int cursor;
+    unsigned int search_range, entry_selector, range_shift;
+    unsigned int shift;
+    unsigned int head_out_off = 0;
+    unsigned int file_check;
+    int rc;
+
+    /* CFF fonts have no glyf/loca; skip subsetting and rely on the original */
+    if (f->is_otf || !f->off_glyf || !f->off_loca)
+        return -1;
+
+    if (!f->used_gids || !f->gid_map || !f->gid_rev || f->n_sub_gids <= 0)
+        return -1;
+
+    n_sub = f->n_sub_gids;
+
+    /* Sum outline sizes in new-GID order */
+    for (new_gid = 0; new_gid < n_sub; new_gid++)
+    {
+        int old = f->gid_rev[new_gid];
+        unsigned int start = ttf_loca_offset(f, old);
+        unsigned int end = ttf_loca_offset(f, old + 1);
+
+        if (end > start && end <= f->len_glyf)
+            new_glyf_len += end - start;
+    }
+
+    new_hmtx_len = (unsigned int)n_sub * 4;
+    new_name_len = 6;
+    new_loca_len = (unsigned int)(n_sub + 1) * 4;
+
+    new_glyf = (unsigned char *)malloc(new_glyf_len > 0 ? new_glyf_len : 1);
+    offsets = (unsigned int *)malloc((size_t)(n_sub + 1) * sizeof(unsigned int));
+    new_loca = (unsigned char *)malloc(new_loca_len);
+    new_head = (unsigned char *)malloc(f->len_head);
+    new_post = (unsigned char *)malloc(32);
+    new_maxp = (unsigned char *)malloc(f->len_maxp);
+    new_hhea = (unsigned char *)malloc(f->len_hhea);
+    new_hmtx = (unsigned char *)malloc(new_hmtx_len);
+    new_name = (unsigned char *)malloc(new_name_len);
+
+    if (!new_glyf || !offsets || !new_loca || !new_head || !new_post || !new_maxp || !new_hhea || !new_hmtx || !new_name)
+    {
+        free(new_glyf);
+        free(offsets);
+        free(new_loca);
+        free(new_head);
+        free(new_post);
+        free(new_maxp);
+        free(new_hhea);
+        free(new_hmtx);
+        free(new_name);
+        return -1;
+    }
+
+    /* Pack glyph outlines in new-GID order and patch composite references */
+    cur = 0;
+
+    for (new_gid = 0; new_gid < n_sub; new_gid++)
+    {
+        int old = f->gid_rev[new_gid];
+        unsigned int start = ttf_loca_offset(f, old);
+        unsigned int end = ttf_loca_offset(f, old + 1);
+
+        offsets[new_gid] = cur;
+
+        if (end > start && end <= f->len_glyf)
+        {
+            unsigned int glen = end - start;
+            unsigned char *dst = new_glyf + cur;
+            int nc;
+            unsigned int p = 10;
+            unsigned int flags;
+            int old_comp;
+            int new_comp;
+
+            memcpy(dst, f->bytes + f->off_glyf + start, glen);
+            cur += glen;
+
+            /* If this is a composite glyph, rewrite each component's glyphIndex field so it points at the component's new id */
+            if (glen < 10)
+                continue;
+
+            nc = ttf_bes16(dst);
+
+            if (nc >= 0)
+                continue;
+
+            while (p + 4 <= glen)
+            {
+                flags = ttf_be16(dst + p);
+                old_comp = (int)ttf_be16(dst + p + 2);
+
+                if (old_comp >= 0 && old_comp < f->num_glyphs && f->gid_map[old_comp] >= 0)
+                    new_comp = f->gid_map[old_comp];
+                else
+                    new_comp = 0;
+
+                ttf_put_be16(dst + p + 2, (unsigned int)new_comp);
+
+                p += 4;
+
+                if (flags & 0x0001)
+                    p += 4;
+                else
+                    p += 2;
+
+                if (flags & 0x0008)
+                    p += 2;
+                else if (flags & 0x0040)
+                    p += 4;
+                else if (flags & 0x0080)
+                    p += 8;
+
+                if (!(flags & 0x0020))
+                    break;
+            }
+        }
+    }
+
+    offsets[n_sub] = cur;
+
+    /* Write loca in long format (32-bit offsets) */
+    for (i = 0; i <= n_sub; i++)
+        ttf_put_be32(new_loca + i * 4, offsets[i]);
+
+    /* Copy head, zero checksumAdjustment, force long loca format */
+    memcpy(new_head, f->bytes + f->off_head, f->len_head);
+
+    ttf_put_be32(new_head + 8, 0);
+    ttf_put_be16(new_head + 50, 1);
+
+    /* Minimal post version 3.0 */
+    ttf_put_be32(new_post + 0, 0x00030000);
+
+    memset(new_post + 4, 0, 28);
+
+    /* maxp with new glyph count */
+    memcpy(new_maxp, f->bytes + f->off_maxp, f->len_maxp);
+
+    ttf_put_be16(new_maxp + 4, (unsigned int)n_sub);
+
+    /* hhea with all rows becoming full metric pairs */
+    memcpy(new_hhea, f->bytes + f->off_hhea, f->len_hhea);
+
+    ttf_put_be16(new_hhea + 34, (unsigned int)n_sub);
+
+    /* hmtx: n_sub full rows, indexed by new-GID via gid_rev */
+    for (new_gid = 0; new_gid < n_sub; new_gid++)
+    {
+        int old = f->gid_rev[new_gid];
+        const unsigned char *h = f->bytes + f->off_hmtx;
+        unsigned int adv;
+        unsigned int lsb;
+
+        if (old < f->num_h_metrics)
+        {
+            adv = ttf_be16(h + old * 4);
+            lsb = ttf_be16(h + old * 4 + 2);
+        }
+        else
+        {
+            adv = ttf_be16(h + (f->num_h_metrics - 1) * 4);
+
+            {
+                unsigned int lsb_off = (unsigned int)f->num_h_metrics * 4 + (unsigned int)(old - f->num_h_metrics) * 2;
+
+                if (lsb_off + 2 <= f->len_hmtx)
+                    lsb = ttf_be16(h + lsb_off);
+                else
+                    lsb = 0;
+            }
+        }
+
+        ttf_put_be16(new_hmtx + new_gid * 4, adv);
+        ttf_put_be16(new_hmtx + new_gid * 4 + 2, lsb);
+    }
+
+    /* Minimal name (empty record set) */
+    ttf_put_be16(new_name + 0, 0);
+    ttf_put_be16(new_name + 2, 0);
+    ttf_put_be16(new_name + 4, 6);
+
+    /* Table list, cmap is omitted because the PDF uses Identity-H/CIDToGIDMap */
+    n_tbl = 0;
+
+#define SUB_ADD(t, d, l)       \
+    do                         \
+    {                          \
+        tbl[n_tbl].tag = (t);  \
+        tbl[n_tbl].data = (d); \
+        tbl[n_tbl].len = (l);  \
+        n_tbl++;               \
+    } while (0)
+
+    SUB_ADD(0x4F532F32, f->bytes + f->off_os2, f->len_os2);
+    SUB_ADD(0x676C7966, new_glyf, new_glyf_len);
+    SUB_ADD(0x68656164, new_head, f->len_head);
+    SUB_ADD(0x68686561, new_hhea, f->len_hhea);
+    SUB_ADD(0x686D7478, new_hmtx, new_hmtx_len);
+    SUB_ADD(0x6C6F6361, new_loca, new_loca_len);
+    SUB_ADD(0x6D617870, new_maxp, f->len_maxp);
+    SUB_ADD(0x6E616D65, new_name, new_name_len);
+    SUB_ADD(0x706F7374, new_post, 32);
+
+    if (f->off_cvt && f->len_cvt)
+        SUB_ADD(0x63767420, f->bytes + f->off_cvt, f->len_cvt);
+
+    if (f->off_fpgm && f->len_fpgm)
+        SUB_ADD(0x6670676D, f->bytes + f->off_fpgm, f->len_fpgm);
+
+    if (f->off_prep && f->len_prep)
+        SUB_ADD(0x70726570, f->bytes + f->off_prep, f->len_prep);
+
+#undef SUB_ADD
+
+    for (i = 0; i < n_tbl; i++)
+        tbl[i].checksum = ttf_checksum(tbl[i].data, tbl[i].len);
+
+    header_size = 12 + (unsigned int)n_tbl * 16;
+    out_size = header_size;
+
+    for (i = 0; i < n_tbl; i++)
+    {
+        out_size += tbl[i].len;
+
+        if (tbl[i].len & 3)
+            out_size += 4 - (tbl[i].len & 3);
+    }
+
+    out = (unsigned char *)malloc(out_size);
+
+    if (!out)
+    {
+        free(new_glyf);
+        free(offsets);
+        free(new_loca);
+        free(new_head);
+        free(new_post);
+        free(new_maxp);
+        free(new_hhea);
+        free(new_hmtx);
+        free(new_name);
+        return -1;
+    }
+
+    memset(out, 0, out_size);
+
+    /* SFNT header: version + numTables + searchRange + entrySelector + rangeShift */
+    entry_selector = 0;
+    shift = 1;
+
+    while ((shift << 1) <= (unsigned int)n_tbl)
+    {
+        shift <<= 1;
+        entry_selector++;
+    }
+
+    search_range = shift * 16;
+    range_shift = (unsigned int)n_tbl * 16 - search_range;
+
+    ttf_put_be32(out + 0, 0x00010000);
+    ttf_put_be16(out + 4, (unsigned int)n_tbl);
+    ttf_put_be16(out + 6, search_range);
+    ttf_put_be16(out + 8, entry_selector);
+    ttf_put_be16(out + 10, range_shift);
+
+    /* Sort by tag ascending as required by the spec */
+    for (i = 0; i < n_tbl - 1; i++)
+    {
+        int j;
+
+        for (j = 0; j < n_tbl - 1 - i; j++)
+        {
+            if (tbl[j].tag > tbl[j + 1].tag)
+            {
+                struct sub_table tmp = tbl[j];
+                tbl[j] = tbl[j + 1];
+                tbl[j + 1] = tmp;
+            }
+        }
+    }
+
+    cursor = header_size;
+
+    for (i = 0; i < n_tbl; i++)
+    {
+        tbl[i].out_offset = cursor;
+
+        memcpy(out + cursor, tbl[i].data, tbl[i].len);
+
+        cursor += tbl[i].len;
+
+        if (cursor & 3)
+            cursor += 4 - (cursor & 3);
+
+        if (tbl[i].tag == 0x68656164)
+            head_out_off = tbl[i].out_offset;
+    }
+
+    for (i = 0; i < n_tbl; i++)
+    {
+        unsigned char *e = out + 12 + i * 16;
+
+        ttf_put_be32(e + 0, tbl[i].tag);
+        ttf_put_be32(e + 4, tbl[i].checksum);
+        ttf_put_be32(e + 8, tbl[i].out_offset);
+        ttf_put_be32(e + 12, tbl[i].len);
+    }
+
+    /* Adjust head.checksumAdjustment so overall file checksum lands on 0xB1B0AFBA */
+    file_check = ttf_checksum(out, out_size);
+
+    ttf_put_be32(out + head_out_off + 8, 0xB1B0AFBAu - file_check);
+
+    f->subset_bytes = out;
+    f->subset_len = out_size;
+
+    rc = 0;
+
+    free(new_glyf);
+    free(offsets);
+    free(new_loca);
+    free(new_head);
+    free(new_post);
+    free(new_maxp);
+    free(new_hhea);
+    free(new_hmtx);
+    free(new_name);
+
+    return rc;
 }
 
 /* Look up glyph width at 1000-unit em for a WinAnsi byte and a style mask */
@@ -934,21 +1654,110 @@ static int pdf_end_obj(pdf_out *o)
     return pdf_puts(o, "endobj\n");
 }
 
-static int pdf_emit_stream(pdf_out *o, int id, const pdf_buf *b)
+/* zlib deflate at default level, returns buffer and length or NULL */
+static unsigned char *pdf_deflate(const unsigned char *src, size_t src_len, size_t *out_len)
 {
+    z_stream z;
+    uLongf cap;
+    unsigned char *buf = NULL;
+    int rc;
+
+    if (!src || src_len == 0)
+        return NULL;
+
+    cap = compressBound((uLong)src_len);
+
+    buf = (unsigned char *)malloc((size_t)cap);
+
+    if (!buf)
+        return NULL;
+
+    memset(&z, 0, sizeof(z));
+
+    if (deflateInit(&z, Z_DEFAULT_COMPRESSION) != Z_OK)
+    {
+        free(buf);
+        return NULL;
+    }
+
+    z.next_in = (Bytef *)src;
+    z.avail_in = (uInt)src_len;
+    z.next_out = buf;
+    z.avail_out = cap;
+
+    rc = deflate(&z, Z_FINISH);
+
+    if (rc != Z_STREAM_END)
+    {
+        deflateEnd(&z);
+        free(buf);
+        return NULL;
+    }
+
+    *out_len = (size_t)z.total_out;
+
+    deflateEnd(&z);
+
+    return buf;
+}
+
+/* Emit stream with optional Flate compression, extra dict entries */
+static int pdf_emit_stream_maybe_deflate(pdf_out *o, int id, const unsigned char *raw, size_t raw_len, const char *extra, int allow_compress)
+{
+    unsigned char *comp = NULL;
+    size_t comp_len = 0;
+    const unsigned char *body = NULL;
+    size_t body_len;
+    int use_flate = 0;
+
+    if (allow_compress && raw_len > 32)
+    {
+        comp = pdf_deflate(raw, raw_len, &comp_len);
+
+        if (comp && comp_len + 32 < raw_len)
+            use_flate = 1;
+    }
+
+    if (use_flate)
+    {
+        body = comp;
+        body_len = comp_len;
+    }
+    else
+    {
+        body = raw;
+        body_len = raw_len;
+    }
+
     if (pdf_begin_obj(o, id) != 0)
+    {
+        free(comp);
         return -1;
+    }
 
-    if (pdf_printf(o, "<< /Length %lu >>\nstream\n", (unsigned long)b->len) != 0)
+    if (pdf_printf(o, "<< /Length %lu%s%s%s >>\nstream\n", (unsigned long)body_len, use_flate ? " /Filter /FlateDecode" : "", extra ? " " : "", extra ? extra : "") != 0)
+    {
+        free(comp);
         return -1;
+    }
 
-    if (pdf_write_raw(o, b->buf, b->len) != 0)
+    if (pdf_write_raw(o, body, body_len) != 0)
+    {
+        free(comp);
         return -1;
+    }
+
+    free(comp);
 
     if (pdf_puts(o, "\nendstream\n") != 0)
         return -1;
 
     return pdf_end_obj(o);
+}
+
+static int pdf_emit_stream(pdf_out *o, int id, const pdf_buf *b)
+{
+    return pdf_emit_stream_maybe_deflate(o, id, (const unsigned char *)b->buf, b->len, NULL, 1);
 }
 
 /* Content-stream helpers: escape a WinAnsi byte for a PDF (Tj) string */
@@ -997,6 +1806,7 @@ static void pdf_para_init(pdf_para *p)
 static void pdf_para_free(pdf_para *p)
 {
     free(p->chars);
+
     memset(p, 0, sizeof(*p));
 }
 
@@ -1146,9 +1956,10 @@ static int pdf_para_wrap_next(const pdf_para *p, const pdf_font_ctx *fc, int sta
 
 static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx *fc, int start, int end, double x, double y_baseline, double font_size, int tab_width, double word_space, int *lossy)
 {
-    unsigned short cur_mask;
     const char *cur_font = NULL;
-    int cur_face = -2; /* TTF face currently selected in the stream */
+    int cur_face = -2;  /* TTF face currently selected in the stream */
+    int cur_bold = 0;   /* Synthetic bold state in TTF mode */
+    int cur_italic = 0; /* Synthetic italic state in TTF mode */
     int i;
     double x_pen;
     double x_ul_start;
@@ -1159,7 +1970,6 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
     int cap_uls;
     int rc;
 
-    cur_mask = 0xFFFF;
     x_pen = x;
     x_ul_start = 0.0;
     in_ul = 0;
@@ -1196,6 +2006,13 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
     if (rc == 0)
     {
         if (pdfb_printf(s, "1 0 0 1 %.2f %.2f Tm\n", x, y_baseline) != 0)
+            rc = -1;
+    }
+
+    /* Reset synthetic bold state at line start. Tr persists across BT/ET so without this a bold-ending line would bleed into the next line */
+    if (rc == 0 && fc && fc->mode == 1)
+    {
+        if (pdfb_puts(s, "0 Tr\n") != 0)
             rc = -1;
     }
 
@@ -1279,6 +2096,9 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
                     if (lossy)
                         (*lossy)++;
                 }
+
+                /* Record this GID as used for subsetting, casting const away for used_gids */
+                ttf_face_mark_used((struct ttf_face *)&fc->faces[want_face], gid);
             }
             else
             {
@@ -1308,6 +2128,9 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
             /* Font resource switch: base-14 picks by style, TTF picks by face */
             if (fc && fc->mode == 1)
             {
+                int want_bold = (want_mask & EA_BOLD) != 0;
+                int want_italic = (want_mask & EA_ITALIC) != 0;
+
                 if (want_face != cur_face)
                 {
                     if (pdfb_printf(s, "/TT%d %.2f Tf\n", want_face, font_size) != 0)
@@ -1318,6 +2141,52 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
 
                     cur_face = want_face;
                     cur_font = NULL;
+                }
+
+                /* Synthetic bold via fill+stroke, with stroke width scaled to font size */
+                if (want_bold != cur_bold)
+                {
+                    if (want_bold)
+                    {
+                        if (pdfb_printf(s, "2 Tr %.3f w\n", font_size * 0.03) != 0)
+                        {
+                            rc = -1;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        if (pdfb_puts(s, "0 Tr\n") != 0)
+                        {
+                            rc = -1;
+                            break;
+                        }
+                    }
+
+                    cur_bold = want_bold;
+                }
+
+                /* Synthetic italic via horizontal shear, anchored at current x_pen */
+                if (want_italic != cur_italic)
+                {
+                    if (want_italic)
+                    {
+                        if (pdfb_printf(s, "1 0 0.21 1 %.2f %.2f Tm\n", x_pen, y_baseline) != 0)
+                        {
+                            rc = -1;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        if (pdfb_printf(s, "1 0 0 1 %.2f %.2f Tm\n", x_pen, y_baseline) != 0)
+                        {
+                            rc = -1;
+                            break;
+                        }
+                    }
+
+                    cur_italic = want_italic;
                 }
             }
             else
@@ -1334,8 +2203,6 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
                 }
             }
 
-            cur_mask = want_mask;
-
             pdfb_init(&run_str);
 
             if (fc && fc->mode == 1)
@@ -1344,7 +2211,7 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
                 int reps = (cp == '\t') ? (tab_width > 0 ? tab_width : 4) : 1;
                 int k;
                 int adv_out = adv_1000;
-                unsigned int emit_gid = (unsigned int)gid;
+                unsigned int emit_gid = (unsigned int)ttf_face_map_gid((struct ttf_face *)&fc->faces[want_face], gid);
 
                 if (pdfb_puts(&run_str, "<") != 0)
                 {
@@ -1718,7 +2585,7 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
             if (x < PDF_MARGIN_L)
                 x = PDF_MARGIN_L;
         }
-        else if (trim_end > start && align == EA_ALIGN_JUST && !is_last_line)
+        else if (trim_end > start && align == EA_ALIGN_JUST && (!is_last_line || start == 0))
         {
             line_w = pdf_para_measure_range(para, p->fc, start, trim_end, p->font_size, p->tab_width);
             n_spaces = 0;
@@ -1795,30 +2662,235 @@ static int pdf_write_xref(pdf_out *o, int catalog_id)
     return 0;
 }
 
+/* Check if a GID is mappable and used for legacy ToUnicode entries */
+static int ttf_gid_in_tounicode(const struct ttf_face *f, int gid)
+{
+    if (!f->gid_to_cp[gid])
+        return 0;
+
+    if (f->used_gids && !f->used_gids[gid])
+        return 0;
+
+    return 1;
+}
+
+/* Write a bfchar entry, using UTF-16 surrogate pairs for non-BMP */
+static int pdf_write_bfchar_entry(pdf_buf *b, unsigned int cid, unsigned int cp)
+{
+    unsigned int v;
+    unsigned int hi;
+    unsigned int lo;
+
+    if (cp <= 0xFFFF)
+        return pdfb_printf(b, "<%04X> <%04X>\n", cid & 0xFFFF, cp);
+
+    v = cp - 0x10000;
+    hi = 0xD800 | ((v >> 10) & 0x3FF);
+    lo = 0xDC00 | (v & 0x3FF);
+
+    return pdfb_printf(b, "<%04X> <%04X%04X>\n", cid & 0xFFFF, hi, lo);
+}
+
+static int pdf_write_ttf_tounicode(pdf_out *o, const struct ttf_face *f, int id)
+{
+    pdf_buf b;
+    int i;
+    int total_mapped;
+    int chunk_count;
+    int rc;
+    int use_renumber;
+
+    if (!f->gid_to_cp)
+        return -1;
+
+    use_renumber = (f->gid_rev && f->n_sub_gids > 0);
+
+    total_mapped = 0;
+
+    if (use_renumber)
+    {
+        for (i = 1; i < f->n_sub_gids; i++)
+        {
+            int old = f->gid_rev[i];
+
+            if (old > 0 && old < f->num_glyphs && f->gid_to_cp[old])
+                total_mapped++;
+        }
+    }
+    else
+    {
+        for (i = 1; i < f->num_glyphs; i++)
+        {
+            if (ttf_gid_in_tounicode(f, i))
+                total_mapped++;
+        }
+    }
+
+    if (total_mapped == 0)
+        return -1;
+
+    pdfb_init(&b);
+
+    rc = 0;
+
+    if (pdfb_puts(&b, "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n") != 0)
+        rc = -1;
+
+    if (rc == 0 && pdfb_puts(&b, "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n") != 0)
+        rc = -1;
+
+    if (rc == 0 && pdfb_puts(&b, "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n") != 0)
+        rc = -1;
+
+    /* bfchar chunks, 100 entries max per spec */
+    i = 1;
+    chunk_count = 0;
+
+    while (rc == 0 && chunk_count < total_mapped)
+    {
+        int chunk;
+        int written;
+        int j;
+        int upper;
+
+        chunk = total_mapped - chunk_count;
+
+        if (chunk > 100)
+            chunk = 100;
+
+        if (chunk <= 0)
+            break;
+
+        if (pdfb_printf(&b, "%d beginbfchar\n", chunk) != 0)
+        {
+            rc = -1;
+            break;
+        }
+
+        written = 0;
+        upper = use_renumber ? f->n_sub_gids : f->num_glyphs;
+
+        for (j = i; j < upper && written < chunk; j++)
+        {
+            unsigned int cp;
+            unsigned int cid;
+
+            if (use_renumber)
+            {
+                int old = f->gid_rev[j];
+
+                if (old <= 0 || old >= f->num_glyphs)
+                    continue;
+
+                cp = f->gid_to_cp[old];
+
+                if (!cp)
+                    continue;
+
+                cid = (unsigned int)j;
+            }
+            else
+            {
+                if (!ttf_gid_in_tounicode(f, j))
+                    continue;
+
+                cp = f->gid_to_cp[j];
+                cid = (unsigned int)j;
+            }
+
+            if (pdf_write_bfchar_entry(&b, cid, cp) != 0)
+            {
+                rc = -1;
+                break;
+            }
+
+            written++;
+        }
+
+        if (rc == 0 && pdfb_puts(&b, "endbfchar\n") != 0)
+            rc = -1;
+
+        i = j;
+        chunk_count += written;
+    }
+
+    if (rc == 0 && pdfb_puts(&b, "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n") != 0)
+        rc = -1;
+
+    if (rc == 0)
+        rc = pdf_emit_stream(o, id, &b);
+
+    pdfb_free(&b);
+
+    return rc;
+}
+
 /* Emit the /W array of a CIDFontType2 for one TTF face. Widths in 1/1000 em */
 static int pdf_write_ttf_widths(pdf_out *o, const struct ttf_face *f)
 {
     int i;
     int upem = f->units_per_em;
 
-    if (pdf_puts(o, "/W [ 0 [") != 0)
+    if (pdf_puts(o, "/W [") != 0)
         return -1;
 
-    for (i = 0; i < f->num_glyphs; i++)
+    /* Build /W array, compact when renumbering, full otherwise */
+    if (f->gid_rev && f->n_sub_gids > 0)
     {
-        int adv;
+        if (pdf_puts(o, " 0 [") != 0)
+            return -1;
 
-        adv = ttf_face_advance(f, i) * 1000 / upem;
+        for (i = 0; i < f->n_sub_gids; i++)
+        {
+            int old = f->gid_rev[i];
+            int adv = ttf_face_advance(f, old) * 1000 / upem;
 
-        if (pdf_printf(o, "%s%d", i > 0 ? " " : "", adv) != 0)
+            if (pdf_printf(o, "%s%d", i > 0 ? " " : "", adv) != 0)
+                return -1;
+        }
+
+        if (pdf_puts(o, "]") != 0)
+            return -1;
+    }
+    else if (f->used_gids)
+    {
+        for (i = 0; i < f->num_glyphs; i++)
+        {
+            int adv;
+
+            if (!f->used_gids[i])
+                continue;
+
+            adv = ttf_face_advance(f, i) * 1000 / upem;
+
+            if (pdf_printf(o, " %d [%d]", i, adv) != 0)
+                return -1;
+        }
+    }
+    else
+    {
+        if (pdf_puts(o, " 0 [") != 0)
+            return -1;
+
+        for (i = 0; i < f->num_glyphs; i++)
+        {
+            int adv;
+
+            adv = ttf_face_advance(f, i) * 1000 / upem;
+
+            if (pdf_printf(o, "%s%d", i > 0 ? " " : "", adv) != 0)
+                return -1;
+        }
+
+        if (pdf_puts(o, "]") != 0)
             return -1;
     }
 
-    return pdf_puts(o, "] ]\n");
+    return pdf_puts(o, " ]\n");
 }
 
 /* Emit the four PDF objects that represent one embedded TrueType or CFF face */
-static int pdf_write_ttf_face(pdf_out *o, const struct ttf_face *f, int face_idx, int type0_id, int cid_id, int fd_id, int ff_id)
+static int pdf_write_ttf_face(pdf_out *o, const struct ttf_face *f, int face_idx, int type0_id, int cid_id, int fd_id, int ff_id, int tou_id)
 {
     char name[32];
     int upem;
@@ -1826,6 +2898,9 @@ static int pdf_write_ttf_face(pdf_out *o, const struct ttf_face *f, int face_idx
     const char *cid_subtype = NULL;
     const char *cid_extra = NULL;
     const char *file_key = NULL;
+    const unsigned char *emit_bytes = NULL;
+    size_t emit_len;
+    char extra[64];
 
     snprintf(name, sizeof(name), "TinyFace%d", face_idx);
 
@@ -1843,12 +2918,20 @@ static int pdf_write_ttf_face(pdf_out *o, const struct ttf_face *f, int face_idx
         file_key = "FontFile2";
     }
 
-    /* Type 0 Font */
+    /* Type0 font, optional /ToUnicode enables copy, search and accessibility */
     if (pdf_begin_obj(o, type0_id) != 0)
         return -1;
 
-    if (pdf_printf(o, "<< /Type /Font /Subtype /Type0 /BaseFont /%s /Encoding /Identity-H /DescendantFonts [%d 0 R] >>\n", name, cid_id) != 0)
-        return -1;
+    if (tou_id > 0)
+    {
+        if (pdf_printf(o, "<< /Type /Font /Subtype /Type0 /BaseFont /%s /Encoding /Identity-H /DescendantFonts [%d 0 R] /ToUnicode %d 0 R >>\n", name, cid_id, tou_id) != 0)
+            return -1;
+    }
+    else
+    {
+        if (pdf_printf(o, "<< /Type /Font /Subtype /Type0 /BaseFont /%s /Encoding /Identity-H /DescendantFonts [%d 0 R] >>\n", name, cid_id) != 0)
+            return -1;
+    }
 
     if (pdf_end_obj(o) != 0)
         return -1;
@@ -1857,7 +2940,7 @@ static int pdf_write_ttf_face(pdf_out *o, const struct ttf_face *f, int face_idx
     if (pdf_begin_obj(o, cid_id) != 0)
         return -1;
 
-    if (pdf_printf(o, "<< /Type /Font /Subtype /%s /BaseFont /%s /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor %d 0 R%s ", cid_subtype, name, fd_id, cid_extra) != 0)
+    if (pdf_printf(o, "<< /Type /Font /Subtype /%s /BaseFont /%s /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor %d 0 R /DW %d%s ", cid_subtype, name, fd_id, f->units_per_em > 0 ? ttf_face_advance(f, 0) * 1000 / f->units_per_em : 500, cid_extra) != 0)
         return -1;
 
     if (pdf_write_ttf_widths(o, f) != 0)
@@ -1888,28 +2971,24 @@ static int pdf_write_ttf_face(pdf_out *o, const struct ttf_face *f, int face_idx
     if (pdf_end_obj(o) != 0)
         return -1;
 
-    /* Font stream: raw TTF/OTF bytes */
-    if (pdf_begin_obj(o, ff_id) != 0)
-        return -1;
-
-    if (f->is_otf)
+    /* Emit subset or raw TTF/OTF bytes, Length1 is the pre-Flate size */
+    if (f->subset_bytes && f->subset_len > 0)
     {
-        if (pdf_printf(o, "<< /Length %lu /Subtype /OpenType >>\nstream\n", (unsigned long)f->len) != 0)
-            return -1;
+        emit_bytes = f->subset_bytes;
+        emit_len = f->subset_len;
     }
     else
     {
-        if (pdf_printf(o, "<< /Length %lu /Length1 %lu >>\nstream\n", (unsigned long)f->len, (unsigned long)f->len) != 0)
-            return -1;
+        emit_bytes = f->bytes;
+        emit_len = f->len;
     }
 
-    if (pdf_write_raw(o, f->bytes, f->len) != 0)
-        return -1;
+    if (f->is_otf)
+        snprintf(extra, sizeof(extra), "/Subtype /OpenType");
+    else
+        snprintf(extra, sizeof(extra), "/Length1 %lu", (unsigned long)emit_len);
 
-    if (pdf_puts(o, "\nendstream\n") != 0)
-        return -1;
-
-    return pdf_end_obj(o);
+    return pdf_emit_stream_maybe_deflate(o, ff_id, emit_bytes, emit_len, extra, 1);
 }
 
 int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, size_t errsz, char *warn, size_t warnsz)
@@ -1982,31 +3061,10 @@ int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
             rc = -1;
     }
 
-    /* Allocate font object ids before the resource catalog */
+    /* Emit base-14 font objects now, defer TTF ids until after body */
     if (rc == 0)
     {
-        if (fc.mode == 1)
-        {
-            for (f = 0; f < fc.n_faces && rc == 0; f++)
-            {
-                int t0 = pdf_alloc_id(&o);
-                int cid = pdf_alloc_id(&o);
-                int fd = pdf_alloc_id(&o);
-                int ff = pdf_alloc_id(&o);
-
-                if (t0 == 0 || cid == 0 || fd == 0 || ff == 0)
-                {
-                    rc = -1;
-                    break;
-                }
-
-                fc.face_type0_id[f] = t0;
-
-                if (pdf_write_ttf_face(&o, &fc.faces[f], f, t0, cid, fd, ff) != 0)
-                    rc = -1;
-            }
-        }
-        else
+        if (fc.mode != 1)
         {
             font_reg_id = pdf_alloc_id(&o);
             font_bold_id = pdf_alloc_id(&o);
@@ -2046,39 +3104,6 @@ int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
             rc = -1;
         else if (pdf_end_obj(&o) != 0)
             rc = -1;
-    }
-
-    /* Resources dict: base-14 uses F0..F3, TTF mode uses TT0..TTn */
-    if (rc == 0)
-    {
-        if (pdf_begin_obj(&o, resources_id) != 0)
-            rc = -1;
-        else if (pdf_puts(&o, "<< /Font << ") != 0)
-            rc = -1;
-        else
-        {
-            if (fc.mode == 1)
-            {
-                for (f = 0; f < fc.n_faces && rc == 0; f++)
-                {
-                    if (pdf_printf(&o, "/TT%d %d 0 R ", f, fc.face_type0_id[f]) != 0)
-                        rc = -1;
-                }
-            }
-            else
-            {
-                if (pdf_printf(&o, "/%s %d 0 R /%s %d 0 R /%s %d 0 R /%s %d 0 R ", PDF_FN_REGULAR, font_reg_id, PDF_FN_BOLD, font_bold_id, PDF_FN_ITALIC, font_it_id, PDF_FN_BOLDITALIC, font_bi_id) != 0)
-                    rc = -1;
-            }
-        }
-
-        if (rc == 0)
-        {
-            if (pdf_puts(&o, ">> /ProcSet [/PDF /Text] >>\n") != 0)
-                rc = -1;
-            else if (pdf_end_obj(&o) != 0)
-                rc = -1;
-        }
     }
 
     /* Body: build paragraphs, flush at every LB_PARA */
@@ -2134,7 +3159,7 @@ int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
         }
     }
 
-    /* Flush any pending paragraph (belt-and-braces: normally the last-line branch above already ran, but if ed->count == 0 we skip that) */
+    /* Flush any pending paragraph (belt-and-braces) */
     if (rc == 0 && para.has_content)
     {
         if (pdf_pager_emit_para(&pager, &para, &o.lossy) != 0)
@@ -2154,6 +3179,100 @@ int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
             rc = -1;
         else if (pdf_pager_close_page(&pager) != 0)
             rc = -1;
+    }
+
+    /* Subset, allocate and embed only the TTF faces that were used */
+    if (rc == 0 && fc.mode == 1)
+    {
+        for (f = 0; f < fc.n_faces && rc == 0; f++)
+        {
+            int t0;
+            int cid;
+            int fd;
+            int ff;
+            int tou;
+
+            if (!fc.faces[f].was_used)
+            {
+                fc.face_type0_id[f] = 0;
+                continue;
+            }
+
+            if (fc.faces[f].used_gids)
+            {
+                ttf_face_close_composites(&fc.faces[f]);
+                ttf_face_subset(&fc.faces[f]);
+            }
+
+            t0 = pdf_alloc_id(&o);
+            cid = pdf_alloc_id(&o);
+            fd = pdf_alloc_id(&o);
+            ff = pdf_alloc_id(&o);
+            tou = pdf_alloc_id(&o);
+
+            if (t0 == 0 || cid == 0 || fd == 0 || ff == 0 || tou == 0)
+            {
+                rc = -1;
+                break;
+            }
+
+            fc.face_type0_id[f] = t0;
+
+            if (pdf_write_ttf_face(&o, &fc.faces[f], f, t0, cid, fd, ff, tou) != 0)
+            {
+                rc = -1;
+                break;
+            }
+
+            if (pdf_write_ttf_tounicode(&o, &fc.faces[f], tou) != 0)
+            {
+                /* Non-fatal: emit an empty placeholder CMap so the reference stays valid */
+                pdf_buf empty;
+
+                pdfb_init(&empty);
+
+                if (pdfb_puts(&empty, "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n") == 0)
+                    pdf_emit_stream(&o, tou, &empty);
+
+                pdfb_free(&empty);
+            }
+        }
+    }
+
+    /* Emit resources dictionary now, only listing embedded faces */
+    if (rc == 0)
+    {
+        if (pdf_begin_obj(&o, resources_id) != 0)
+            rc = -1;
+        else if (pdf_puts(&o, "<< /Font << ") != 0)
+            rc = -1;
+        else
+        {
+            if (fc.mode == 1)
+            {
+                for (f = 0; f < fc.n_faces && rc == 0; f++)
+                {
+                    if (fc.face_type0_id[f] == 0)
+                        continue;
+
+                    if (pdf_printf(&o, "/TT%d %d 0 R ", f, fc.face_type0_id[f]) != 0)
+                        rc = -1;
+                }
+            }
+            else
+            {
+                if (pdf_printf(&o, "/%s %d 0 R /%s %d 0 R /%s %d 0 R /%s %d 0 R ", PDF_FN_REGULAR, font_reg_id, PDF_FN_BOLD, font_bold_id, PDF_FN_ITALIC, font_it_id, PDF_FN_BOLDITALIC, font_bi_id) != 0)
+                    rc = -1;
+            }
+        }
+
+        if (rc == 0)
+        {
+            if (pdf_puts(&o, ">> /ProcSet [/PDF /Text] >>\n") != 0)
+                rc = -1;
+            else if (pdf_end_obj(&o) != 0)
+                rc = -1;
+        }
     }
 
     /* Pages tree, written after we know all page ids */

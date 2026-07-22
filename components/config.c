@@ -447,6 +447,11 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->tts_volume = 100;
 #endif /* HAVE_TTS */
 
+    cfg->print_last_choice = 0; /* local */
+    cfg->print_ipp_host[0] = '\0';
+    cfg->print_ipp_queue[0] = '\0';
+    cfg->print_ipp_port = 0;
+
     /* White-on-black fallback */
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
     {
@@ -1240,6 +1245,34 @@ int te_cfg_load(TeConfig *cfg, const char *path)
                 cfg->tts_volume = 100;
         }
 #endif /* HAVE_TTS */
+        else if (strcasecmp(word, "PRINT_DESTINATION") == 0)
+        {
+            if (strcasecmp(rest, "IPPS") == 0)
+                cfg->print_last_choice = 2;
+            else if (strcasecmp(rest, "IPP") == 0)
+                cfg->print_last_choice = 1;
+            else
+                cfg->print_last_choice = 0;
+        }
+        else if (strcasecmp(word, "PRINT_IPP_HOST") == 0)
+        {
+            strncpy(cfg->print_ipp_host, rest, sizeof(cfg->print_ipp_host) - 1);
+
+            cfg->print_ipp_host[sizeof(cfg->print_ipp_host) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_IPP_QUEUE") == 0)
+        {
+            strncpy(cfg->print_ipp_queue, rest, sizeof(cfg->print_ipp_queue) - 1);
+
+            cfg->print_ipp_queue[sizeof(cfg->print_ipp_queue) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_IPP_PORT") == 0)
+        {
+            cfg->print_ipp_port = atoi(rest);
+
+            if (cfg->print_ipp_port < 0 || cfg->print_ipp_port > 65535)
+                cfg->print_ipp_port = 0;
+        }
     }
 
     fclose(f);
@@ -1248,7 +1281,6 @@ int te_cfg_load(TeConfig *cfg, const char *path)
 }
 
 /* Save */
-
 static const char *color_name(int c)
 {
     switch (c)
@@ -1377,7 +1409,11 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "ASSIST_REPEAT_CHECK") == 0 ||
                 strcasecmp(word, "WORD_MOVE_MODE") == 0 ||
                 strcasecmp(word, "COLOR") == 0 ||
-                strcasecmp(word, "COLORMAP") == 0
+                strcasecmp(word, "COLORMAP") == 0 ||
+                strcasecmp(word, "PRINT_DESTINATION") == 0 ||
+                strcasecmp(word, "PRINT_IPP_HOST") == 0 ||
+                strcasecmp(word, "PRINT_IPP_QUEUE") == 0 ||
+                strcasecmp(word, "PRINT_IPP_PORT") == 0
 #ifdef HAVE_HUNSPELL
                 || strcasecmp(word, "SPELL_ENABLED") == 0 || strcasecmp(word, "SPELL_DICT_PATH") == 0 || strcasecmp(word, "SPELL_DICT_NAME") == 0 || strcasecmp(word, "SPELL_CUSTOM_DICT") == 0
 #ifdef HAVE_HYPHEN
@@ -1584,6 +1620,17 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "TTS_PITCH %d\n", cfg->tts_pitch);
     fprintf(out, "TTS_VOLUME %d\n", cfg->tts_volume);
 #endif /* HAVE_TTS */
+
+    fprintf(out, "PRINT_DESTINATION %s\n", cfg->print_last_choice == 2 ? "IPPS" : (cfg->print_last_choice == 1 ? "IPP" : "LOCAL"));
+
+    if (cfg->print_ipp_host[0])
+        fprintf(out, "PRINT_IPP_HOST %s\n", cfg->print_ipp_host);
+
+    if (cfg->print_ipp_queue[0])
+        fprintf(out, "PRINT_IPP_QUEUE %s\n", cfg->print_ipp_queue);
+
+    if (cfg->print_ipp_port > 0)
+        fprintf(out, "PRINT_IPP_PORT %d\n", cfg->print_ipp_port);
 
     fclose(out);
 

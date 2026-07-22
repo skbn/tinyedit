@@ -30,6 +30,9 @@ extern "C"
     /* User pressed Alt+R - translate selection */
     int ui_translate_action(TeApp *app);
 
+    /* Replace selection with translated text */
+    int ui_translate_replace_selection(TeApp *app, int first, int last, const char *new_utf8);
+
 #else
 
 /* Inert stubs */

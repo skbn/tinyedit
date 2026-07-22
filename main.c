@@ -354,6 +354,7 @@ int main(int argc, char **argv)
     define_key("\033R", KEY_ALT('R'));
     define_key("\033m", KEY_ALT('M'));
     define_key("\033M", KEY_ALT('M'));
+    define_key("\033\r", KEY_ALT_CTRL('M'));
     define_key("\033n", KEY_ALT('N'));
     define_key("\033N", KEY_ALT('N'));
     define_key("\033v", KEY_ALT('V'));

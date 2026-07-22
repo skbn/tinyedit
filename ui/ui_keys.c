@@ -158,6 +158,11 @@ static const char *HELP_LINES[] =
         "    F4 / Alt+T       Setup / configuration",
         "    Alt+U            Unicode glyph picker",
 #ifdef PLATFORM_AMIGA
+        "    Alt+Shift+M      Print popup",
+#else
+        "    Ctrl+Alt+M       Print popup",
+#endif
+#ifdef PLATFORM_AMIGA
         "    Alt+Shift+S      Cycle syntax language",
 #else
         "    Ctrl+Alt+S       Cycle syntax language",
@@ -178,6 +183,7 @@ static const char *HELP_LINES[] =
 #include "ui_glyph_picker.h"
 #include "ui_mouse.h"
 #include "ui_assist.h"
+#include "ui_print.h"
 
 #ifdef HAVE_TRANSLATE
 #include "ui_translate.h"
@@ -930,6 +936,16 @@ int handle_function_keys(TeApp *app, int ch, int is_key)
 #endif
     {
         ui_tts_pause_toggle(app);
+        return 1;
+    }
+
+#ifdef PLATFORM_AMIGA
+    if (is_key && ch == KEY_SHIFT('M'))
+#else
+    if (is_key && ch == KEY_ALT_CTRL('M'))
+#endif
+    {
+        ui_editor_print(app);
         return 1;
     }
 

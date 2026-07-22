@@ -948,13 +948,13 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     align_ind = line_align_indent(cur_align, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width);
     eff_ln_offset = ln_offset + align_ind;
 
-    /* Justify only intermediate sub-rows of a paragraph, the last one keeps its natural width */
+    /* Justify intermediate sub-rows and single-line paragraphs */
     is_para_last = (seg_end == len) && (cur_brk == LB_PARA);
 
     /* When the tail of this EdLine breaks with a hyphen the glyph goes into the last column */
     hyph_reserve = (seg_end == len && cur_brk == LB_HYPHEN) ? 1 : 0;
 
-    if (cur_align == EA_ALIGN_JUST && !is_para_last && seg_len > 0 && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
+    if (ed_segment_should_justify(cur_align, is_para_last, seg_start == 0 && seg_end == len) && seg_len > 0 && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
     {
         int text_vw_now = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width);
         int target_vw = width - hyph_reserve;

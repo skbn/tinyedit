@@ -123,6 +123,12 @@ typedef struct
     /* Mouse support: 0=disabled, 1=enabled */
     int mouse_enabled;
 
+    /* Printing: last destination and IPP endpoint remembered across sessions */
+    int print_last_choice;                /* 0=local 1=IPP 2=IPPS */
+    char print_ipp_host[TE_CFG_STR_MAX];  /* hostname or IP */
+    char print_ipp_queue[TE_CFG_STR_MAX]; /* queue name */
+    int print_ipp_port;                   /* 0 = protocol default (631) */
+
     /* Amiga color palette mapping (COLORMAP): physical pen for each logical color */
     int color_map[16];
     int color_map_initialized; /* 1 if user configured COLORMAP explicitly */

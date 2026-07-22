@@ -2394,6 +2394,19 @@ int ui_rich_align_set(TeApp *app, unsigned char align)
     return 1;
 }
 
+/* Returns 1 if a visual sub-row should be justified */
+int ed_segment_should_justify(unsigned char align, int last_subrow, int only_subrow)
+{
+    if (align != EA_ALIGN_JUST)
+        return 0;
+
+    /* Justify every sub-row except the last one of a multi-line paragraph */
+    if (last_subrow && !only_subrow)
+        return 0;
+
+    return 1;
+}
+
 /* Fit a freshly loaded document to the configured column, no undo */
 void ui_editor_rewrap_loaded(TeApp *app)
 {

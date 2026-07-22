@@ -27,7 +27,7 @@
 
 #ifdef HAVE_TRANSLATE
 #include "../translate/translate.h"
-#include "../translate/http_client.h"
+#include "../core/http_client.h"
 #include "../translate/translate_stardict.h"
 #endif
 
@@ -338,6 +338,63 @@ static int replace_lines(TeApp *app, int first, int last, const char *new_utf8)
     return 0;
 }
 
+/* Replace selection: partial single-line ranges are replaced in-place. Multi-line selections fall back to line replacement */
+int ui_translate_replace_selection(TeApp *app, int first, int last, const char *new_utf8)
+{
+    Ed *ed = te_app_get_editor(app);
+    EdInfo info;
+    int r1, c1, r2, c2;
+
+    if (!ed || !new_utf8)
+        return -1;
+
+    ed_get_info(ed, &info);
+
+    if (info.block.active)
+    {
+        int ar = info.block.anchor_row;
+        int ac = info.block.anchor_col;
+        int cr = info.row;
+        int cc = info.col;
+
+        if (ar < cr || (ar == cr && ac < cc))
+        {
+            r1 = ar;
+            c1 = ac;
+            r2 = cr;
+            c2 = cc;
+        }
+        else
+        {
+            r1 = cr;
+            c1 = cc;
+            r2 = ar;
+            c2 = ac;
+        }
+
+        /* Same-line partial selection: replace only the selected columns */
+        if (r1 == r2 && c1 != c2 && first == r1 && last == r1 && strchr(new_utf8, '\n') == NULL)
+        {
+            wchar_t *replacement = NULL;
+            int rlen = 0;
+            int rc;
+
+            replacement = utf8_to_wcs(new_utf8, &rlen);
+
+            if (!replacement)
+                return -1;
+
+            rc = ed_replace_word_with_undo(ed, r1, c1, c2, replacement, rlen);
+
+            free(replacement);
+
+            return rc;
+        }
+    }
+
+    return replace_lines(app, first, last, new_utf8);
+}
+
 /* Show the source preview + result in a popup; offer Replace/Insert/Cancel */
 static int translate_show_popup(TeApp *app, const char *src, const char *dst, const char *result_utf8, const char *err_msg)
 {
@@ -488,7 +545,7 @@ int ui_translate_action(TeApp *app)
     if (choice == 1)
     {
         /* The helper owns the undo delta and the reflow */
-        if (replace_lines(app, first, last, result) == 0)
+        if (ui_translate_replace_selection(app, first, last, result) == 0)
         {
             te_status(app, "Replaced %d line(s) with translation", last - first + 1);
 

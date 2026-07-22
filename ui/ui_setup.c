@@ -18,6 +18,7 @@
 #include "te.h"
 #include "ui_setup.h"
 #include "ui_files.h"
+#include "ui_view.h"
 #include "core/portable.h"
 #include "../components/config.h"
 #include "../core/charset.h"
@@ -1625,6 +1626,7 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 
         if (key == KEY_F(10) || key == 'S' || key == 's')
         {
+            TeConfig old_cfg;
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
             int fi;
             int fallbacks_changed = 0;
@@ -1644,6 +1646,7 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
                 continue;
             }
 
+            old_cfg = *cfg;
             *cfg = work;
 
             view_set_tab_width(cfg->tab_width > 0 ? cfg->tab_width : 4);
@@ -1651,20 +1654,20 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 
 #if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
             /* Detect changes that require a font backend reload or window restart */
-            font_mode_changed = (cfg->ttf_enabled != work.ttf_enabled) || (strcmp(cfg->font, work.font) != 0) || (cfg->ttf_size != work.ttf_size);
+            font_mode_changed = (old_cfg.ttf_enabled != work.ttf_enabled) || (strcmp(old_cfg.font, work.font) != 0) || (old_cfg.ttf_size != work.ttf_size);
 
             if (work.ttf_enabled)
             {
                 for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)
                 {
-                    if (strcmp(cfg->ttf_fallback[fi], work.ttf_fallback[fi]) != 0 || cfg->ttf_fallback_size[fi] != work.ttf_fallback_size[fi])
+                    if (strcmp(old_cfg.ttf_fallback[fi], work.ttf_fallback[fi]) != 0 || old_cfg.ttf_fallback_size[fi] != work.ttf_fallback_size[fi])
                     {
                         fallbacks_changed = 1;
                         break;
                     }
                 }
 
-                if (strcmp(cfg->ttf_font, work.ttf_font) != 0 || cfg->ttf_size != work.ttf_size || cfg->ttf_antialias != work.ttf_antialias || cfg->ttf_use_utf8 != work.ttf_use_utf8 || fallbacks_changed)
+                if (strcmp(old_cfg.ttf_font, work.ttf_font) != 0 || old_cfg.ttf_size != work.ttf_size || old_cfg.ttf_antialias != work.ttf_antialias || old_cfg.ttf_use_utf8 != work.ttf_use_utf8 || fallbacks_changed)
                     ttf_details_changed = 1;
             }
 

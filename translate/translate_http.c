@@ -9,7 +9,7 @@
  * (at your option) any later version.
  */
 
-#include "http_client.h"
+#include "../core/http_client.h"
 #include "json_utils.h"
 
 #include <stdio.h>
