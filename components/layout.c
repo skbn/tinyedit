@@ -76,12 +76,18 @@ static int try_hyphen(const wchar_t *text, int ws, int we, int line_start, int w
 {
     int breaks[64];
     int n;
-    int wlen = we - ws;
+    int wlen;
     int best = 0;
     int i;
 
     if (!o->hyphenate || !o->hyphen)
         return 0;
+
+    /* Skip leading punctuation so min_word counts real letters */
+    while (ws < we - 1 && (text[ws] == L'¿' || text[ws] == L'¡' || text[ws] == L'(' || text[ws] == L'[' || text[ws] == L'{' || text[ws] == L'"' || text[ws] == L'\''))
+        ws++;
+
+    wlen = we - ws;
 
     if (wlen < o->min_word)
         return 0;

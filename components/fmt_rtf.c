@@ -70,6 +70,11 @@ struct rtf_ctx
     int n_aligns;
     int cap_aligns;
 
+    /* Per-line break kind, grown on demand */
+    unsigned char *brks;
+    int n_brks;
+    int cap_brks;
+
     /* Group stack */
     struct rtf_state stack[RTF_MAX_DEPTH];
     int depth;
@@ -241,10 +246,42 @@ static int rtf_put_align(struct rtf_ctx *c)
     return 0;
 }
 
-/* End of paragraph: flush the run, store alignment, emit a newline */
-static int rtf_par(struct rtf_ctx *c)
+/* Record the break kind of the line being closed */
+static int rtf_put_brk(struct rtf_ctx *c, unsigned char brk)
 {
-    if (rtf_flush_run(c) != 0 || rtf_put_align(c) != 0)
+    unsigned char *nb = NULL;
+    int nc;
+
+    if (c->line >= c->cap_brks)
+    {
+        nc = c->cap_brks > 0 ? c->cap_brks * 2 : 64;
+
+        while (nc <= c->line)
+            nc *= 2;
+
+        nb = (unsigned char *)realloc(c->brks, (size_t)nc);
+
+        if (!nb)
+            return -1;
+
+        memset(nb + c->cap_brks, 0, (size_t)(nc - c->cap_brks));
+
+        c->brks = nb;
+        c->cap_brks = nc;
+    }
+
+    c->brks[c->line] = brk;
+
+    if (c->line + 1 > c->n_brks)
+        c->n_brks = c->line + 1;
+
+    return 0;
+}
+
+/* End of paragraph: flush the run, store alignment, emit a newline */
+static int rtf_par(struct rtf_ctx *c, unsigned char brk)
+{
+    if (rtf_flush_run(c) != 0 || rtf_put_align(c) != 0 || rtf_put_brk(c, brk) != 0)
         return -1;
 
     if (rtf_text_reserve(c, 1) != 0)
@@ -398,7 +435,7 @@ static int rtf_control(struct rtf_ctx *c)
         }
         case '\r':
         case '\n':
-            return rtf_par(c);
+            return rtf_par(c, LB_PARA);
         default:
             rtf_seterr(c, at, "unsupported control symbol", NULL);
             return -1;
@@ -525,8 +562,11 @@ static int rtf_control(struct rtf_ctx *c)
         return 0;
     }
 
-    if (strcmp(word, "par") == 0 || strcmp(word, "line") == 0)
-        return rtf_par(c);
+    if (strcmp(word, "par") == 0)
+        return rtf_par(c, LB_PARA);
+
+    if (strcmp(word, "line") == 0)
+        return rtf_par(c, LB_SPACE);
 
     if (strcmp(word, "tab") == 0)
         return rtf_put_cp(c, (unsigned long)'\t');
@@ -695,7 +735,7 @@ int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, siz
         /* Close a trailing unterminated paragraph */
         if (c.col > 0 || c.line == 0)
         {
-            if (rtf_flush_run(&c) != 0 || rtf_put_align(&c) != 0)
+            if (rtf_flush_run(&c) != 0 || rtf_put_align(&c) != 0 || rtf_put_brk(&c, LB_PARA) != 0)
                 ok = 0;
         }
 
@@ -720,6 +760,10 @@ int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, siz
         for (i = 0; i < c.n_aligns && i < ed->count; i++)
             ed->lines[i]->para_align = c.aligns[i];
 
+        /* Stamp the per-line break kinds recorded during parsing */
+        for (i = 0; i < c.n_brks && i < ed->count; i++)
+            ed->lines[i]->brk = c.brks[i];
+
         if (c.dropped_colors && warn && warnsz > 0)
             snprintf(warn, warnsz, "color information was dropped (not supported yet)");
 
@@ -729,6 +773,7 @@ int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, siz
     free(c.text);
     free(c.runs);
     free(c.aligns);
+    free(c.brks);
 
     return rc;
 }

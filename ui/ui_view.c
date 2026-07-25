@@ -381,6 +381,7 @@ int view_cursor_align_indent(Ed *ed, int width)
     int seg_start = 0;
     int seg_end = 0;
     int seg_vw;
+    int hyph_reserve;
 
     ed_get_info(ed, &info);
 
@@ -394,7 +395,9 @@ int view_cursor_align_indent(Ed *ed, int width)
 
     seg_vw = wcs_vwidth_ex(&l[seg_start], seg_end - seg_start, 0, s_tab);
 
-    return view_align_indent(ed->lines[info.row]->para_align, seg_vw, width);
+    hyph_reserve = (seg_end == len && ed->lines[info.row]->brk == LB_HYPHEN) ? 1 : 0;
+
+    return view_align_indent(ed->lines[info.row]->para_align, seg_vw, width - hyph_reserve);
 }
 
 /* Extra columns to add to the cursor when its sub-row is being justified */
@@ -737,6 +740,7 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
     int left;
     int soft;
     int indent;
+    int hyph_reserve;
 
     if (!app || !out_line || !out_col)
         return -1;
@@ -785,7 +789,9 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
 
         l = ed_line_wcs(ed, line);
         len = ed_line_len(ed, line);
-        indent = view_align_indent(ed->lines[line]->para_align, (l && len > 0) ? wcs_vwidth_ex(l, len, 0, s_tab) : 0, width);
+
+        hyph_reserve = (ed->lines[line]->brk == LB_HYPHEN) ? 1 : 0;
+        indent = view_align_indent(ed->lines[line]->para_align, (l && len > 0) ? wcs_vwidth_ex(l, len, 0, s_tab) : 0, width - hyph_reserve);
 
         screen_x -= indent;
 
@@ -818,7 +824,8 @@ int ui_editor_screen_to_logical(TeApp *app, int width, int screen_y, int screen_
 
             view_subrow_range(l ? l : L"", l ? len : 0, width, sub + left, &seg_start, &seg_end);
 
-            indent = view_align_indent(ed->lines[line]->para_align, (l && seg_end > seg_start) ? wcs_vwidth_ex(&l[seg_start], seg_end - seg_start, 0, s_tab) : 0, width);
+            hyph_reserve = (seg_end == len && ed->lines[line]->brk == LB_HYPHEN) ? 1 : 0;
+            indent = view_align_indent(ed->lines[line]->para_align, (l && seg_end > seg_start) ? wcs_vwidth_ex(&l[seg_start], seg_end - seg_start, 0, s_tab) : 0, width - hyph_reserve);
 
             screen_x -= indent;
 

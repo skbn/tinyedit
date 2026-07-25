@@ -26,6 +26,7 @@ USE_TRANSLATE ?= 0
 USE_STARDICT ?= 0
 USE_TTS ?= 0
 USE_IPP ?= 0
+USE_URF ?= 0
 
 # Detect OS and warn if BSD make is used instead of gmake
 OS := $(shell uname -s)
@@ -47,6 +48,17 @@ AR = ar
 CDEFS = -DPLATFORM_UNIX -DTE_HAVE_ZLIB
 ifneq ($(BSD_OS),)
   CDEFS += -DPLATFORM_BSD
+endif
+
+# URF (Apple Raster) support. Requires FreeType.
+ifeq ($(USE_URF),1)
+  CDEFS += -DHAVE_URF
+  URF_CFLAGS := $(shell pkg-config --cflags freetype2 2>/dev/null)
+  URF_LIB := $(shell pkg-config --libs freetype2 2>/dev/null)
+  ifeq ($(URF_LIB),)
+    URF_CFLAGS = -I/usr/include/freetype2
+    URF_LIB = -lfreetype
+  endif
 endif
 
 # Hunspell support (uses system library on Unix)
@@ -161,7 +173,6 @@ endif
 # HTTP client layer (used by translate and by IPP printing).
 # Backends: libcurl on Unix/Windows, bsdsocket + AmiSSL on Amiga.
 # Activated whenever either USE_TRANSLATE=1 or USE_IPP=1
-USE_IPP ?= 1
 
 ifeq ($(USE_IPP),1)
   CFLAGS += -DHAVE_IPP
@@ -233,8 +244,8 @@ UIDIR = $(HERE)ui
 
 # Object files in objs/
 CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
-            $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/portable.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/print.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
+            $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/portable.o $(OBJDIR)/mdns.o $(OBJDIR)/printer_cache.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/fmt_pcl.o $(OBJDIR)/fmt_urf.o $(OBJDIR)/print.o $(OBJDIR)/print_amiga.o $(OBJDIR)/print_win32.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_view.o $(OBJDIR)/ui_keys.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o $(OBJDIR)/ui_assist.o $(OBJDIR)/ui_print.o \
@@ -293,6 +304,12 @@ $(OBJDIR)/utf8.o: $(COREDIR)/utf8.c $(COREDIR)/utf8.h | $(OBJDIR)
 $(OBJDIR)/portable.o: $(COREDIR)/portable.c $(COREDIR)/portable.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/mdns.o: $(COREDIR)/mdns.c $(COREDIR)/mdns.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/printer_cache.o: $(COREDIR)/printer_cache.c $(COREDIR)/printer_cache.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 # Component objects
 $(OBJDIR)/editor.o: $(COMPDIR)/editor.c $(COMPDIR)/editor.h $(COMPDIR)/ed_attr.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -317,8 +334,20 @@ $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_att
 $(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c $(COMPDIR)/fmt_pdf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/fmt_pdf.c -o $@
 
+$(OBJDIR)/fmt_pcl.o: $(COMPDIR)/fmt_pcl.c $(COMPDIR)/fmt_pcl.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/fmt_pcl.c -o $@
+
+$(OBJDIR)/fmt_urf.o: $(COMPDIR)/fmt_urf.c $(COMPDIR)/fmt_urf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_urf.c -o $@
+
 $(OBJDIR)/print.o: $(COMPDIR)/print.c $(COMPDIR)/print.h $(COMPDIR)/fmt_pdf.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print.c -o $@
+
+$(OBJDIR)/print_amiga.o: $(COMPDIR)/print_amiga.c $(COMPDIR)/print_amiga.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print_amiga.c -o $@
+
+$(OBJDIR)/print_win32.o: $(COMPDIR)/print_win32.c $(COMPDIR)/print_win32.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print_win32.c -o $@
 
 $(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -499,11 +528,11 @@ $(OBJDIR)/main.o: $(HERE)main.c | $(OBJDIR)
 
 $(TINYEDIT): $(OBJDIR)/main.o $(TARGET) $(ALL_OBJS)
 	$(CXX) $(CFLAGS) $(CDEFS) $(OBJDIR)/main.o $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB) $(TRANSLATE_LIB) -lz
+	      -o $@ $(NCURSES_LIB) $(HUNSPELL_LIB) $(HYPHEN_LIB) $(MYTHES_LIB) $(TRANSLATE_LIB) $(URF_LIB) -lz
 else
 $(TINYEDIT): $(HERE)main.c $(TARGET) $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) $(TARGET) \
-	      -o $@ $(NCURSES_LIB) $(HYPHEN_LIB) $(TRANSLATE_LIB) -lz
+	      -o $@ $(NCURSES_LIB) $(HYPHEN_LIB) $(TRANSLATE_LIB) $(URF_LIB) -lz
 endif
 
 clean:

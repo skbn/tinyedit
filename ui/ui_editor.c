@@ -945,14 +945,15 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     cur_align = l ? ed->lines[li]->para_align : 0;
     cur_brk = l ? ed->lines[li]->brk : LB_PARA;
 
-    align_ind = line_align_indent(cur_align, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width);
+    /* When the tail of this EdLine breaks with a hyphen the glyph goes into the last column */
+    hyph_reserve = (seg_end == len && cur_brk == LB_HYPHEN) ? 1 : 0;
+
+    /* Reserve one column for the hyphen so right/center alignment does not overlap it */
+    align_ind = line_align_indent(cur_align, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width - hyph_reserve);
     eff_ln_offset = ln_offset + align_ind;
 
     /* Justify intermediate sub-rows and single-line paragraphs */
     is_para_last = (seg_end == len) && (cur_brk == LB_PARA);
-
-    /* When the tail of this EdLine breaks with a hyphen the glyph goes into the last column */
-    hyph_reserve = (seg_end == len && cur_brk == LB_HYPHEN) ? 1 : 0;
 
     if (ed_segment_should_justify(cur_align, is_para_last, seg_start == 0 && seg_end == len) && seg_len > 0 && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
     {
@@ -1268,6 +1269,10 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
         int hx = seg_x_end(&sl, l);
         int left = offset_x + ln_offset;
         int right = left + width;
+
+        /* For right-aligned text seg_x_end lands exactly at the right edge. Clamp so the hyphen occupies the last visible cell */
+        if (hx >= right)
+            hx = right - 1;
 
         if (hx >= left && hx < right)
         {
@@ -1660,6 +1665,7 @@ static void position_cursor(TeApp *app)
         const wchar_t *wl = ed_line_wcs(te_app_get_editor(app), info.row);
         int line_len = ed_line_len(te_app_get_editor(app), info.row);
         int wchar_col = info.col;
+        int hyph_res;
 
         /* Convert wchar index to visual column for wide glyphs */
         if (wchar_col > line_len)
@@ -1671,7 +1677,8 @@ static void position_cursor(TeApp *app)
         cx = offset_x + ln_offset + (wl ? wcs_vwidth_ex(wl, wchar_col, 0, s_tab_width) : wchar_col);
 
         /* Follow paragraph alignment so the cursor sits with the text */
-        cx += line_align_indent(te_app_get_editor(app)->lines[info.row]->para_align, (wl && line_len > 0) ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0, width);
+        hyph_res = (te_app_get_editor(app)->lines[info.row]->brk == LB_HYPHEN) ? 1 : 0;
+        cx += line_align_indent(te_app_get_editor(app)->lines[info.row]->para_align, (wl && line_len > 0) ? wcs_vwidth_ex(wl, line_len, 0, s_tab_width) : 0, width - hyph_res);
 
         /* If the line is being visually justified, shift the cursor by the accumulated gap width */
         cx += view_cursor_justify_shift(te_app_get_editor(app), width);

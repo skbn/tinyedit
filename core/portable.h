@@ -76,6 +76,9 @@ long pf_get_file_mtime(const char *path);
 /* Portable path join */
 void pf_path_join(char *out, size_t outsize, const char *base, const char *sub);
 
+/* Portable atof with '.' as decimal separator, independent of locale */
+double pf_atof_dot(const char *s, const char **endptr);
+
 /* Portable safe strncpy (always NUL-terminates) */
 void pf_safe_strncpy(char *dst, const char *src, size_t dstsize);
 

@@ -15,6 +15,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(PLATFORM_WIN32)
+#include <windows.h>
+#endif
+
 #include "ipp.h"
 #include "../core/http_client.h"
 
@@ -28,6 +32,7 @@
 #define IPP_TAG_INTEGER 0x21
 #define IPP_TAG_BOOLEAN 0x22
 #define IPP_TAG_ENUM 0x23
+#define IPP_TAG_RESOLUTION 0x32
 #define IPP_TAG_RANGE 0x33
 
 #define IPP_TAG_URI 0x45
@@ -62,6 +67,48 @@ static void ipp_seterrf(char *err, size_t errsz, const char *fmt, int code)
 {
     if (err && errsz > 0)
         snprintf(err, errsz, fmt, code);
+}
+
+/* Rewrite ipp:// and ipps:// URIs to http:// and https:// for the wire POST */
+static int ipp_uri_to_http(const char *uri, char *out, size_t outsz)
+{
+    const char *rest = NULL;
+    const char *scheme = NULL;
+
+    if (!uri || !out || outsz < 8)
+        return -1;
+
+    if (strncmp(uri, "ipp://", 6) == 0)
+    {
+        scheme = "http://";
+        rest = uri + 6;
+    }
+    else if (strncmp(uri, "ipps://", 7) == 0)
+    {
+        scheme = "https://";
+        rest = uri + 7;
+    }
+    else if (strncmp(uri, "http://", 7) == 0 || strncmp(uri, "https://", 8) == 0)
+    {
+        /* Already an HTTP scheme; pass through */
+        if (strlen(uri) + 1 > outsz)
+            return -1;
+
+        memcpy(out, uri, strlen(uri) + 1);
+
+        return 0;
+    }
+    else
+    {
+        return -1;
+    }
+
+    if (strlen(scheme) + strlen(rest) + 1 > outsz)
+        return -1;
+
+    snprintf(out, outsz, "%s%s", scheme, rest);
+
+    return 0;
 }
 
 /* Bounded big-endian writers; overflow zeroes left and makes writes no-ops */
@@ -146,8 +193,126 @@ static void bw_attr(unsigned char **p, size_t *left, unsigned char tag, const ch
     bw_bytes(p, left, value, vl);
 }
 
-/* Build a Print-Job IPP request, return bytes written or -1 on overflow */
-static int ipp_build_print_job(unsigned char *buf, size_t bufsz, const char *printer_uri, const char *user, const char *job_name, const char *doc_format)
+/* Emit a keyword or name attribute holding an integer value (4 bytes BE) */
+static void bw_attr_int(unsigned char **p, size_t *left, unsigned char tag, const char *name, int value)
+{
+    size_t nl = strlen(name);
+
+    if (nl > 0xFFFF)
+    {
+        *left = 0;
+        return;
+    }
+
+    bw_u8(p, left, tag);
+    bw_u16(p, left, (unsigned int)nl);
+    bw_bytes(p, left, name, nl);
+    bw_u16(p, left, 4);
+    bw_u32(p, left, (unsigned int)value);
+}
+
+/* Emit a resolution attribute: cross-feed x feed with a units code (3=dpi, 4=dpc) */
+static void bw_attr_resolution(unsigned char **p, size_t *left, const char *name, int xf, int fd, int units)
+{
+    size_t nl = strlen(name);
+
+    if (nl > 0xFFFF)
+    {
+        *left = 0;
+        return;
+    }
+
+    bw_u8(p, left, IPP_TAG_RESOLUTION);
+    bw_u16(p, left, (unsigned int)nl);
+    bw_bytes(p, left, name, nl);
+    bw_u16(p, left, 9);
+    bw_u32(p, left, (unsigned int)xf);
+    bw_u32(p, left, (unsigned int)fd);
+    bw_u8(p, left, (unsigned int)units);
+}
+
+/* Best-effort username for IPP jobs, falling back to "user" */
+static void ipp_default_user(char *out, size_t outsz)
+{
+    const char *src = NULL;
+
+#if defined(PLATFORM_WIN32)
+    wchar_t wbuf[128];
+    char buf[512];
+    DWORD wcount;
+#endif
+
+    if (outsz == 0)
+        return;
+
+#if defined(PLATFORM_WIN32)
+    /* Use GetUserNameW and convert to UTF-8 to preserve non-ASCII names */
+    wcount = (DWORD)(sizeof(wbuf) / sizeof(wbuf[0]));
+
+    if (GetUserNameW(wbuf, &wcount) && wbuf[0])
+    {
+        if (WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, buf, (int)sizeof(buf), NULL, NULL) > 0)
+            src = buf;
+    }
+#else
+    src = getenv("USER");
+
+    if (!src || !src[0])
+        src = getenv("LOGNAME");
+#endif
+
+    if (!src || !src[0])
+        src = "user";
+
+    strncpy(out, src, outsz - 1);
+    out[outsz - 1] = '\0';
+}
+
+/* Best-effort RFC 5646 language tag from the locale, lowercased, defaulting to "en" */
+static void ipp_default_lang(char *out, size_t outsz)
+{
+    const char *loc = NULL;
+    int i;
+
+    if (outsz == 0)
+        return;
+
+    loc = getenv("LC_ALL");
+
+    if (!loc || !loc[0])
+        loc = getenv("LC_MESSAGES");
+
+    if (!loc || !loc[0])
+        loc = getenv("LANG");
+
+    if (!loc || !loc[0] || (loc[0] == 'C' && loc[1] == '\0') || strcmp(loc, "POSIX") == 0)
+    {
+        strncpy(out, "en", outsz - 1);
+        out[outsz - 1] = '\0';
+        return;
+    }
+
+    for (i = 0; i + 1 < (int)outsz && loc[i] && loc[i] != '.' && loc[i] != '_' && loc[i] != '@'; i++)
+    {
+        char c = loc[i];
+
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+
+        out[i] = c;
+    }
+
+    out[i] = '\0';
+
+    if (!out[0])
+    {
+        strncpy(out, "en", outsz - 1);
+        out[outsz - 1] = '\0';
+    }
+}
+
+/* Build a Print-Job IPP request with optional attrs, returning bytes written or -1 */
+static int ipp_build_print_job(unsigned char *buf, size_t bufsz, const char *printer_uri, const char *user, const char *lang, const char *job_name, const char *doc_format, const IppJobAttrs *attrs)
 {
     unsigned char *p = buf;
     size_t left = bufsz;
@@ -157,12 +322,68 @@ static int ipp_build_print_job(unsigned char *buf, size_t bufsz, const char *pri
     bw_u32(&p, &left, 1);      /* request-id */
     bw_u8(&p, &left, IPP_TAG_OP_ATTR);
 
+    /* attributes-charset must be UTF-8 per RFC 8011 for protocol string encoding */
     bw_attr(&p, &left, IPP_TAG_CHARSET, "attributes-charset", "utf-8");
-    bw_attr(&p, &left, IPP_TAG_LANG, "attributes-natural-language", "en");
+    bw_attr(&p, &left, IPP_TAG_LANG, "attributes-natural-language", (lang && lang[0]) ? lang : "en");
     bw_attr(&p, &left, IPP_TAG_URI, "printer-uri", printer_uri);
-    bw_attr(&p, &left, IPP_TAG_NAME, "requesting-user-name", user);
+    bw_attr(&p, &left, IPP_TAG_NAME, "requesting-user-name", (user && user[0]) ? user : "user");
     bw_attr(&p, &left, IPP_TAG_NAME, "job-name", job_name);
     bw_attr(&p, &left, IPP_TAG_MIMETYPE, "document-format", doc_format);
+
+    /* Job attributes group, only if caller set at least one field */
+    if (attrs)
+    {
+        int have_any = 0;
+
+        if ((attrs->media && attrs->media[0]) ||
+            (attrs->sides && attrs->sides[0]) ||
+            (attrs->color_mode && attrs->color_mode[0]) ||
+            attrs->quality > 0 ||
+            attrs->copies > 0 ||
+            attrs->orientation > 0 ||
+            attrs->number_up > 0 ||
+            (attrs->media_source && attrs->media_source[0]) ||
+            (attrs->media_type && attrs->media_type[0]) ||
+            (attrs->resolution_x > 0 && attrs->resolution_y > 0 && attrs->resolution_units > 0))
+        {
+            have_any = 1;
+        }
+
+        if (have_any)
+        {
+            bw_u8(&p, &left, IPP_TAG_JOB_ATTR);
+
+            if (attrs->media && attrs->media[0])
+                bw_attr(&p, &left, IPP_TAG_KEYWORD, "media", attrs->media);
+
+            if (attrs->sides && attrs->sides[0])
+                bw_attr(&p, &left, IPP_TAG_KEYWORD, "sides", attrs->sides);
+
+            if (attrs->color_mode && attrs->color_mode[0])
+                bw_attr(&p, &left, IPP_TAG_KEYWORD, "print-color-mode", attrs->color_mode);
+
+            if (attrs->quality > 0)
+                bw_attr_int(&p, &left, IPP_TAG_ENUM, "print-quality", attrs->quality);
+
+            if (attrs->copies > 0)
+                bw_attr_int(&p, &left, IPP_TAG_INTEGER, "copies", attrs->copies);
+
+            if (attrs->orientation > 0)
+                bw_attr_int(&p, &left, IPP_TAG_ENUM, "orientation-requested", attrs->orientation);
+
+            if (attrs->number_up > 0)
+                bw_attr_int(&p, &left, IPP_TAG_INTEGER, "number-up", attrs->number_up);
+
+            if (attrs->media_source && attrs->media_source[0])
+                bw_attr(&p, &left, IPP_TAG_KEYWORD, "media-source", attrs->media_source);
+
+            if (attrs->media_type && attrs->media_type[0])
+                bw_attr(&p, &left, IPP_TAG_KEYWORD, "media-type", attrs->media_type);
+
+            if (attrs->resolution_x > 0 && attrs->resolution_y > 0 && attrs->resolution_units > 0)
+                bw_attr_resolution(&p, &left, "printer-resolution", attrs->resolution_x, attrs->resolution_y, attrs->resolution_units);
+        }
+    }
 
     bw_u8(&p, &left, IPP_TAG_END);
 
@@ -193,14 +414,17 @@ static int ipp_parse_status(const char *body, int body_len, char *err, size_t er
     return -1;
 }
 
-int ipp_print_document(const char *uri, const char *job_name, const char *doc_fmt, const unsigned char *doc, size_t doc_len, char *err, size_t errsz)
+int ipp_print_document(const char *uri, const char *job_name, const char *doc_fmt, const IppJobAttrs *attrs, const unsigned char *doc, size_t doc_len, char *err, size_t errsz)
 {
     unsigned char ipp_hdr[1536];
     int ipp_hdr_len;
     unsigned char *body = NULL;
     size_t body_len;
     HttpResponse resp;
+    char http_uri[1024];
     int rc;
+    char user[128];
+    char lang[16];
 
     if (err && errsz > 0)
         err[0] = '\0';
@@ -213,8 +437,18 @@ int ipp_print_document(const char *uri, const char *job_name, const char *doc_fm
         return -1;
     }
 
-    /* Build the IPP header */
-    ipp_hdr_len = ipp_build_print_job(ipp_hdr, sizeof(ipp_hdr), uri, "tinyedit", (job_name && job_name[0]) ? job_name : "print", (doc_fmt && doc_fmt[0]) ? doc_fmt : "application/pdf");
+    /* IPP header keeps original ipp:// URI; HTTP transport uses rewritten http(s):// */
+    if (ipp_uri_to_http(uri, http_uri, sizeof(http_uri)) != 0)
+    {
+        ipp_seterr(err, errsz, "invalid printer URI");
+        return -1;
+    }
+
+    /* Build IPP header; user and lang derived from environment, attrs may be NULL */
+    ipp_default_user(user, sizeof(user));
+    ipp_default_lang(lang, sizeof(lang));
+
+    ipp_hdr_len = ipp_build_print_job(ipp_hdr, sizeof(ipp_hdr), uri, user, lang, (job_name && job_name[0]) ? job_name : "print", (doc_fmt && doc_fmt[0]) ? doc_fmt : "application/pdf", attrs);
 
     if (ipp_hdr_len < 0)
     {
@@ -244,7 +478,7 @@ int ipp_print_document(const char *uri, const char *job_name, const char *doc_fm
         return -1;
     }
 
-    rc = http_post(uri, (const char *)body, (int)body_len, "application/ipp", NULL, IPP_TIMEOUT_SECS, &resp);
+    rc = http_post(http_uri, (const char *)body, (int)body_len, "application/ipp", NULL, IPP_TIMEOUT_SECS, &resp);
 
     free(body);
 
@@ -277,23 +511,40 @@ int ipp_print_document(const char *uri, const char *job_name, const char *doc_fm
 /* Build a Get-Printer-Attributes request restricted to used attributes */
 static int ipp_build_get_attrs(unsigned char *buf, size_t bufsz, const char *printer_uri)
 {
-    unsigned char *p = buf = NULL;
+    unsigned char *p = buf;
     size_t left = bufsz;
     static const char *wanted[] =
         {
             "printer-name",
+            "printer-make-and-model",
+            "printer-info",
+            "printer-location",
             "printer-state",
             "printer-state-reasons",
+            "printer-state-message",
+            "printer-is-accepting-jobs",
+            "queued-job-count",
             "media-supported",
             "media-default",
+            "media-source-supported",
+            "media-source-default",
+            "media-type-supported",
+            "media-type-default",
             "sides-supported",
             "sides-default",
             "print-color-mode-supported",
             "print-color-mode-default",
             "print-quality-supported",
             "print-quality-default",
+            "printer-resolution-supported",
+            "printer-resolution-default",
+            "orientation-requested-supported",
+            "orientation-requested-default",
+            "number-up-supported",
+            "number-up-default",
             "document-format-supported",
-            "copies-supported"};
+            "copies-supported",
+            "copies-default"};
 
     int nw = (int)(sizeof(wanted) / sizeof(wanted[0]));
     int i;
@@ -459,13 +710,36 @@ static void ipp_ingest_string(IppPrinterInfo *info, const char *cur_name, const 
         strncpy(info->printer_name, val, sizeof(info->printer_name) - 1);
         info->printer_name[sizeof(info->printer_name) - 1] = '\0';
     }
+    else if (ipp_attr_is(cur_name, "printer-make-and-model"))
+    {
+        strncpy(info->make_and_model, val, sizeof(info->make_and_model) - 1);
+        info->make_and_model[sizeof(info->make_and_model) - 1] = '\0';
+    }
+    else if (ipp_attr_is(cur_name, "printer-info"))
+    {
+        strncpy(info->info, val, sizeof(info->info) - 1);
+        info->info[sizeof(info->info) - 1] = '\0';
+    }
+    else if (ipp_attr_is(cur_name, "printer-location"))
+    {
+        strncpy(info->location, val, sizeof(info->location) - 1);
+        info->location[sizeof(info->location) - 1] = '\0';
+    }
+    else if (ipp_attr_is(cur_name, "printer-state-message"))
+    {
+        strncpy(info->state_message, val, sizeof(info->state_message) - 1);
+        info->state_message[sizeof(info->state_message) - 1] = '\0';
+    }
     else if (ipp_attr_is(cur_name, "printer-state-reasons"))
     {
+        /* Keep the legacy single-slot field pointing at the first reason */
         if (!info->state_reason[0])
         {
             strncpy(info->state_reason, val, sizeof(info->state_reason) - 1);
             info->state_reason[sizeof(info->state_reason) - 1] = '\0';
         }
+
+        ipp_stringset_add(info->state_reasons, &info->n_state_reasons, IPP_MAX_REASONS, val);
     }
     else if (ipp_attr_is(cur_name, "media-supported"))
     {
@@ -498,6 +772,22 @@ static void ipp_ingest_string(IppPrinterInfo *info, const char *cur_name, const 
         if (strcmp(val, "application/pdf") == 0)
             info->supports_pdf = 1;
     }
+    else if (ipp_attr_is(cur_name, "media-source-supported"))
+    {
+        ipp_stringset_add(info->media_sources, &info->n_media_sources, IPP_MAX_SOURCES, val);
+    }
+    else if (ipp_attr_is(cur_name, "media-source-default"))
+    {
+        info->default_media_source = ipp_stringset_add(info->media_sources, &info->n_media_sources, IPP_MAX_SOURCES, val);
+    }
+    else if (ipp_attr_is(cur_name, "media-type-supported"))
+    {
+        ipp_stringset_add(info->media_types, &info->n_media_types, IPP_MAX_TYPES, val);
+    }
+    else if (ipp_attr_is(cur_name, "media-type-default"))
+    {
+        info->default_media_type = ipp_stringset_add(info->media_types, &info->n_media_types, IPP_MAX_TYPES, val);
+    }
 }
 
 /* Take one integer-shaped value and route it into info */
@@ -506,6 +796,10 @@ static void ipp_ingest_integer(IppPrinterInfo *info, const char *cur_name, int v
     if (ipp_attr_is(cur_name, "printer-state"))
     {
         info->state = val;
+    }
+    else if (ipp_attr_is(cur_name, "queued-job-count"))
+    {
+        info->queued_job_count = val;
     }
     else if (ipp_attr_is(cur_name, "print-quality-supported"))
     {
@@ -542,12 +836,124 @@ static void ipp_ingest_integer(IppPrinterInfo *info, const char *cur_name, int v
 
         info->default_quality = idx;
     }
+    else if (ipp_attr_is(cur_name, "orientation-requested-supported"))
+    {
+        int i;
+
+        for (i = 0; i < info->n_orientations; i++)
+        {
+            if (info->orientations[i] == val)
+                return;
+        }
+
+        if (info->n_orientations < IPP_MAX_ORIENTATIONS)
+            info->orientations[info->n_orientations++] = val;
+    }
+    else if (ipp_attr_is(cur_name, "orientation-requested-default"))
+    {
+        int i;
+        int idx = -1;
+
+        for (i = 0; i < info->n_orientations; i++)
+        {
+            if (info->orientations[i] == val)
+            {
+                idx = i;
+                break;
+            }
+        }
+
+        if (idx < 0 && info->n_orientations < IPP_MAX_ORIENTATIONS)
+        {
+            info->orientations[info->n_orientations++] = val;
+            idx = info->n_orientations - 1;
+        }
+
+        info->default_orientation = idx;
+    }
+    else if (ipp_attr_is(cur_name, "number-up-supported"))
+    {
+        int i;
+
+        for (i = 0; i < info->n_number_ups; i++)
+        {
+            if (info->number_ups[i] == val)
+                return;
+        }
+
+        if (info->n_number_ups < IPP_MAX_NUMBER_UP)
+            info->number_ups[info->n_number_ups++] = val;
+    }
+    else if (ipp_attr_is(cur_name, "number-up-default"))
+    {
+        int i;
+        int idx = -1;
+
+        for (i = 0; i < info->n_number_ups; i++)
+        {
+            if (info->number_ups[i] == val)
+            {
+                idx = i;
+                break;
+            }
+        }
+
+        if (idx < 0 && info->n_number_ups < IPP_MAX_NUMBER_UP)
+        {
+            info->number_ups[info->n_number_ups++] = val;
+            idx = info->n_number_ups - 1;
+        }
+
+        info->default_number_up = idx;
+    }
     else if (ipp_attr_is(cur_name, "copies-supported"))
     {
         /* Comes as rangeOfInteger normally, but a bare integer is possible */
         if (val > info->max_copies)
             info->max_copies = val;
     }
+    else if (ipp_attr_is(cur_name, "copies-default"))
+    {
+        info->default_copies = val;
+    }
+}
+
+/* Take one resolution-shaped value and route it into info */
+static void ipp_ingest_resolution(IppPrinterInfo *info, const char *cur_name, int xf, int fd, int units)
+{
+    int i;
+    int idx = -1;
+
+    if (ipp_attr_is(cur_name, "printer-resolution-supported") || ipp_attr_is(cur_name, "printer-resolution-default"))
+    {
+        for (i = 0; i < info->n_resolutions; i++)
+        {
+            if (info->resolutions[i].cross_feed == xf && info->resolutions[i].feed == fd && info->resolutions[i].units == units)
+            {
+                idx = i;
+                break;
+            }
+        }
+
+        if (idx < 0 && info->n_resolutions < IPP_MAX_RESOLUTIONS)
+        {
+            info->resolutions[info->n_resolutions].cross_feed = xf;
+            info->resolutions[info->n_resolutions].feed = fd;
+            info->resolutions[info->n_resolutions].units = units;
+            idx = info->n_resolutions;
+            info->n_resolutions++;
+        }
+
+        if (ipp_attr_is(cur_name, "printer-resolution-default"))
+            info->default_resolution = idx;
+    }
+}
+
+/* Take one boolean-shaped value and route it into info */
+static void ipp_ingest_boolean(IppPrinterInfo *info, const char *cur_name, int val)
+{
+    if (ipp_attr_is(cur_name, "printer-is-accepting-jobs"))
+        info->accepting_jobs = val ? 1 : 0;
 }
 
 /* Parse printer-attributes group into IppPrinterInfo */
@@ -645,7 +1051,28 @@ static int ipp_parse_attrs(const unsigned char *body, int body_len, IppPrinterIn
         }
         else if (tag == IPP_TAG_BOOLEAN)
         {
-            rd_skip(&c, (int)vl);
+            if (vl == 1)
+            {
+                int v = rd_u8(&c);
+
+                ipp_ingest_boolean(info, cur_name, v);
+            }
+            else
+                rd_skip(&c, (int)vl);
+        }
+        else if (tag == IPP_TAG_RESOLUTION)
+        {
+            /* 9 bytes: cross_feed(4) + feed(4) + units(1) */
+            if (vl == 9)
+            {
+                int xf = (int)rd_u32(&c);
+                int fd = (int)rd_u32(&c);
+                int un = rd_u8(&c);
+
+                ipp_ingest_resolution(info, cur_name, xf, fd, un);
+            }
+            else
+                rd_skip(&c, (int)vl);
         }
         else
         {
@@ -661,6 +1088,7 @@ int ipp_get_printer_info(const char *uri, IppPrinterInfo *info, char *err, size_
     unsigned char req[1024];
     int req_len;
     HttpResponse resp;
+    char http_uri[1024];
     int rc;
 
     if (err && errsz > 0)
@@ -672,12 +1100,25 @@ int ipp_get_printer_info(const char *uri, IppPrinterInfo *info, char *err, size_
         return -1;
     }
 
+    if (ipp_uri_to_http(uri, http_uri, sizeof(http_uri)) != 0)
+    {
+        ipp_seterr(err, errsz, "invalid printer URI");
+        return -1;
+    }
+
     memset(info, 0, sizeof(*info));
 
     info->default_media = -1;
     info->default_sides = -1;
     info->default_color_mode = -1;
     info->default_quality = -1;
+    info->default_resolution = -1;
+    info->default_orientation = -1;
+    info->default_number_up = -1;
+    info->default_media_source = -1;
+    info->default_media_type = -1;
+    info->accepting_jobs = -1;
+    info->queued_job_count = -1;
 
     req_len = ipp_build_get_attrs(req, sizeof(req), uri);
 
@@ -695,7 +1136,7 @@ int ipp_get_printer_info(const char *uri, IppPrinterInfo *info, char *err, size_
         return -1;
     }
 
-    rc = http_post(uri, (const char *)req, req_len, "application/ipp", NULL, IPP_TIMEOUT_SECS, &resp);
+    rc = http_post(http_uri, (const char *)req, req_len, "application/ipp", NULL, IPP_TIMEOUT_SECS, &resp);
 
     if (rc != HTTP_OK)
     {

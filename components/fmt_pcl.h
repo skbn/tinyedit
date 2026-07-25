@@ -9,26 +9,26 @@
  * (at your option) any later version.
  */
 
-#ifndef UI_PRINT_H
-#define UI_PRINT_H
+#ifndef FMT_PCL_H
+#define FMT_PCL_H
 
-#include "te.h"
+#include <stdio.h>
+#include <stddef.h>
+
+#include "config.h"
+
+struct Ed;
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-    /* Open the print popup: local / IPP / IPPS / options. From the keymap */
-    void ui_editor_print(TeApp *app);
-
-#ifdef HAVE_IPP
-    /* Configure printer options via IPP Get-Printer-Attributes */
-    void ui_editor_print_options(TeApp *app);
-#endif
+    /* Write ed as a PCL 3/5 text job */
+    int pcl_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, size_t errsz, char *warn, size_t warnsz);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif
+#endif /* FMT_PCL_H */

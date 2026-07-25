@@ -6,7 +6,7 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 
 - Full UTF-8 support with charset conversion (internal UTF-8, configurable output)
 - Multiple charsets: UTF-8, LATIN-1/2, CP437, CP850, CP865, CP866, CP1252
-- TTF rendering with full Unicode support (including emojis) on AmigaOS
+- TTF rendering with full Unicode support (including emojis) on AmigaOS and Windows (bundled FreeType + libpng + zlib)
 - Tab system for editing multiple files simultaneously
 - Syntax highlighting (C, C++, x86/m68k asm, Amiga C) with bracket matching and current-line highlight
 - Spell checker with native implementation (AmigaOS/Windows) or Hunspell integration (*nix) (optional, USE_HUNSPELL=1)
@@ -15,6 +15,7 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 - Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
 - Experimental grammar/style checker using rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1); grammar checks only work on UTF-8 text
 - Partial rich-text support for .rtf and .wp/.wp4 files
+- Experimental built-in printing: PDF, PCL and URF (Apple Raster) output; local printing via `lp`/`lpr` (Unix), shell print verb (Windows) or `PRT:` (AmigaOS); optional IPP/IPPS network printing with mDNS/Bonjour (AirPrint) discovery
 - Translator panel with online support and StarDict-compatible offline dictionary
 - Mouse support (works in terminal, SSH and remote sessions)
 - Configurable colors (and TTF fonts on AmigaOS)
@@ -91,6 +92,17 @@ make -f Makefile.unix USE_GRAMMAR=1
 - No external library dependency; uses a self-contained C module and `.rul` rule packs
 - Rule packs can be generated from LanguageTool XML files using `tools/lt2rul.py`
 
+To compile with URF (Apple Raster) print export support (optional, requires FreeType):
+```bash
+make -f Makefile.unix USE_URF=1
+```
+- Uses the system FreeType library via `pkg-config freetype2` (falls back to `-I/usr/include/freetype2 -lfreetype`)
+- Debian/Ubuntu: `sudo apt install libfreetype-dev`
+- Arch Linux: `sudo pacman -S freetype2`
+- FreeBSD: `doas pkg install freetype2`
+- macOS: `brew install freetype`
+- Note: `Makefile.unix.static` enables `USE_URF=1` by default; `Makefile.unix` defaults to `USE_URF=0`
+
 Dictionaries, hyphenation patterns and thesaurus data:
 - Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
 - Arch Linux: `sudo pacman -S hunspell-es_es hunspell-en_us hyphen-es hyphen-en mythes-es mythes-en`
@@ -98,8 +110,34 @@ Dictionaries, hyphenation patterns and thesaurus data:
 - macOS: Dictionary files are included with hunspell
 
 ### Windows (MinGW)
+
+The Windows version uses bundled FreeType with libpng and zlib for TTF rendering (full Unicode, including emojis) via the native `te_rastport_win32` engine. The FreeType, zlib and libpng source trees are compiled directly into the executable, so no external DLLs are required
+
+Using MSYS2 MinGW gcc:
+
+- libpng: https://www.libpng.org/
+- zlib: https://www.zlib.net/
+- FreeType: https://freetype.org/
+
+To compile, in the tinyedit directory extract freetype-2.14.3.tar.xz,
+libpng-1.6.58.tar.xz, and zlib.tar.gz and rename them to `freetype`, `zlib`, and `libpng`
+
+To prepare headers (patches FreeType for PNG + system zlib, color emoji fonts) and build:
 ```bash
-make -f Makefile.win32
+make -f Makefile.win32 unprep
+make -f Makefile.win32 prep
+make -f Makefile.win32 clean all
+```
+
+To build 32-bit or 64-bit binaries:
+```bash
+make -f Makefile.win32 ARCH=win32 clean all
+make -f Makefile.win32 ARCH=win64 clean all
+```
+
+To enable URF (Apple Raster) print export (uses the bundled FreeType):
+```bash
+make -f Makefile.win32 USE_URF=1 clean all
 ```
 
 To compile with native spell checker (spellchecker/ like AmigaOS):
@@ -114,7 +152,7 @@ When compiled with `USE_HUNSPELL=1`, the Windows version includes the same nativ
 
 ### AmigaOS
 
-For AmigaOS the program uses FreeType with libpng and zlib for TTF rendering
+For AmigaOS the program uses bundled FreeType with libpng and zlib for TTF rendering (full Unicode, including emojis) via the native `te_rastport` engine, and the same FreeType is also used for URF (Apple Raster) print export
 
 Using bebbo gcc:
 
@@ -222,6 +260,61 @@ make -f Makefile.unix USE_HYPHEN=1 USE_MYTHES=1
 Or combine with Hunspell:
 ```bash
 make -f Makefile.unix USE_HUNSPELL=1 USE_HYPHEN=1 USE_MYTHES=1
+```
+
+## Printing
+
+tinyedit includes experimental built-in printing support with a unified print dialog (`ui_print`). The same dialog drives local and network printers across all platforms
+
+### Output formats
+
+The editor can render the document to several page-description formats, chosen automatically based on what the target printer advertises:
+
+- **PDF** — default raster-ready format, always available; used for local printing on Unix (piped to `lp`/`lpr`) and Windows (shell print verb on a temp PDF)
+- **PCL** — PCL 5/6 for legacy laser and inkjet printers
+- **URF (Apple Raster)** — required by AirPrint-compatible printers; needs FreeType (see URF section below)
+
+### Local printing
+
+- **Unix/*nix**: pipes the generated PDF to `lp -s` (fallback `lpr`); CUPS handles the rest
+- **Windows**: writes a temp PDF and invokes the shell print verb; alternatively lists installed printers via the Win32 spooler
+- **AmigaOS**: writes charset-converted text directly to `PRT:` (printer.device); reads PrinterPrefs to identify the configured driver
+
+### Network printing (IPP / AirPrint)
+
+Optional IPP/IPPS client (`USE_IPP=1`) sends jobs directly to network printers. Combined with the mDNS/Bonjour discovery (`core/mdns.c`), tinyedit can find AirPrint printers on the LAN and query their capabilities (media sizes, duplex, color, quality, copies, orientation, number-up, sources, types, resolutions) via `Get-Printer-Attributes`, then submit jobs with `Print-Job`
+
+- mDNS discovery queries `_ipp._tcp` and `_ipps._tcp` services on the local network
+- Discovered printers are merged with local printers into a persistent cache (`printer_cache`)
+- TLS (`ipps://`) is supported via the platform's HTTP client; on AmigaOS this requires AmiSSL (`WITH_AMISSL=1`)
+
+### Compilation flags
+
+| Flag | Effect | Default |
+| --- | --- | --- |
+| `USE_URF=1` | Enable URF (Apple Raster) export; requires FreeType | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: always on |
+| `USE_IPP=1` | Enable IPP/IPPS network printing; pulls in `http_client` | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: 0 |
+| `WITH_AMISSL=1` | AmigaOS only: TLS for IPPS via AmiSSL (requires `USE_IPP=1` or `USE_TRANSLATE=1`) | 0 |
+
+Examples:
+```bash
+# Unix with URF + IPP
+make -f Makefile.unix USE_URF=1 USE_IPP=1
+
+# Windows with URF + IPP
+make -f Makefile.win32 USE_URF=1 USE_IPP=1 clean all
+
+# AmigaOS with IPP over TLS (AirPrint to ipps:// printers)
+make -f Makefile.amiga USE_IPP=1 WITH_AMISSL=1 clean all
+```
+
+The static Unix build (`Makefile.unix.static`) enables both `USE_URF` and `USE_IPP` by default
+
+### AmiSSL setup (AmigaOS, for IPPS)
+
+For TLS-protected IPP on AmigaOS, place the AmiSSL SDK alongside the tinyedit directory and build with `WITH_AMISSL=1`:
+```
+AMISSL_SDK=AmiSSL make -f Makefile.amiga USE_IPP=1 WITH_AMISSL=1 clean all
 ```
 
 ## Usage

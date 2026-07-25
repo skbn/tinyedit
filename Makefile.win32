@@ -36,6 +36,7 @@ USE_TRANSLATE ?= 0
 USE_STARDICT ?= 0
 USE_TTS ?= 0
 USE_IPP ?= 0
+USE_URF ?= 0
 
 # Compiler (native MSYS2 MinGW)
 CC = gcc
@@ -48,6 +49,11 @@ LFLAGS = -mwindows
 
 # Platform-specific defines
 CDEFS = -DPLATFORM_WIN32 -DNO_TYPEDEF_BOOL -D_WINDOWS
+
+# URF (Apple Raster) support. Requires FreeType.
+ifeq ($(USE_URF),1)
+  CDEFS += -DHAVE_URF
+endif
 
 # Architecture (default: win64 for 64-bit Windows)
 ARCH?=win64
@@ -76,9 +82,9 @@ SPELL_DIR = $(HERE)spellchecker
 # Object files in objs/
 CORE_OBJS = $(OBJDIR)/utf8.o $(OBJDIR)/charset.o \
             $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
-            $(OBJDIR)/search.o $(OBJDIR)/portable.o $(OBJDIR)/ncursesw_win32.o \
+            $(OBJDIR)/search.o $(OBJDIR)/portable.o $(OBJDIR)/mdns.o $(OBJDIR)/printer_cache.o $(OBJDIR)/ncursesw_win32.o \
             $(OBJDIR)/te_rastport_win32.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/print.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/fmt_pcl.o $(OBJDIR)/fmt_urf.o $(OBJDIR)/print.o $(OBJDIR)/print_amiga.o $(OBJDIR)/print_win32.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
 UI_OBJS   = $(OBJDIR)/te_app.o \
             $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_editor.o \
@@ -166,7 +172,6 @@ SPELL_LIB :=
 endif
 
 # HTTP client layer (used by translate and IPP printing).
-USE_IPP ?= 1
 
 ifeq ($(USE_IPP),1)
 CDEFS    += -DHAVE_IPP
@@ -279,7 +284,7 @@ all: $(TARGET)
 
 $(TARGET): $(HERE)main.c $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) \
-	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32 -lmsimg32 $(TRANSLATE_LIB)
+	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32 -lmsimg32 -lwinspool -lshell32 $(TRANSLATE_LIB)
 
 # Create obj directory
 $(OBJDIR):
@@ -406,6 +411,12 @@ $(OBJDIR)/search.o: $(COREDIR)/search.c $(COREDIR)/search.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/portable.o: $(COREDIR)/portable.c $(COREDIR)/portable.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/mdns.o: $(COREDIR)/mdns.c $(COREDIR)/mdns.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/printer_cache.o: $(COREDIR)/printer_cache.c $(COREDIR)/printer_cache.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ncursesw_win32.o: $(HERE)ncursesw_win32.c $(HERE)ncursesw_win32.h | $(OBJDIR)
@@ -564,7 +575,19 @@ $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_att
 $(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c $(COMPDIR)/fmt_pdf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/fmt_pcl.o: $(COMPDIR)/fmt_pcl.c $(COMPDIR)/fmt_pcl.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/fmt_urf.o: $(COMPDIR)/fmt_urf.c $(COMPDIR)/fmt_urf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) $(FTINC) -c $< -o $@
+
 $(OBJDIR)/print.o: $(COMPDIR)/print.c $(COMPDIR)/print.h $(COMPDIR)/fmt_pdf.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/print_amiga.o: $(COMPDIR)/print_amiga.c $(COMPDIR)/print_amiga.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/print_win32.o: $(COMPDIR)/print_win32.c $(COMPDIR)/print_win32.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)

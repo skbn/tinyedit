@@ -33,6 +33,7 @@
 #include "ui_editor_helper.h"
 #include "ui_view.h"
 #include "ui_keys.h"
+#include "ui_hyph.h"
 
 static const char *HELP_LINES[] =
     {
@@ -57,7 +58,9 @@ static const char *HELP_LINES[] =
         "    Tab              Insert tab",
         "    Alt+Q            Toggle wrap mode",
         "    Alt+D            Toggle line numbers",
+#ifdef HAVE_HYPHEN
         "    Alt+E            Toggle hyphen wrap",
+#endif
         "    F3 / Alt+C       Choose output charset",
         "",
         "  Block (selection):",
@@ -99,10 +102,6 @@ static const char *HELP_LINES[] =
         "    Alt+P            Spell check word under cursor",
 #ifdef HAVE_MYTHES
         "    Alt+A            Thesaurus lookup for word under cursor",
-#endif
-
-#ifdef HAVE_HYPHEN
-        "    Alt+E            Toggle hyphen wrap",
 #endif
 
 #endif /* HAVE_HUNSPELL */
@@ -371,7 +370,19 @@ int do_save(TeApp *app)
 
         if (fp)
         {
-            rc = pdf_export(te_app_get_editor(app), fp, &app->cfg, perr, sizeof(perr), pwarn, sizeof(pwarn));
+            LayoutHyphenFn hy = NULL;
+            void *hy_user = NULL;
+
+            /* Honour the editor's current hyphen mode: on = use it, off = don't force */
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+            if (app->hyph_wrap_enabled && app->hyph_handle)
+            {
+                hy = ui_layout_hyphen;
+                hy_user = app;
+            }
+#endif
+
+            rc = pdf_export_ex(te_app_get_editor(app), fp, &app->cfg, hy, hy_user, perr, sizeof(perr), pwarn, sizeof(pwarn));
             fclose(fp);
         }
 
@@ -1832,6 +1843,14 @@ int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int width, int
             /* Hard-wrap: reflow paragraph when a word separator is inserted */
             if (wch == L' ' || wch == L'\t')
                 ed_auto_rewrap_after_edit(app);
+            else if (app->hard_wrap)
+            {
+                /* Clear stale LB_HYPHEN so the hyphen glyph doesn't render until the paragraph is re-wrapped on word separator */
+                Ed *ed = te_app_get_editor(app);
+
+                if (ed->lines[ed->row]->brk == LB_HYPHEN)
+                    ed->lines[ed->row]->brk = LB_WORD;
+            }
 
             return 1;
         }

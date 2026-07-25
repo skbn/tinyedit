@@ -98,7 +98,9 @@ int port_file_create_empty(const char *p)
 
 void port_get_config_dir(char *buf, size_t bufsz)
 {
+#if !defined(PLATFORM_AMIGA)
     char *home = NULL;
+#endif
 
 #if defined(PLATFORM_AMIGA)
     snprintf(buf, bufsz, "ENVARC:tinyedit");
@@ -288,6 +290,52 @@ void pf_safe_strncpy(char *dst, const char *src, size_t dstsize)
 
     memcpy(dst, src, len);
     dst[len] = '\0';
+}
+
+/* Portable atof with '.' as decimal separator, independent of locale */
+double pf_atof_dot(const char *s, const char **endptr)
+{
+    const char *p = s ? s : "";
+    double val = 0.0;
+    double frac = 0.0;
+    double div = 1.0;
+    int sign = 1;
+
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f' || *p == '\v')
+        p++;
+
+    if (*p == '-')
+    {
+        sign = -1;
+        p++;
+    }
+    else if (*p == '+')
+    {
+        p++;
+    }
+
+    while (*p >= '0' && *p <= '9')
+    {
+        val = val * 10.0 + (double)(*p - '0');
+        p++;
+    }
+
+    if (*p == '.')
+    {
+        p++;
+
+        while (*p >= '0' && *p <= '9')
+        {
+            frac = frac * 10.0 + (double)(*p - '0');
+            div *= 10.0;
+            p++;
+        }
+    }
+
+    if (endptr)
+        *endptr = p;
+
+    return sign * (val + frac / div);
 }
 
 /* Portable path join */

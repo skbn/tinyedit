@@ -15,7 +15,8 @@
 #include <stdio.h>
 #include <stddef.h>
 
-#include "config.h" /* TeConfig is a typedef on an anonymous struct, so we can't forward-declare it -- pull the header in */
+#include "config.h" /* TeConfig is a typedef on an anonymous struct, so we can't forward-declare it. Pull the header in */
+#include "layout.h" /* LayoutHyphenFn */
 
 struct Ed;
 
@@ -26,6 +27,9 @@ extern "C"
 
     /* Write ed as a PDF 1.4 document */
     int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, size_t errsz, char *warn, size_t warnsz);
+
+    /* Same as pdf_export with an optional hyphenator callback */
+    int pdf_export_ex(const struct Ed *ed, FILE *fp, const TeConfig *cfg, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz);
 
 #ifdef __cplusplus
 }

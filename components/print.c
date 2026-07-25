@@ -21,8 +21,11 @@
 
 #include "editor.h"
 #include "config.h"
+#include "layout.h"
 #include "fmt_pdf.h"
 #include "print.h"
+#include "print_amiga.h"
+#include "print_win32.h"
 #include "../core/utf8.h"
 #include "../core/charset.h"
 
@@ -43,7 +46,7 @@ static void print_seterr(char *err, size_t errsz, const char *msg)
 #if defined(PLATFORM_UNIX)
 
 /* Export the PDF straight into a print spooler pipe */
-static int print_via_cmd(const struct Ed *ed, const TeConfig *cfg, const char *cmd, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_via_cmd(const struct Ed *ed, const TeConfig *cfg, const char *cmd, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     FILE *p = NULL;
     int rc;
@@ -58,7 +61,7 @@ static int print_via_cmd(const struct Ed *ed, const TeConfig *cfg, const char *c
     /* Ignore SIGPIPE so a closed spooler pipe does not kill the process */
     old_pipe = signal(SIGPIPE, SIG_IGN);
 
-    rc = pdf_export(ed, p, cfg, err, errsz, warn, warnsz);
+    rc = pdf_export_ex(ed, p, cfg, hyph, hyph_user, err, errsz, warn, warnsz);
     status = pclose(p);
 
     signal(SIGPIPE, old_pipe);
@@ -72,15 +75,15 @@ static int print_via_cmd(const struct Ed *ed, const TeConfig *cfg, const char *c
     return 0;
 }
 
-static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
-    if (print_via_cmd(ed, cfg, "lp -s 2>/dev/null", err, errsz, warn, warnsz) == 0)
+    if (print_via_cmd(ed, cfg, "lp -s 2>/dev/null", hyph, hyph_user, err, errsz, warn, warnsz) == 0)
         return 0;
 
     if (err && errsz > 0)
         err[0] = '\0';
 
-    if (print_via_cmd(ed, cfg, "lpr 2>/dev/null", err, errsz, warn, warnsz) == 0)
+    if (print_via_cmd(ed, cfg, "lpr 2>/dev/null", hyph, hyph_user, err, errsz, warn, warnsz) == 0)
         return 0;
 
     if (err && errsz > 0)
@@ -93,13 +96,12 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
 
 #elif defined(PLATFORM_WIN32)
 
-static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     char tmpdir[MAX_PATH];
     char path[MAX_PATH];
     FILE *fp = NULL;
     int rc;
-    HINSTANCE h;
 
     if (GetTempPathA(sizeof(tmpdir), tmpdir) == 0)
     {
@@ -117,15 +119,15 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
         return -1;
     }
 
-    rc = pdf_export(ed, fp, cfg, err, errsz, warn, warnsz);
+    rc = pdf_export_ex(ed, fp, cfg, hyph, hyph_user, err, errsz, warn, warnsz);
+
     fclose(fp);
 
     if (rc != 0)
         return -1;
 
-    h = ShellExecuteA(NULL, "print", path, NULL, NULL, SW_HIDE);
-
-    if ((INT_PTR)h <= 32)
+    /* WinSpool printto with a named printer, or default print verb */
+    if (win32_print_file((cfg && cfg->print_local_name[0]) ? cfg->print_local_name : NULL, path) != 0)
     {
         print_seterr(err, errsz, "no print handler registered for PDF");
         return -1;
@@ -188,13 +190,17 @@ static int print_amiga_line(FILE *fp, const EdLine *ln, const char *cs)
     return 0;
 }
 
-static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     FILE *fp = NULL;
     int row;
     const char *cs = NULL;
 
     cs = (charset && charset[0]) ? charset : "LATIN-1";
+
+    /* Apply wizard picks back to printer.device via prefs (best-effort) */
+    if (cfg)
+        amiga_apply_printer_prefs(cfg->print_media, cfg->print_color_mode, cfg->print_quality);
 
     fp = fopen("PRT:", "w");
 
@@ -209,6 +215,7 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
         if (print_amiga_line(fp, ed->lines[row], cs) != 0)
         {
             fclose(fp);
+
             print_seterr(err, errsz, "write error on PRT:");
             return -1;
         }
@@ -216,12 +223,14 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
         if (fputc('\n', fp) == EOF)
         {
             fclose(fp);
+
             print_seterr(err, errsz, "write error on PRT:");
             return -1;
         }
     }
 
     fputc('\f', fp);
+
     fclose(fp);
 
     return 0;
@@ -229,7 +238,7 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
 
 #else
 
-static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     print_seterr(err, errsz, "printing not supported on this platform");
 
@@ -240,6 +249,11 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
 
 int te_print_document(const struct Ed *ed, const TeConfig *cfg, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz)
 {
+    return te_print_document_ex(ed, cfg, charset, NULL, NULL, err, errsz, warn, warnsz);
+}
+
+int te_print_document_ex(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
+{
     if (err && errsz > 0)
         err[0] = '\0';
 
@@ -249,5 +263,5 @@ int te_print_document(const struct Ed *ed, const TeConfig *cfg, const char *char
     if (!ed)
         return -1;
 
-    return print_platform(ed, cfg, charset, err, errsz, warn, warnsz);
+    return print_platform(ed, cfg, charset, hyph, hyph_user, err, errsz, warn, warnsz);
 }

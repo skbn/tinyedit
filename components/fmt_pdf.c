@@ -79,6 +79,12 @@ typedef struct
     int cap;
     unsigned char align; /* EA_ALIGN_* from the paragraph's first EdLine */
     int has_content;     /* 1 once at least one line has been merged in */
+
+    /* Forced break points: char offsets where the editor split a line. breaks_pos[] are offsets into chars[], breaks_hyph[] is 1 for LB_HYPHEN, 0 for LB_WORD */
+    int *breaks_pos;
+    unsigned char *breaks_hyph;
+    int n_breaks;
+    int cap_breaks;
 } pdf_para;
 
 /* Emit a slice of a paragraph into a content stream at (x, y_baseline) */
@@ -104,6 +110,10 @@ typedef struct
     int tab_width;
     int in_page;
     const struct pdf_font_ctx_tag *fc;
+
+    /* Optional hyphenator. NULL disables wrap-hyphenation */
+    LayoutHyphenFn hyph;
+    void *hyph_user;
 } pdf_pager;
 
 struct ttf_face
@@ -1806,6 +1816,8 @@ static void pdf_para_init(pdf_para *p)
 static void pdf_para_free(pdf_para *p)
 {
     free(p->chars);
+    free(p->breaks_pos);
+    free(p->breaks_hyph);
 
     memset(p, 0, sizeof(*p));
 }
@@ -1815,6 +1827,7 @@ static void pdf_para_reset(pdf_para *p)
     p->len = 0;
     p->align = EA_ALIGN_LEFT;
     p->has_content = 0;
+    p->n_breaks = 0;
 }
 
 static int pdf_para_push(pdf_para *p, unsigned int cp, unsigned short mask)
@@ -1838,6 +1851,55 @@ static int pdf_para_push(pdf_para *p, unsigned int cp, unsigned short mask)
     p->chars[p->len].mask = mask;
     p->len++;
     return 0;
+}
+
+/* Record a forced break at the current end of the paragraph buffer */
+static int pdf_para_add_break(pdf_para *p, int is_hyphen)
+{
+    if (p->n_breaks >= p->cap_breaks)
+    {
+        int nc;
+        int *np;
+        unsigned char *nh;
+
+        nc = p->cap_breaks ? p->cap_breaks * 2 : 16;
+        np = (int *)realloc(p->breaks_pos, (size_t)nc * sizeof(*np));
+
+        if (!np)
+            return -1;
+
+        nh = (unsigned char *)realloc(p->breaks_hyph, (size_t)nc * sizeof(*nh));
+
+        if (!nh)
+        {
+            p->breaks_pos = np;
+            return -1;
+        }
+
+        p->breaks_pos = np;
+        p->breaks_hyph = nh;
+        p->cap_breaks = nc;
+    }
+
+    p->breaks_pos[p->n_breaks] = p->len;
+    p->breaks_hyph[p->n_breaks] = (unsigned char)(is_hyphen ? 1 : 0);
+    p->n_breaks++;
+
+    return 0;
+}
+
+/* Find the next forced break at or after offset start */
+static int pdf_para_find_break(const pdf_para *p, int start)
+{
+    int i;
+
+    for (i = 0; i < p->n_breaks; i++)
+    {
+        if (p->breaks_pos[i] > start)
+            return i;
+    }
+
+    return -1;
 }
 
 /* Append an EdLine's characters (with their attribute runs resolved to per-char masks) onto the paragraph buffer */
@@ -1904,13 +1966,16 @@ static double pdf_para_measure_range(const pdf_para *p, const pdf_font_ctx *fc, 
     return units * font_size / 1000.0;
 }
 
-/* Find the wrap boundary starting at 'start': the highest index E such that the range [start, E) fits within max_w points */
-static int pdf_para_wrap_next(const pdf_para *p, const pdf_font_ctx *fc, int start, double max_w, double font_size, int tab_width)
+/* Find the longest wrapping substring that fits the printable width, optionally hyphenating the overflow */
+static int pdf_para_wrap_next(const pdf_para *p, const pdf_font_ctx *fc, int start, double max_w, double font_size, int tab_width, LayoutHyphenFn hyph, void *hyph_user, int *out_hyphenated)
 {
     double units_max;
     double units;
-    int last_space_at; /* index of last space that still fits (-1 = none) */
+    int last_space_at;
     int i;
+
+    if (out_hyphenated)
+        *out_hyphenated = 0;
 
     if (tab_width <= 0)
         tab_width = 4;
@@ -1938,7 +2003,100 @@ static int pdf_para_wrap_next(const pdf_para *p, const pdf_font_ctx *fc, int sta
 
         if (units + (double)gw > units_max && i > start)
         {
-            /* Overflow: break after the last accepted space, if any */
+            /* Overflow: try hyphenation before falling back to space-break or hard cut */
+            if (hyph)
+            {
+                int word_start = i;
+                int word_end = i;
+                int wlen;
+                int hy_widths_len = 0;
+
+                while (word_start > start && p->chars[word_start - 1].cp != ' ' && p->chars[word_start - 1].cp != '\t')
+                    word_start--;
+
+                while (word_end < p->len && p->chars[word_end].cp != ' ' && p->chars[word_end].cp != '\t')
+                    word_end++;
+
+                /* Skip leading punctuation so min_word counts real letters */
+                while (word_start < word_end - 1 &&
+                       (p->chars[word_start].cp == 0xBF || /* ¿ */
+                        p->chars[word_start].cp == 0xA1 || /* ¡ */
+                        p->chars[word_start].cp == '(' ||
+                        p->chars[word_start].cp == '[' ||
+                        p->chars[word_start].cp == '{' ||
+                        p->chars[word_start].cp == '"' ||
+                        p->chars[word_start].cp == '\''))
+                    word_start++;
+
+                wlen = word_end - word_start;
+
+                /* Match layout_paragraph defaults: min_word=5 */
+                if (wlen >= 5)
+                {
+                    wchar_t wbuf[128];
+                    int splits[64];
+                    int nsplits;
+                    int k;
+                    int hyphen_gw;
+                    double word_prefix_units = 0.0;
+                    int cap = (int)(sizeof(wbuf) / sizeof(wbuf[0])) - 1;
+                    int j;
+
+                    if (wlen > cap)
+                        wlen = cap;
+
+                    for (k = 0; k < wlen; k++)
+                        wbuf[k] = (wchar_t)p->chars[word_start + k].cp;
+
+                    wbuf[wlen] = 0;
+
+                    nsplits = hyph(hyph_user, wbuf, wlen, splits, (int)(sizeof(splits) / sizeof(splits[0])));
+                    hyphen_gw = pdf_ctx_cp_advance(fc, '-', 0, NULL);
+
+                    /* Units already accumulated for range [start, word_start) */
+                    for (j = start; j < word_start; j++)
+                    {
+                        unsigned int c2 = p->chars[j].cp;
+
+                        if (c2 == '\t')
+                            word_prefix_units += (double)(tab_width * pdf_ctx_cp_advance(fc, ' ', 0, NULL));
+                        else
+                            word_prefix_units += (double)pdf_ctx_cp_advance(fc, c2, p->chars[j].mask, NULL);
+                    }
+
+                    /* Try the largest split that still fits (with the trailing hyphen) */
+                    for (k = nsplits - 1; k >= 0; k--)
+                    {
+                        int split = splits[k];
+                        double frag_units = 0.0;
+                        int j;
+
+                        /* Match layout_paragraph: min_left=2, min_right=3 */
+                        if (split < 2 || wlen - split < 3)
+                            continue;
+
+                        for (j = 0; j < split; j++)
+                        {
+                            unsigned int c2 = p->chars[word_start + j].cp;
+
+                            if (c2 == '\t')
+                                frag_units += (double)(tab_width * pdf_ctx_cp_advance(fc, ' ', 0, NULL));
+                            else
+                                frag_units += (double)pdf_ctx_cp_advance(fc, c2, p->chars[word_start + j].mask, NULL);
+                        }
+
+                        if (word_prefix_units + frag_units + (double)hyphen_gw <= units_max)
+                        {
+                            if (out_hyphenated)
+                                *out_hyphenated = 1;
+
+                            return word_start + split;
+                        }
+                    }
+                }
+            }
+
+            /* Fall back to the historic behaviour: last space, else hard cut */
             if (last_space_at >= start)
                 return last_space_at + 1;
 
@@ -1997,7 +2155,7 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
         if (fc && fc->mode == 1)
             tw = 0.0;
         else
-            tw = (font_size > 0.0) ? word_space * 1000.0 / font_size : word_space;
+            tw = word_space;
 
         if (pdfb_printf(s, "%.3f Tw\n", tw) != 0)
             rc = -1;
@@ -2243,7 +2401,7 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
                     break;
                 }
 
-                /* Justified TTF/CFF: add extra space as a negative TJ adjustment */
+                /* Add justified extra space as a negative TJ adjustment for TTF/CFF */
                 if (cp == ' ' && word_space != 0.0)
                 {
                     int adj = (font_size > 0.0) ? (int)(-word_space * 1000.0 / font_size) : 0;
@@ -2528,6 +2686,7 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
 {
     double avail;
     int start;
+    int use_forced;
 
     avail = PDF_PAGE_W - PDF_MARGIN_L - PDF_MARGIN_R;
 
@@ -2536,6 +2695,7 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
         return pdf_pager_blank_line(p);
 
     start = 0;
+    use_forced = 1;
 
     while (start < para->len)
     {
@@ -2548,8 +2708,36 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
         int n_spaces;
         int j;
         double word_space;
+        int hyphenated = 0;
+        pdf_wchar saved_char = {0, 0};
+        int saved_at = -1;
+        int bi;
 
-        end = pdf_para_wrap_next(para, p->fc, start, avail, p->font_size, p->tab_width);
+        /* Try forced break from editor, skip if disabled */
+        bi = use_forced ? pdf_para_find_break(para, start) : -1;
+
+        if (bi >= 0)
+        {
+            int fb_end = para->breaks_pos[bi];
+            double fb_w = pdf_para_measure_range(para, p->fc, start, fb_end, p->font_size, p->tab_width);
+
+            if (fb_w <= avail)
+            {
+                /* Forced break fits, use it */
+                end = fb_end;
+                hyphenated = (para->breaks_hyph[bi] == 1);
+            }
+            else
+            {
+                /* Doesn't fit (proportional font), disable forced breaks */
+                use_forced = 0;
+                end = pdf_para_wrap_next(para, p->fc, start, avail, p->font_size, p->tab_width, p->hyph, p->hyph_user, &hyphenated);
+            }
+        }
+        else
+        {
+            end = pdf_para_wrap_next(para, p->fc, start, avail, p->font_size, p->tab_width, p->hyph, p->hyph_user, &hyphenated);
+        }
 
         /* Guard: wrap_next must advance by at least one char */
         if (end <= start)
@@ -2563,8 +2751,26 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
         while (trim_end > start && para->chars[trim_end - 1].cp == ' ')
             trim_end--;
 
+        /* Insert a hyphen at the wrap point so the renderer emits it inline */
+        if (hyphenated && end < para->len && trim_end == end)
+        {
+            pdf_para *mp = (pdf_para *)para;
+            unsigned short mask_at = trim_end > start ? mp->chars[trim_end - 1].mask : 0;
+
+            saved_at = end;
+            saved_char = mp->chars[end];
+            mp->chars[end].cp = '-';
+            mp->chars[end].mask = mask_at;
+            trim_end = end + 1;
+        }
+
         if (pdf_pager_ensure_line(p) != 0)
+        {
+            if (saved_at >= 0)
+                ((pdf_para *)para)->chars[saved_at] = saved_char;
+
             return -1;
+        }
 
         align = (int)para->align;
         word_space = 0.0;
@@ -2597,7 +2803,12 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
             }
 
             if (n_spaces > 0 && line_w < avail)
+            {
                 word_space = (avail - line_w) / (double)n_spaces;
+
+                if (word_space > p->font_size * 0.5)
+                    word_space = p->font_size * 0.5;
+            }
 
             x = PDF_MARGIN_L;
         }
@@ -2609,8 +2820,17 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
         if (trim_end > start)
         {
             if (pdf_emit_para_range(&p->content, para, p->fc, start, trim_end, x, p->y_baseline, p->font_size, p->tab_width, word_space, lossy) != 0)
+            {
+                if (saved_at >= 0)
+                    ((pdf_para *)para)->chars[saved_at] = saved_char;
+
                 return -1;
+            }
         }
+
+        /* Restore the char we swapped for '-' so the next line reads the original */
+        if (saved_at >= 0)
+            ((pdf_para *)para)->chars[saved_at] = saved_char;
 
         p->y_baseline -= p->leading;
 
@@ -2993,6 +3213,11 @@ static int pdf_write_ttf_face(pdf_out *o, const struct ttf_face *f, int face_idx
 
 int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, size_t errsz, char *warn, size_t warnsz)
 {
+    return pdf_export_ex(ed, fp, cfg, NULL, NULL, err, errsz, warn, warnsz);
+}
+
+int pdf_export_ex(const struct Ed *ed, FILE *fp, const TeConfig *cfg, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
+{
     pdf_out o;
     pdf_pager pager;
     pdf_para para;
@@ -3029,6 +3254,8 @@ int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
     pager.font_size = (cfg && cfg->ttf_size > 0) ? (double)cfg->ttf_size : PDF_FONT_SIZE;
     pager.leading = pager.font_size * PDF_LEADING_MUL;
     pager.tab_width = (cfg && cfg->tab_width > 0) ? cfg->tab_width : 4;
+    pager.hyph = hyph;
+    pager.hyph_user = hyph_user;
 
     pdfb_init(&pager.content);
 
@@ -3106,7 +3333,7 @@ int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
             rc = -1;
     }
 
-    /* Body: build paragraphs, flush at every LB_PARA */
+    /* Build paragraphs from consecutive non-empty lines, re-wrapping text to page width */
     if (rc == 0)
     {
         for (row = 0; row < ed->count; row++)
@@ -3119,6 +3346,31 @@ int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
 
             ln = ed->lines[row];
             n_runs = ed_attr_runs(ln, &runs);
+            is_last = (row == ed->count - 1);
+            brk = is_last ? (int)LB_PARA : (int)ln->brk;
+
+            /* Empty line = paragraph break */
+            if (ln->len == 0)
+            {
+                if (para.has_content)
+                {
+                    if (pdf_pager_emit_para(&pager, &para, &o.lossy) != 0)
+                    {
+                        rc = -1;
+                        break;
+                    }
+
+                    pdf_para_reset(&para);
+                }
+
+                if (pdf_pager_blank_line(&pager) != 0)
+                {
+                    rc = -1;
+                    break;
+                }
+
+                continue;
+            }
 
             /* First line of a paragraph? Adopt its alignment */
             if (!para.has_content)
@@ -3133,13 +3385,20 @@ int pdf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
                 break;
             }
 
-            is_last = (row == ed->count - 1);
-            brk = is_last ? (int)LB_PARA : (int)ln->brk;
-
+            /* Join consecutive non-empty lines within a paragraph */
             if (brk == LB_SPACE)
             {
-                /* The wrap consumed a space at the join, put one back so the two visual lines merge into a single paragraph correctly */
+                /* The wrap consumed a space at the join, put one back */
                 if (pdf_para_push(&para, ' ', 0) != 0)
+                {
+                    rc = -1;
+                    break;
+                }
+            }
+            else if (brk == LB_HYPHEN || brk == LB_WORD)
+            {
+                /* The editor forced a break here (hyphenation or word break). Record the position so pdf_pager_emit_para can honour it */
+                if (pdf_para_add_break(&para, brk == LB_HYPHEN ? 1 : 0) != 0)
                 {
                     rc = -1;
                     break;

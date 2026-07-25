@@ -452,7 +452,21 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->print_ipp_queue[0] = '\0';
     cfg->print_ipp_port = 0;
 
-    /* White-on-black fallback */
+    cfg->print_media[0] = '\0';
+    cfg->print_sides[0] = '\0';
+    cfg->print_color_mode[0] = '\0';
+    cfg->print_quality = 0;
+    cfg->print_copies = 0;
+    cfg->print_local_name[0] = '\0';
+    cfg->print_document_format[0] = '\0';
+    cfg->print_orientation = 0;
+    cfg->print_number_up = 0;
+    cfg->print_media_source[0] = '\0';
+    cfg->print_media_type[0] = '\0';
+    cfg->print_resolution_x = 0;
+    cfg->print_resolution_y = 0;
+    cfg->print_resolution_units = 0;
+
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
     {
         cfg->color_fg[i] = 7;
@@ -1273,6 +1287,91 @@ int te_cfg_load(TeConfig *cfg, const char *path)
             if (cfg->print_ipp_port < 0 || cfg->print_ipp_port > 65535)
                 cfg->print_ipp_port = 0;
         }
+        else if (strcasecmp(word, "PRINT_MEDIA") == 0)
+        {
+            strncpy(cfg->print_media, rest, sizeof(cfg->print_media) - 1);
+
+            cfg->print_media[sizeof(cfg->print_media) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_SIDES") == 0)
+        {
+            strncpy(cfg->print_sides, rest, sizeof(cfg->print_sides) - 1);
+
+            cfg->print_sides[sizeof(cfg->print_sides) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_COLOR_MODE") == 0)
+        {
+            strncpy(cfg->print_color_mode, rest, sizeof(cfg->print_color_mode) - 1);
+
+            cfg->print_color_mode[sizeof(cfg->print_color_mode) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_QUALITY") == 0)
+        {
+            cfg->print_quality = atoi(rest);
+
+            if (cfg->print_quality < 0)
+                cfg->print_quality = 0;
+
+            if (cfg->print_quality > 5)
+                cfg->print_quality = 5;
+        }
+        else if (strcasecmp(word, "PRINT_COPIES") == 0)
+        {
+            cfg->print_copies = atoi(rest);
+
+            if (cfg->print_copies < 0)
+                cfg->print_copies = 0;
+        }
+        else if (strcasecmp(word, "PRINT_LOCAL_NAME") == 0)
+        {
+            strncpy(cfg->print_local_name, rest, sizeof(cfg->print_local_name) - 1);
+
+            cfg->print_local_name[sizeof(cfg->print_local_name) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_DOCUMENT_FORMAT") == 0)
+        {
+            strncpy(cfg->print_document_format, rest, sizeof(cfg->print_document_format) - 1);
+
+            cfg->print_document_format[sizeof(cfg->print_document_format) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_ORIENTATION") == 0)
+        {
+            cfg->print_orientation = atoi(rest);
+
+            if (cfg->print_orientation < 3 || cfg->print_orientation > 6)
+                cfg->print_orientation = 0;
+        }
+        else if (strcasecmp(word, "PRINT_NUMBER_UP") == 0)
+        {
+            cfg->print_number_up = atoi(rest);
+
+            if (cfg->print_number_up < 0 || cfg->print_number_up > 64)
+                cfg->print_number_up = 0;
+        }
+        else if (strcasecmp(word, "PRINT_MEDIA_SOURCE") == 0)
+        {
+            strncpy(cfg->print_media_source, rest, sizeof(cfg->print_media_source) - 1);
+
+            cfg->print_media_source[sizeof(cfg->print_media_source) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_MEDIA_TYPE") == 0)
+        {
+            strncpy(cfg->print_media_type, rest, sizeof(cfg->print_media_type) - 1);
+
+            cfg->print_media_type[sizeof(cfg->print_media_type) - 1] = '\0';
+        }
+        else if (strcasecmp(word, "PRINT_RESOLUTION") == 0)
+        {
+            /* Format: "X Y U" e.g. "600 600 3" */
+            int rx = 0, ry = 0, ru = 0;
+
+            if (sscanf(rest, "%d %d %d", &rx, &ry, &ru) == 3 && rx > 0 && ry > 0 && (ru == 3 || ru == 4))
+            {
+                cfg->print_resolution_x = rx;
+                cfg->print_resolution_y = ry;
+                cfg->print_resolution_units = ru;
+            }
+        }
     }
 
     fclose(f);
@@ -1413,7 +1512,19 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "PRINT_DESTINATION") == 0 ||
                 strcasecmp(word, "PRINT_IPP_HOST") == 0 ||
                 strcasecmp(word, "PRINT_IPP_QUEUE") == 0 ||
-                strcasecmp(word, "PRINT_IPP_PORT") == 0
+                strcasecmp(word, "PRINT_IPP_PORT") == 0 ||
+                strcasecmp(word, "PRINT_MEDIA") == 0 ||
+                strcasecmp(word, "PRINT_SIDES") == 0 ||
+                strcasecmp(word, "PRINT_COLOR_MODE") == 0 ||
+                strcasecmp(word, "PRINT_QUALITY") == 0 ||
+                strcasecmp(word, "PRINT_COPIES") == 0 ||
+                strcasecmp(word, "PRINT_LOCAL_NAME") == 0 ||
+                strcasecmp(word, "PRINT_DOCUMENT_FORMAT") == 0 ||
+                strcasecmp(word, "PRINT_ORIENTATION") == 0 ||
+                strcasecmp(word, "PRINT_NUMBER_UP") == 0 ||
+                strcasecmp(word, "PRINT_MEDIA_SOURCE") == 0 ||
+                strcasecmp(word, "PRINT_MEDIA_TYPE") == 0 ||
+                strcasecmp(word, "PRINT_RESOLUTION") == 0
 #ifdef HAVE_HUNSPELL
                 || strcasecmp(word, "SPELL_ENABLED") == 0 || strcasecmp(word, "SPELL_DICT_PATH") == 0 || strcasecmp(word, "SPELL_DICT_NAME") == 0 || strcasecmp(word, "SPELL_CUSTOM_DICT") == 0
 #ifdef HAVE_HYPHEN
@@ -1631,6 +1742,42 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
     if (cfg->print_ipp_port > 0)
         fprintf(out, "PRINT_IPP_PORT %d\n", cfg->print_ipp_port);
+
+    if (cfg->print_media[0])
+        fprintf(out, "PRINT_MEDIA %s\n", cfg->print_media);
+
+    if (cfg->print_sides[0])
+        fprintf(out, "PRINT_SIDES %s\n", cfg->print_sides);
+
+    if (cfg->print_color_mode[0])
+        fprintf(out, "PRINT_COLOR_MODE %s\n", cfg->print_color_mode);
+
+    if (cfg->print_quality > 0)
+        fprintf(out, "PRINT_QUALITY %d\n", cfg->print_quality);
+
+    if (cfg->print_copies > 0)
+        fprintf(out, "PRINT_COPIES %d\n", cfg->print_copies);
+
+    if (cfg->print_local_name[0])
+        fprintf(out, "PRINT_LOCAL_NAME %s\n", cfg->print_local_name);
+
+    if (cfg->print_document_format[0])
+        fprintf(out, "PRINT_DOCUMENT_FORMAT %s\n", cfg->print_document_format);
+
+    if (cfg->print_orientation > 0)
+        fprintf(out, "PRINT_ORIENTATION %d\n", cfg->print_orientation);
+
+    if (cfg->print_number_up > 0)
+        fprintf(out, "PRINT_NUMBER_UP %d\n", cfg->print_number_up);
+
+    if (cfg->print_media_source[0])
+        fprintf(out, "PRINT_MEDIA_SOURCE %s\n", cfg->print_media_source);
+
+    if (cfg->print_media_type[0])
+        fprintf(out, "PRINT_MEDIA_TYPE %s\n", cfg->print_media_type);
+
+    if (cfg->print_resolution_x > 0 && cfg->print_resolution_y > 0 && cfg->print_resolution_units > 0)
+        fprintf(out, "PRINT_RESOLUTION %d %d %d\n", cfg->print_resolution_x, cfg->print_resolution_y, cfg->print_resolution_units);
 
     fclose(out);
 

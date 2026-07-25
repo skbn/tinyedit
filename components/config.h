@@ -129,6 +129,28 @@ typedef struct
     char print_ipp_queue[TE_CFG_STR_MAX]; /* queue name */
     int print_ipp_port;                   /* 0 = protocol default (631) */
 
+    /* IPP job attributes remembered across sessions (empty/zero = use printer default) */
+    char print_media[TE_CFG_STR_MAX];
+    char print_sides[TE_CFG_STR_MAX];
+    char print_color_mode[TE_CFG_STR_MAX];
+    int print_quality;
+    int print_copies;
+
+    /* Local printer name (Windows: printto verb; Unix: lp -d; empty=system default) */
+    char print_local_name[TE_CFG_STR_MAX];
+
+    /* MIME type sent as document-format in the IPP Print-Job; empty=auto-pick from printer's list */
+    char print_document_format[TE_CFG_STR_MAX];
+
+    /* Extra IPP job attributes; empty/0 = printer default (unset) */
+    int print_orientation;                   /* IPP enum: 3=portrait 4=landscape 5=rev-land 6=rev-port */
+    int print_number_up;                     /* pages per sheet: 1, 2, 4, 6, 9 */
+    char print_media_source[TE_CFG_STR_MAX]; /* "auto" / "tray-1" / "manual" / "envelope" */
+    char print_media_type[TE_CFG_STR_MAX];   /* "stationery" / "photographic" / etc */
+    int print_resolution_x;                  /* 0=unset */
+    int print_resolution_y;                  /* 0=unset */
+    int print_resolution_units;              /* 3=dpi 4=dpc 0=unset */
+
     /* Amiga color palette mapping (COLORMAP): physical pen for each logical color */
     int color_map[16];
     int color_map_initialized; /* 1 if user configured COLORMAP explicitly */

@@ -22,9 +22,19 @@
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <proto/bsdsocket.h>
+#include <proto/socket.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <time.h>
+
+#ifndef FIONBIO
+#define FIONBIO 0x8004667E
+#endif
+#ifndef EINPROGRESS
+#define EINPROGRESS 36
+#endif
 #ifdef WITH_AMISSL
 #include <libraries/amisslmaster.h>
 #include <libraries/amissl.h>
@@ -211,7 +221,7 @@ static size_t http_curl_write_callback(void *contents, size_t size, size_t nmemb
     size_t total = size * nmemb;
     CurlResponse *resp = (CurlResponse *)userp;
     size_t new_cap;
-    char *new_data;
+    char *new_data = NULL;
 
     if (resp->size + total > HTTP_MAX_BODY_BYTES)
         return 0;
@@ -277,6 +287,7 @@ static int do_request_libcurl(const char *method, const char *url, const char *b
         char header[256];
 
         snprintf(header, sizeof(header), "Content-Type: %s", content_type);
+
         headers = curl_slist_append(headers, header);
     }
 
@@ -342,6 +353,7 @@ static int do_request_libcurl(const char *method, const char *url, const char *b
 
     if (headers)
         curl_slist_free_all(headers);
+
     curl_easy_cleanup(curl);
 
     return ret;
@@ -561,6 +573,13 @@ static int do_request(const char *method, const char *url, const char *body, int
     char location[512];
     int status;
     struct timeval tv;
+    fd_set wait_fds;
+    int selrc;
+    long nonblock;
+    int so_err;
+    int so_err_len;
+    time_t deadline;
+    int remaining_secs;
 
     if (!out)
         return HTTP_ERR_URL;
@@ -591,7 +610,7 @@ static int do_request(const char *method, const char *url, const char *body, int
         if (sock < 0)
             return HTTP_ERR_CONNECT;
 
-        /* Connect */
+        /* Connect with timeout via non-blocking + WaitSelect */
         memset(&sa, 0, sizeof(sa));
 
         sa.sin_family = AF_INET;
@@ -599,16 +618,46 @@ static int do_request(const char *method, const char *url, const char *body, int
 
         memcpy(&sa.sin_addr, he->h_addr_list[0], (size_t)he->h_length);
 
+        nonblock = 1L;
+
+        IoctlSocket(sock, FIONBIO, (char *)&nonblock);
+
         if (connect(sock, (struct sockaddr *)&sa, sizeof(sa)) != 0)
         {
-            CloseSocket(sock);
-            return HTTP_ERR_CONNECT;
+            if (Errno() != EINPROGRESS)
+            {
+                CloseSocket(sock);
+                return HTTP_ERR_CONNECT;
+            }
+
+            FD_ZERO(&wait_fds);
+            FD_SET(sock, &wait_fds);
+
+            tv.tv_sec = timeout_secs;
+            tv.tv_usec = 0;
+
+            selrc = WaitSelect(sock + 1, NULL, &wait_fds, NULL, &tv, NULL);
+
+            if (selrc <= 0)
+            {
+                CloseSocket(sock);
+                return HTTP_ERR_TIMEOUT;
+            }
+
+            so_err_len = sizeof(so_err);
+            so_err = 0;
+
+            if (getsockopt(sock, SOL_SOCKET, SO_ERROR, (char *)&so_err, &so_err_len) < 0 || so_err != 0)
+            {
+                CloseSocket(sock);
+                return HTTP_ERR_CONNECT;
+            }
         }
 
-        /* Set socket timeout (30 seconds) */
-        tv.tv_sec = 30;
-        tv.tv_usec = 0;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof(tv));
+        nonblock = 0L;
+        IoctlSocket(sock, FIONBIO, (char *)&nonblock);
+
+        deadline = time(NULL) + timeout_secs;
 
         /* TLS handshake if needed */
         ctx = NULL;
@@ -796,11 +845,28 @@ static int do_request(const char *method, const char *url, const char *body, int
                         SSL_CTX_free(ctx);
 
                     CloseSocket(sock);
+
                     return HTTP_ERR_OOM;
                 }
 
                 response_buf = grown;
             }
+
+            remaining_secs = (int)(deadline - time(NULL));
+
+            if (remaining_secs <= 0)
+                break;
+
+            FD_ZERO(&wait_fds);
+            FD_SET(sock, &wait_fds);
+
+            tv.tv_sec = remaining_secs;
+            tv.tv_usec = 0;
+
+            selrc = WaitSelect(sock + 1, &wait_fds, NULL, NULL, &tv, NULL);
+
+            if (selrc <= 0)
+                break;
 
             if (use_tls)
                 n = SSL_read(ssl, response_buf + response_len, 1024);
@@ -824,6 +890,7 @@ static int do_request(const char *method, const char *url, const char *body, int
                 SSL_CTX_free(ctx);
 
             CloseSocket(sock);
+
             return HTTP_ERR_RECV;
         }
 
