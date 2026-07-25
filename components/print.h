@@ -28,7 +28,7 @@ extern "C"
     int te_print_document(const struct Ed *ed, const TeConfig *cfg, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz);
 
     /* Same, plus optional hyphenator; NULL disables. Caller decides based on editor state */
-    int te_print_document_ex(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz);
+    int te_print_document_ex(const struct Ed *ed, const TeConfig *cfg, const char *charset, const char *file_path, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz);
 
 #ifdef __cplusplus
 }

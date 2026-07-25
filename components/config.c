@@ -342,6 +342,12 @@ void te_cfg_defaults(TeConfig *cfg)
         cfg->ttf_fallback_size[i] = 0;
     }
 
+    /* Print font size: 0 = inherit ttf_size (screen value) */
+    cfg->print_font_size = 0;
+
+    /* Print font path: empty = inherit ttf_font (screen font) */
+    cfg->print_font_path[0] = '\0';
+
 #ifdef HAVE_HUNSPELL
     /* Spell checker defaults: disabled, empty paths */
     cfg->spell_enabled = 0;
@@ -764,6 +770,28 @@ int te_cfg_load(TeConfig *cfg, const char *path)
 
             if (cfg->ttf_size < 6 || cfg->ttf_size > 96)
                 cfg->ttf_size = 14;
+        }
+        else if (strcasecmp(word, "PRINT_FONT_SIZE") == 0)
+        {
+            char val[16];
+
+            get_token(rest, val, sizeof(val));
+            cfg->print_font_size = atoi(val);
+
+            /* 0 = inherit ttf_size; otherwise clamp to 6..96 */
+            if (cfg->print_font_size != 0 && (cfg->print_font_size < 6 || cfg->print_font_size > 96))
+                cfg->print_font_size = 0;
+        }
+        else if (strcasecmp(word, "PRINT_FONT_PATH") == 0)
+        {
+            char tmp[TE_CFG_STR_MAX];
+
+            copy_rest(rest, tmp, sizeof(tmp));
+
+            strip_quotes(tmp);
+
+            strncpy(cfg->print_font_path, tmp, sizeof(cfg->print_font_path) - 1);
+            cfg->print_font_path[sizeof(cfg->print_font_path) - 1] = '\0';
         }
         else if (strcasecmp(word, "TTF_ANTIALIAS") == 0)
         {
@@ -1500,6 +1528,8 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "TTF_SIZE") == 0 ||
                 strcasecmp(word, "TTF_ANTIALIAS") == 0 ||
                 strcasecmp(word, "TTF_USE_UTF8") == 0 ||
+                strcasecmp(word, "PRINT_FONT_SIZE") == 0 ||
+                strcasecmp(word, "PRINT_FONT_PATH") == 0 ||
                 strcasecmp(word, "DEFAULT_BG_COLOR") == 0 ||
                 strcasecmp(word, "CURSORCOLOR") == 0 ||
                 strcasecmp(word, "MOUSE_ENABLED") == 0 ||
@@ -1589,6 +1619,13 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "TTF_SIZE %d\n", cfg->ttf_size);
     fprintf(out, "TTF_ANTIALIAS %s\n", cfg->ttf_antialias == 2 ? "ON" : (cfg->ttf_antialias == 1 ? "OFF" : "AUTO"));
     fprintf(out, "TTF_USE_UTF8 %s\n", cfg->ttf_use_utf8 ? "YES" : "NO");
+
+    /* Print font overrides: only emit when set (empty/0 = inherit, omitted for clean config) */
+    if (cfg->print_font_size > 0)
+        fprintf(out, "PRINT_FONT_SIZE %d\n", cfg->print_font_size);
+
+    if (cfg->print_font_path[0])
+        fprintf(out, "PRINT_FONT_PATH %s\n", cfg->print_font_path);
 
     /* Write TTF fallback section */
     for (fi = 0; fi < TE_CFG_TTF_FALLBACKS; fi++)

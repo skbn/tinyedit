@@ -327,7 +327,11 @@ static int wiz_discover_into_cache(TeApp *app, PrinterCache *pc)
 #elif defined(PLATFORM_AMIGA)
     AmigaPrinterPrefs prefs;
 #else
-    const char *q = getenv("PRINTER");
+    char cups_queues[32][128];
+    FILE *pp = NULL;
+    char line[256];
+    int qlen;
+    const char *q = NULL;
 #endif
 
     te_status(app, "Discovering printers...");
@@ -364,18 +368,52 @@ static int wiz_discover_into_cache(TeApp *app, PrinterCache *pc)
         n_local = 1;
     }
 #else
-    /* Unix local printers via CUPS: single entry pointing at localhost queue */
-    if (!q || !q[0])
-        q = getenv("LPDEST");
+    /* Unix: enumerate all CUPS queues via lpstat -e, fall back to $PRINTER/$LPDEST */
+    pp = popen("lpstat -e 2>/dev/null", "r");
 
-    if (q && q[0])
+    if (pp)
     {
-        snprintf(uri, sizeof(uri), "ipp://localhost:631/printers/%s", q);
+        while (n_local < (int)(sizeof(cups_queues) / sizeof(cups_queues[0])) && fgets(line, sizeof(line), pp))
+        {
+            qlen = (int)strlen(line);
 
-        if (printer_cache_add(pc, q, uri, "local"))
+            while (qlen > 0 && (line[qlen - 1] == '\n' || line[qlen - 1] == '\r' || line[qlen - 1] == ' ' || line[qlen - 1] == '\t'))
+                line[--qlen] = '\0';
+
+            if (qlen <= 0)
+                continue;
+
+            strncpy(cups_queues[n_local], line, sizeof(cups_queues[0]) - 1);
+            cups_queues[n_local][sizeof(cups_queues[0]) - 1] = '\0';
+
+            n_local++;
+        }
+
+        pclose(pp);
+    }
+
+    /* Fall back to $PRINTER / $LPDEST if lpstat found nothing */
+    if (n_local == 0)
+    {
+        q = getenv("PRINTER");
+
+        if (!q || !q[0])
+            q = getenv("LPDEST");
+
+        if (q && q[0])
+        {
+            strncpy(cups_queues[0], q, sizeof(cups_queues[0]) - 1);
+            cups_queues[0][sizeof(cups_queues[0]) - 1] = '\0';
+            n_local = 1;
+        }
+    }
+
+    for (i = 0; i < n_local; i++)
+    {
+        snprintf(uri, sizeof(uri), "ipp://localhost:631/printers/%s", cups_queues[i]);
+
+        if (printer_cache_add(pc, cups_queues[i], uri, "local"))
             added++;
-
-        n_local = 1;
     }
 #endif
 
@@ -991,7 +1029,19 @@ void ui_editor_print_options(TeApp *app)
 
     if (rc != 0)
     {
-        te_status(app, "Options: %s", err[0] ? err : "printer did not respond");
+        /* For local printers, save the queue name so direct printing still works */
+        if (strcmp(kind, "local") == 0 && cfg->print_local_name[0])
+        {
+            if (app->cfg_path[0])
+                te_cfg_save(cfg, app->cfg_path);
+
+            te_status(app, "Local queue '%s' saved (IPP query failed: %s). Use Print > Local printer.", cfg->print_local_name, err[0] ? err : "no response");
+        }
+        else
+        {
+            te_status(app, "Options: %s", err[0] ? err : "printer did not respond");
+        }
+
         return;
     }
 
@@ -1093,7 +1143,7 @@ void ui_editor_print(TeApp *app)
         }
 #endif
 
-        rc = te_print_document_ex(ed, cfg, app->charset_out, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
+        rc = te_print_document_ex(ed, cfg, app->charset_out, te_app_get_filename(app), hy, hy_user, err, sizeof(err), warn, sizeof(warn));
 
         if (rc == 0)
             te_status(app, warn[0] ? warn : "Sent to printer");
@@ -1275,7 +1325,7 @@ void ui_editor_print(TeApp *app)
     if (strcmp(doc_fmt, "application/pdf") == 0)
         prc = pdf_export_ex(ed, mem, cfg, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
     else if (strcmp(doc_fmt, "image/urf") == 0)
-        prc = urf_export(ed, mem, cfg, err, sizeof(err), warn, sizeof(warn));
+        prc = urf_export_ex(ed, mem, cfg, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
     else
         prc = pcl_export(ed, mem, cfg, err, sizeof(err), warn, sizeof(warn));
 

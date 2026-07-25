@@ -108,6 +108,12 @@ typedef struct
     char ttf_fallback[TE_CFG_TTF_FALLBACKS][TE_CFG_STR_MAX];
     int ttf_fallback_size[TE_CFG_TTF_FALLBACKS]; /* 0 = inherit ttf_size */
 
+    /* Print font size in points; 0 = inherit ttf_size (screen value) */
+    int print_font_size;
+
+    /* Print font path; empty = inherit ttf_font (screen font) */
+    char print_font_path[TE_CFG_STR_MAX];
+
     /* Default background color for COLOR_PAIR(0) on Amiga */
     int default_bg_color;
 

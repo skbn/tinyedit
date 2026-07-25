@@ -79,6 +79,7 @@ void ui_tts_load_from_config(TeApp *app)
         {
             /* Mark disabled if backend unavailable, keep cfg preference */
             app->tts_enabled = 0;
+
             te_status(app, "TTS backend unavailable (espeak-ng not found?)");
         }
         else

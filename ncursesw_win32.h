@@ -342,8 +342,10 @@ int mvwin(WINDOW *win, int y, int x);
             (x) = 0;            \
         }                       \
     } while (0)
+
 #define getmaxy(win) ((win) ? (win)->_maxy : 0)
 #define getmaxx(win) ((win) ? (win)->_maxx : 0)
+
 #define getyx(win, y, x)        \
     do                          \
     {                           \
@@ -358,6 +360,10 @@ int mvwin(WINDOW *win, int y, int x);
             (x) = 0;            \
         }                       \
     } while (0)
+
+int getcury(WINDOW *win);
+int getcurx(WINDOW *win);
+
 #define getbegyx(win, y, x)     \
     do                          \
     {                           \

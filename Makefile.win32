@@ -284,7 +284,7 @@ all: $(TARGET)
 
 $(TARGET): $(HERE)main.c $(ALL_OBJS)
 	$(CC) $(CFLAGS) $(LFLAGS) $(CDEFS) $(HERE)main.c $(ALL_OBJS) \
-	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32 -lmsimg32 -lwinspool -lshell32 $(TRANSLATE_LIB)
+	      -o $@ -lws2_32 -lkernel32 -luser32 -lgdi32 -lmsimg32 -lwinspool -lshell32 $(TRANSLATE_LIB) $(TTS_LIB)
 
 # Create obj directory
 $(OBJDIR):

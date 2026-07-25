@@ -23,13 +23,10 @@
 #include "../core/utf8.h"
 #include "../core/charset.h"
 
-/* Page: US Letter, 1" margins, 12pt Helvetica, 14.4pt leading */
-#define PDF_PAGE_W 612.0
-#define PDF_PAGE_H 792.0
-#define PDF_MARGIN_L 72.0
-#define PDF_MARGIN_R 72.0
-#define PDF_MARGIN_T 72.0
-#define PDF_MARGIN_B 72.0
+/* Page geometry defaults: US Letter, 1" margins, 12pt, 14.4pt leading */
+#define PDF_DEFAULT_PAGE_W 612.0
+#define PDF_DEFAULT_PAGE_H 792.0
+#define PDF_MARGIN_IN 1.0
 #define PDF_FONT_SIZE 12.0
 #define PDF_LEADING_MUL 1.2    /* Line height = size * 1.2 */
 #define PDF_UNDERLINE_OFF -1.5 /* Points below baseline */
@@ -110,6 +107,14 @@ typedef struct
     int tab_width;
     int in_page;
     const struct pdf_font_ctx_tag *fc;
+
+    /* Page geometry, initialised from cfg->print_media and cfg->print_orientation */
+    double page_w;
+    double page_h;
+    double margin_l;
+    double margin_r;
+    double margin_t;
+    double margin_b;
 
     /* Optional hyphenator. NULL disables wrap-hyphenation */
     LayoutHyphenFn hyph;
@@ -247,6 +252,90 @@ static const short pdf_w_helv_bold[224] =
 static int pdf_glyph_width(unsigned char b, unsigned short mask);
 static int pdf_cp_to_winansi(unsigned int cp, unsigned char *out);
 static int ttf_cmap_lookup_fmt4(const struct ttf_face *f, unsigned int cp);
+
+/* Parse a CUPS/IPP media string into page dimensions in points (1pt = 1/72") */
+static int pdf_parse_media(const char *media, double *out_w, double *out_h)
+{
+    const char *x = NULL;
+    const char *p = NULL;
+    const char *start = NULL;
+    char *end = NULL;
+    double tw = 0.0;
+    double th = 0.0;
+    double scale = 1.0;
+
+    if (!media || !media[0])
+        return -1;
+
+    /* Format: "name_WxHunit", e.g. "iso_a4_210x297mm", "na_letter_8.5x11in", "custom_595x842pt" */
+    x = strrchr(media, 'x');
+
+    if (!x)
+        return -1;
+
+    /* Parse width: scan backwards from 'x' to the last '_' or start */
+    start = x;
+
+    while (start > media && start[-1] != '_')
+        start--;
+
+    end = NULL;
+
+    tw = strtod(start, &end);
+
+    if (end != x)
+        return -1;
+
+    /* Parse height: scan forwards from after 'x' to the first non-digit/dot */
+    end = NULL;
+
+    th = strtod(x + 1, &end);
+
+    if (end == x + 1)
+        return -1;
+
+    p = end;
+
+    /* Unit suffix: mm -> 72/25.4, in -> 72, pt -> 1 */
+    if (strncmp(p, "mm", 2) == 0)
+        scale = 72.0 / 25.4;
+    else if (strncmp(p, "in", 2) == 0)
+        scale = 72.0;
+    else if (strncmp(p, "pt", 2) != 0)
+        return -1;
+
+    *out_w = tw * scale;
+    *out_h = th * scale;
+
+    return 0;
+}
+
+/* Initialise page geometry from config: media size + orientation + margins. pw/ph start at Letter defaults */
+static void pdf_pager_init_geometry(pdf_pager *p, const TeConfig *cfg)
+{
+    double pw = PDF_DEFAULT_PAGE_W;
+    double ph = PDF_DEFAULT_PAGE_H;
+    double m = PDF_MARGIN_IN * 72.0;
+    double t;
+
+    if (cfg)
+        pdf_parse_media(cfg->print_media, &pw, &ph);
+
+    /* Orientation: 3=portrait 4=landscape 5=rev-land 6=rev-port. For landscape variants, swap width and height */
+    if (cfg && (cfg->print_orientation == 4 || cfg->print_orientation == 5))
+    {
+        t = pw;
+        pw = ph;
+        ph = t;
+    }
+
+    p->page_w = pw;
+    p->page_h = ph;
+    p->margin_l = m;
+    p->margin_r = m;
+    p->margin_t = m;
+    p->margin_b = m;
+}
 
 static unsigned int ttf_be16(const unsigned char *p)
 {
@@ -759,11 +848,15 @@ static int pdf_font_ctx_try_ttf(pdf_font_ctx *fc, const TeConfig *cfg)
 {
     int i;
     int fi;
+    const char *primary = NULL;
 
     if (!cfg || !cfg->ttf_font[0])
         return -1;
 
-    if (ttf_face_load(&fc->faces[0], cfg->ttf_font) != 0)
+    /* Use print-specific font if set, otherwise fall back to the screen TTF font */
+    primary = cfg->print_font_path[0] ? cfg->print_font_path : cfg->ttf_font;
+
+    if (ttf_face_load(&fc->faces[0], primary) != 0)
         return -1;
 
     fc->n_faces = 1;
@@ -2609,7 +2702,7 @@ static int pdf_pager_open_page(pdf_pager *p)
     pdfb_free(&p->content);
     pdfb_init(&p->content);
 
-    p->y_baseline = PDF_PAGE_H - PDF_MARGIN_T - p->font_size;
+    p->y_baseline = p->page_h - p->margin_t - p->font_size;
     p->in_page = 1;
 
     return 0;
@@ -2641,7 +2734,7 @@ static int pdf_pager_close_page(pdf_pager *p)
     if (pdf_begin_obj(p->o, page_id) != 0)
         return -1;
 
-    if (pdf_printf(p->o, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %.0f %.0f] /Resources %d 0 R /Contents %d 0 R >>\n", p->pages_root_id, PDF_PAGE_W, PDF_PAGE_H, p->resources_id, stream_id) != 0)
+    if (pdf_printf(p->o, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %.0f %.0f] /Resources %d 0 R /Contents %d 0 R >>\n", p->pages_root_id, p->page_w, p->page_h, p->resources_id, stream_id) != 0)
         return -1;
 
     if (pdf_end_obj(p->o) != 0)
@@ -2660,7 +2753,7 @@ static int pdf_pager_ensure_line(pdf_pager *p)
     if (!p->in_page)
         return pdf_pager_open_page(p);
 
-    if (p->y_baseline - p->leading < PDF_MARGIN_B)
+    if (p->y_baseline - p->leading < p->margin_b)
     {
         if (pdf_pager_close_page(p) != 0)
             return -1;
@@ -2688,7 +2781,7 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
     int start;
     int use_forced;
 
-    avail = PDF_PAGE_W - PDF_MARGIN_L - PDF_MARGIN_R;
+    avail = p->page_w - p->margin_l - p->margin_r;
 
     /* Empty paragraph: a blank vertical space (mirrors an empty EdLine) */
     if (para->len == 0)
@@ -2778,18 +2871,18 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
         if (trim_end > start && align == EA_ALIGN_CENTER)
         {
             line_w = pdf_para_measure_range(para, p->fc, start, trim_end, p->font_size, p->tab_width);
-            x = PDF_MARGIN_L + (avail - line_w) * 0.5;
+            x = p->margin_l + (avail - line_w) * 0.5;
 
-            if (x < PDF_MARGIN_L)
-                x = PDF_MARGIN_L;
+            if (x < p->margin_l)
+                x = p->margin_l;
         }
         else if (trim_end > start && align == EA_ALIGN_RIGHT)
         {
             line_w = pdf_para_measure_range(para, p->fc, start, trim_end, p->font_size, p->tab_width);
-            x = PDF_PAGE_W - PDF_MARGIN_R - line_w;
+            x = p->page_w - p->margin_r - line_w;
 
-            if (x < PDF_MARGIN_L)
-                x = PDF_MARGIN_L;
+            if (x < p->margin_l)
+                x = p->margin_l;
         }
         else if (trim_end > start && align == EA_ALIGN_JUST && (!is_last_line || start == 0))
         {
@@ -2810,11 +2903,11 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
                     word_space = p->font_size * 0.5;
             }
 
-            x = PDF_MARGIN_L;
+            x = p->margin_l;
         }
         else
         {
-            x = PDF_MARGIN_L;
+            x = p->margin_l;
         }
 
         if (trim_end > start)
@@ -3251,11 +3344,14 @@ int pdf_export_ex(const struct Ed *ed, FILE *fp, const TeConfig *cfg, LayoutHyph
     memset(&pager, 0, sizeof(pager));
 
     pager.o = &o;
-    pager.font_size = (cfg && cfg->ttf_size > 0) ? (double)cfg->ttf_size : PDF_FONT_SIZE;
+    pager.font_size = (cfg && cfg->print_font_size > 0) ? (double)cfg->print_font_size : (cfg && cfg->ttf_size > 0) ? (double)cfg->ttf_size
+                                                                                                                    : PDF_FONT_SIZE;
     pager.leading = pager.font_size * PDF_LEADING_MUL;
     pager.tab_width = (cfg && cfg->tab_width > 0) ? cfg->tab_width : 4;
     pager.hyph = hyph;
     pager.hyph_user = hyph_user;
+
+    pdf_pager_init_geometry(&pager, cfg);
 
     pdfb_init(&pager.content);
 

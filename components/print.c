@@ -75,8 +75,34 @@ static int print_via_cmd(const struct Ed *ed, const TeConfig *cfg, const char *c
     return 0;
 }
 
-static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, const char *file_path, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
+    char cmd[256];
+
+    /* If a specific local queue is configured, target it explicitly */
+    if (cfg && cfg->print_local_name[0])
+    {
+        snprintf(cmd, sizeof(cmd), "lp -d %s -s", cfg->print_local_name);
+
+        if (print_via_cmd(ed, cfg, cmd, hyph, hyph_user, err, errsz, warn, warnsz) == 0)
+            return 0;
+
+        if (err && errsz > 0)
+            err[0] = '\0';
+
+        snprintf(cmd, sizeof(cmd), "lpr -P %s", cfg->print_local_name);
+
+        if (print_via_cmd(ed, cfg, cmd, hyph, hyph_user, err, errsz, warn, warnsz) == 0)
+            return 0;
+
+        if (err && errsz > 0)
+            err[0] = '\0';
+
+        print_seterr(err, errsz, "no usable print spooler (tried lp -d, lpr -P)");
+
+        return -1;
+    }
+
     if (print_via_cmd(ed, cfg, "lp -s 2>/dev/null", hyph, hyph_user, err, errsz, warn, warnsz) == 0)
         return 0;
 
@@ -96,20 +122,43 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
 
 #elif defined(PLATFORM_WIN32)
 
-static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, const char *file_path, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
-    char tmpdir[MAX_PATH];
+    wchar_t wtmpdir[MAX_PATH];
+    wchar_t wpath[MAX_PATH];
+    wchar_t wdrive[MAX_PATH];
+    wchar_t wdir[MAX_PATH];
+    wchar_t wfname[MAX_PATH];
+    wchar_t wfile[MAX_PATH];
     char path[MAX_PATH];
     FILE *fp = NULL;
     int rc;
+    int have_path = 0;
 
-    if (GetTempPathA(sizeof(tmpdir), tmpdir) == 0)
+    /* Stage the PDF next to the source file if known, else in %TEMP% */
+    if (file_path && file_path[0])
     {
-        print_seterr(err, errsz, "cannot resolve temp directory");
-        return -1;
+        MultiByteToWideChar(CP_UTF8, 0, file_path, -1, wfile, MAX_PATH);
+        _wsplitpath(wfile, wdrive, wdir, wfname, NULL);
+        _wmakepath(wpath, wdrive, wdir, wfname, L".pdf");
+
+        if (wpath[0])
+            have_path = 1;
     }
 
-    snprintf(path, sizeof(path), "%ste_print.pdf", tmpdir);
+    if (!have_path)
+    {
+        if (GetTempPathW(MAX_PATH, wtmpdir) == 0)
+        {
+            print_seterr(err, errsz, "cannot resolve temp directory");
+            return -1;
+        }
+
+        _snwprintf(wpath, MAX_PATH, L"%ste_print.pdf", wtmpdir);
+    }
+
+    /* Convert back to UTF-8 for fopen (we use standard fopen, not _wfopen) */
+    WideCharToMultiByte(CP_UTF8, 0, wpath, -1, path, MAX_PATH, NULL, NULL);
 
     fp = fopen(path, "wb");
 
@@ -190,7 +239,7 @@ static int print_amiga_line(FILE *fp, const EdLine *ln, const char *cs)
     return 0;
 }
 
-static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, const char *file_path, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     FILE *fp = NULL;
     int row;
@@ -238,7 +287,7 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
 
 #else
 
-static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
+static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *charset, const char *file_path, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     print_seterr(err, errsz, "printing not supported on this platform");
 
@@ -249,10 +298,10 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
 
 int te_print_document(const struct Ed *ed, const TeConfig *cfg, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz)
 {
-    return te_print_document_ex(ed, cfg, charset, NULL, NULL, err, errsz, warn, warnsz);
+    return te_print_document_ex(ed, cfg, charset, NULL, NULL, NULL, err, errsz, warn, warnsz);
 }
 
-int te_print_document_ex(const struct Ed *ed, const TeConfig *cfg, const char *charset, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
+int te_print_document_ex(const struct Ed *ed, const TeConfig *cfg, const char *charset, const char *file_path, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     if (err && errsz > 0)
         err[0] = '\0';
@@ -263,5 +312,5 @@ int te_print_document_ex(const struct Ed *ed, const TeConfig *cfg, const char *c
     if (!ed)
         return -1;
 
-    return print_platform(ed, cfg, charset, hyph, hyph_user, err, errsz, warn, warnsz);
+    return print_platform(ed, cfg, charset, file_path, hyph, hyph_user, err, errsz, warn, warnsz);
 }

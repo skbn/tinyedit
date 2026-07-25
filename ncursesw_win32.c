@@ -3636,4 +3636,14 @@ int copywin(const WINDOW *src, WINDOW *dst, int sminrow, int smincol, int dminro
     return OK;
 }
 
+int getcury(WINDOW *win)
+{
+    return (win) ? win->_cury : 0;
+}
+
+int getcurx(WINDOW *win)
+{
+    return (win) ? win->_curx : 0;
+}
+
 #endif /* PLATFORM_WIN32 */

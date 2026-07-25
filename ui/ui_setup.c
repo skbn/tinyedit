@@ -254,6 +254,8 @@ static const SetupField st_fields[] =
         {1, "TTF Size", FT_INT, F_OFF(ttf_size), 0},
         {1, "TTF Antialias", FT_CYCLE, F_OFF(ttf_antialias), 0},
         {1, "TTF Encoding", FT_CYCLE, F_OFF(ttf_use_utf8), 0},
+        {1, "Print Font Size", FT_INT, F_OFF(print_font_size), 0},
+        {1, "Print Font", FT_STR, F_OFF(print_font_path), TE_CFG_STR_MAX},
 #endif
         {1, "Pen 0 (black)", FT_COLORMAP, F_OFF(color_map) + 0 * sizeof(int), 0},
         {1, "Pen 1 (red)", FT_COLORMAP, F_OFF(color_map) + 1 * sizeof(int), 0},
@@ -801,8 +803,8 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
                 }
             }
         }
-        /* TTF Font and Fallbacks use file picker directly */
-        else if ((strcmp(fld->label, "TTF Font") == 0) || strncmp(fld->label, "Fallback", 8) == 0)
+        /* TTF Font, Print Font and Fallbacks use file picker directly */
+        else if ((strcmp(fld->label, "TTF Font") == 0) || (strcmp(fld->label, "Print Font") == 0) || strncmp(fld->label, "Fallback", 8) == 0)
         {
             char tmp[TE_CFG_STR_MAX];
             char start_dir[TE_CFG_STR_MAX];
@@ -878,6 +880,13 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
             {
                 if (parsed < 6 || parsed > 96)
                     parsed = 14;
+            }
+
+            /* PRINT_FONT_SIZE: 0 = inherit ttf_size; otherwise 6..96 */
+            if (fld->off == F_OFF(print_font_size))
+            {
+                if (parsed != 0 && (parsed < 6 || parsed > 96))
+                    parsed = 0;
             }
 
             *v = parsed;

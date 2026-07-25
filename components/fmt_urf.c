@@ -43,11 +43,19 @@ int urf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
+#include FT_OUTLINE_H
+
+#include "ed_attr.h"
+#include "layout.h"
 
 #define URF_DPI 300
-#define URF_MARGIN_IN 0.5
+#define URF_MARGIN_IN 1.0
 #define URF_FONT_SIZE_PT 12
 #define URF_MAX_PAGE_PIXELS (64 * 1024 * 1024)
+#define URF_UNDERLINE_OFF_PT 1.5
+#define URF_UNDERLINE_TH_PT 0.6
+#define URF_BOLD_STRENGTH_MUL 0.03
+#define URF_ITALIC_SHEAR 0.21
 
 typedef struct
 {
@@ -55,6 +63,50 @@ typedef struct
     FT_Face faces[TE_CFG_TTF_FALLBACKS + 1];
     int n_faces;
 } UrfFont;
+
+/* Paragraph model: chars with attribute masks, alignment, forced break points */
+typedef struct
+{
+    unsigned int cp;
+    unsigned short mask;
+} urf_wchar;
+
+typedef struct
+{
+    urf_wchar *chars;
+    int len;
+    int cap;
+    unsigned char align; /* EA_ALIGN_* from the paragraph's first EdLine */
+    int has_content;
+
+    /* Forced break points: char offsets where the editor split a line */
+    int *breaks_pos;
+    unsigned char *breaks_hyph;
+    int n_breaks;
+    int cap_breaks;
+} urf_para;
+
+/* Pager: page management, paragraph wrapping, alignment, rendering */
+typedef struct
+{
+    FILE *fp;
+    unsigned char *buf; /* Page raster buffer (grayscale, w*h) */
+    unsigned int page_w, page_h;
+    int dpi;
+    int margin;
+    int printable_w;
+    int line_height;
+    int ascender;
+    int space_width;
+    int tab_width;
+    int font_size_px;
+    int y; /* Current baseline y */
+    UrfFont *uf;
+    LayoutHyphenFn hyph;
+    void *hyph_user;
+    int page_count;
+    int in_page;
+} urf_pager;
 
 static int urf_seterr(char *err, size_t errsz, const char *msg)
 {
@@ -93,6 +145,130 @@ static void urf_font_close(UrfFont *uf)
         FT_Done_FreeType(uf->lib);
 
     memset(uf, 0, sizeof(*uf));
+}
+
+/* Paragraph model (ported from fmt_pdf.c, adapted for FreeType metrics)  */
+static void urf_para_init(urf_para *p)
+{
+    memset(p, 0, sizeof(*p));
+}
+
+static void urf_para_free(urf_para *p)
+{
+    free(p->chars);
+    free(p->breaks_pos);
+    free(p->breaks_hyph);
+
+    memset(p, 0, sizeof(*p));
+}
+
+static void urf_para_reset(urf_para *p)
+{
+    p->len = 0;
+    p->align = EA_ALIGN_LEFT;
+    p->has_content = 0;
+    p->n_breaks = 0;
+}
+
+static int urf_para_push(urf_para *p, unsigned int cp, unsigned short mask)
+{
+    if (p->len >= p->cap)
+    {
+        int nc;
+        urf_wchar *nb = NULL;
+
+        nc = p->cap ? p->cap * 2 : 128;
+        nb = (urf_wchar *)realloc(p->chars, (size_t)nc * sizeof(*nb));
+
+        if (!nb)
+            return -1;
+
+        p->chars = nb;
+        p->cap = nc;
+    }
+
+    p->chars[p->len].cp = cp;
+    p->chars[p->len].mask = mask;
+    p->len++;
+
+    return 0;
+}
+
+static int urf_para_add_break(urf_para *p, int is_hyphen)
+{
+    if (p->n_breaks >= p->cap_breaks)
+    {
+        int nc;
+        int *np = NULL;
+        unsigned char *nh = NULL;
+
+        nc = p->cap_breaks ? p->cap_breaks * 2 : 16;
+
+        np = (int *)realloc(p->breaks_pos, (size_t)nc * sizeof(*np));
+
+        if (!np)
+            return -1;
+
+        nh = (unsigned char *)realloc(p->breaks_hyph, (size_t)nc * sizeof(*nh));
+
+        if (!nh)
+        {
+            p->breaks_pos = np;
+            return -1;
+        }
+
+        p->breaks_pos = np;
+        p->breaks_hyph = nh;
+        p->cap_breaks = nc;
+    }
+
+    p->breaks_pos[p->n_breaks] = p->len;
+    p->breaks_hyph[p->n_breaks] = (unsigned char)(is_hyphen ? 1 : 0);
+    p->n_breaks++;
+
+    return 0;
+}
+
+static int urf_para_find_break(const urf_para *p, int start)
+{
+    int i;
+
+    for (i = 0; i < p->n_breaks; i++)
+    {
+        if (p->breaks_pos[i] > start)
+            return i;
+    }
+
+    return -1;
+}
+
+static int urf_para_append_edline(urf_para *p, const EdLine *ln, const EdAttrRun *runs, int n_runs)
+{
+    int i;
+    int r;
+
+    r = 0;
+
+    for (i = 0; i < ln->len; i++)
+    {
+        unsigned int cp;
+        unsigned short mask;
+
+        cp = ed_line_char(ln, i);
+
+        mask = 0;
+
+        while (r < n_runs && runs[r].end <= i)
+            r++;
+
+        if (r < n_runs && i >= runs[r].start && i < runs[r].end)
+            mask = runs[r].mask;
+
+        if (urf_para_push(p, cp, mask) != 0)
+            return -1;
+    }
+
+    return 0;
 }
 
 static int urf_parse_media(const char *media, double *w, double *h)
@@ -307,6 +483,9 @@ static int urf_font_advance(const UrfFont *uf, unsigned int cp)
 
     for (i = 0; i < uf->n_faces; i++)
     {
+        if (FT_Get_Char_Index(uf->faces[i], (FT_ULong)cp) == 0)
+            continue;
+
         e = FT_Load_Char(uf->faces[i], (FT_ULong)cp, FT_LOAD_DEFAULT);
 
         if (e)
@@ -340,30 +519,228 @@ static int urf_char_advance(const UrfFont *uf, int x, int margin, int space_widt
     return urf_font_advance(uf, cp);
 }
 
-static int urf_font_render(const UrfFont *uf, unsigned char *buf, unsigned int w, unsigned int h, int x, int y, unsigned int cp)
+/* Measure the pixel width of para chars [start, end) at the given margin/space/tab config */
+static int urf_measure_range(const urf_para *p, const UrfFont *uf, int start, int end, int margin, int space_width, int tab_width)
+{
+    int x;
+    int i;
+
+    if (end > p->len)
+        end = p->len;
+
+    if (tab_width <= 0)
+        tab_width = 4;
+
+    x = margin;
+
+    for (i = start; i < end; i++)
+    {
+        unsigned int cp = p->chars[i].cp;
+        x += urf_char_advance(uf, x, margin, space_width, tab_width, cp);
+    }
+
+    return x - margin;
+}
+
+/* Find the longest wrapping substring that fits max_w pixels, optionally hyphenating */
+static int urf_wrap_next(const urf_para *p, const UrfFont *uf, int start, int max_w, int margin, int space_width, int tab_width, LayoutHyphenFn hyph, void *hyph_user, int *out_hyphenated)
+{
+    int x;
+    int last_space_at;
+    int i;
+
+    if (out_hyphenated)
+        *out_hyphenated = 0;
+
+    if (tab_width <= 0)
+        tab_width = 4;
+
+    if (start >= p->len)
+        return p->len;
+
+    x = margin;
+    last_space_at = -1;
+
+    for (i = start; i < p->len; i++)
+    {
+        unsigned int cp = p->chars[i].cp;
+        int gw = urf_char_advance(uf, x, margin, space_width, tab_width, cp);
+
+        if (x - margin + gw > max_w && i > start)
+        {
+            /* Overflow: try hyphenation before falling back to space-break or hard cut */
+            if (hyph)
+            {
+                int word_start = i;
+                int word_end = i;
+                int wlen;
+                int k;
+
+                while (word_start > start && p->chars[word_start - 1].cp != ' ' && p->chars[word_start - 1].cp != '\t')
+                    word_start--;
+
+                while (word_end < p->len && p->chars[word_end].cp != ' ' && p->chars[word_end].cp != '\t')
+                    word_end++;
+
+                /* Skip leading punctuation so min_word counts real letters */
+                while (word_start < word_end - 1 &&
+                       (p->chars[word_start].cp == 0xBF || /* ¿ */
+                        p->chars[word_start].cp == 0xA1 || /* ¡ */
+                        p->chars[word_start].cp == '(' ||
+                        p->chars[word_start].cp == '[' ||
+                        p->chars[word_start].cp == '{' ||
+                        p->chars[word_start].cp == '"' ||
+                        p->chars[word_start].cp == '\''))
+                    word_start++;
+
+                wlen = word_end - word_start;
+
+                /* Match layout_paragraph defaults: min_word=5 */
+                if (wlen >= 5)
+                {
+                    wchar_t wbuf[128];
+                    int splits[64];
+                    int nsplits;
+                    int hy_width;
+                    int word_prefix_w = 0;
+                    int cap = (int)(sizeof(wbuf) / sizeof(wbuf[0])) - 1;
+                    int j;
+                    int xx;
+
+                    if (wlen > cap)
+                        wlen = cap;
+
+                    for (k = 0; k < wlen; k++)
+                        wbuf[k] = (wchar_t)p->chars[word_start + k].cp;
+
+                    wbuf[wlen] = 0;
+
+                    nsplits = hyph(hyph_user, wbuf, wlen, splits, (int)(sizeof(splits) / sizeof(splits[0])));
+                    hy_width = urf_font_advance(uf, '-');
+
+                    /* Width already accumulated for range [start, word_start) */
+                    xx = margin;
+
+                    for (j = start; j < word_start; j++)
+                        xx += urf_char_advance(uf, xx, margin, space_width, tab_width, p->chars[j].cp);
+
+                    word_prefix_w = xx - margin;
+
+                    /* Try the largest split that still fits (with the trailing hyphen) */
+                    for (k = nsplits - 1; k >= 0; k--)
+                    {
+                        int split = splits[k];
+                        int frag_w = 0;
+                        int xx = margin;
+                        int j;
+
+                        /* Match layout_paragraph: min_left=2, min_right=3 */
+                        if (split < 2 || wlen - split < 3)
+                            continue;
+
+                        for (j = 0; j < split; j++)
+                            xx += urf_char_advance(uf, xx, margin, space_width, tab_width, p->chars[word_start + j].cp);
+
+                        frag_w = xx - margin;
+
+                        if (word_prefix_w + frag_w + hy_width <= max_w)
+                        {
+                            if (out_hyphenated)
+                                *out_hyphenated = 1;
+
+                            return word_start + split;
+                        }
+                    }
+                }
+            }
+
+            /* Fall back: last space, else hard cut */
+            if (last_space_at >= start)
+                return last_space_at + 1;
+
+            return i;
+        }
+
+        x += gw;
+
+        if (cp == ' ')
+            last_space_at = i;
+    }
+
+    return p->len;
+}
+
+/* Render one character at (x, y_baseline) with optional bold/italic/underline */
+static int urf_render_char_attr(const UrfFont *uf, unsigned char *buf, unsigned int w, unsigned int h, int x, int y, unsigned int cp, unsigned short mask, int font_size_px, int space_width)
 {
     FT_Error e;
-    FT_Bitmap *bm = NULL;
     FT_Face face;
-    int bx;
-    int by;
-    int i;
-    int j;
-    int k;
-    unsigned int px;
-    unsigned int py;
+    FT_Bitmap *bm = NULL;
+    int bx, by;
+    int i, j, k;
+    unsigned int px, py;
     unsigned char v;
+    int want_bold, want_italic, want_ul;
+    FT_Matrix shear;
+    int did_transform = 0;
+    int adv = 0;
 
     if (!uf)
         return 0;
 
+    want_bold = (mask & EA_BOLD) != 0;
+    want_italic = (mask & EA_ITALIC) != 0;
+    want_ul = (mask & EA_UNDERLINE) != 0;
+
+    /* Italic shear matrix: x' = x + shear*y, y' = y (horizontal slant) */
+    if (want_italic)
+    {
+        shear.xx = 1 << 16;
+        shear.xy = (FT_Fixed)(URF_ITALIC_SHEAR * (1 << 16));
+        shear.yx = 0;
+        shear.yy = 1 << 16;
+    }
+
     for (i = 0; i < uf->n_faces; i++)
     {
         face = uf->faces[i];
-        e = FT_Load_Char(face, (FT_ULong)cp, FT_LOAD_RENDER);
+
+        /* Skip this face if it doesn't have the glyph (fall back to next face) */
+        if (FT_Get_Char_Index(face, (FT_ULong)cp) == 0)
+            continue;
+
+        /* Apply italic transform on this face (reset after) */
+        if (want_italic)
+        {
+            FT_Set_Transform(face, &shear, NULL);
+            did_transform = 1;
+        }
+
+        if (want_bold)
+            e = FT_Load_Char(face, (FT_ULong)cp, FT_LOAD_NO_BITMAP);
+        else
+            e = FT_Load_Char(face, (FT_ULong)cp, FT_LOAD_RENDER);
+
+        if (want_italic && did_transform)
+        {
+            FT_Set_Transform(face, NULL, NULL);
+            did_transform = 0;
+        }
 
         if (e)
             continue;
+
+        /* Synthetic bold: embolden the outline horizontally only, then render */
+        if (want_bold)
+        {
+            FT_Pos strength = (FT_Pos)(font_size_px * URF_BOLD_STRENGTH_MUL * 64);
+
+            if (face->glyph->format == FT_GLYPH_FORMAT_OUTLINE)
+            {
+                FT_Outline_EmboldenXY(&face->glyph->outline, strength, 0);
+                FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
+            }
+        }
 
         bm = &face->glyph->bitmap;
         bx = x + face->glyph->bitmap_left;
@@ -388,11 +765,298 @@ static int urf_font_render(const UrfFont *uf, unsigned char *buf, unsigned int w
                 v = row[k];
 
                 if (v)
-                    buf[py * w + px] = (unsigned char)(255 - v);
+                {
+                    unsigned char old = buf[py * w + px];
+                    unsigned int nv = (unsigned int)(255 - v);
+
+                    /* Composite: take the darker (more ink) */
+                    if (nv < old)
+                        buf[py * w + px] = (unsigned char)nv;
+                }
             }
         }
 
-        return (int)(face->glyph->metrics.horiAdvance >> 6);
+        adv = (int)(face->glyph->metrics.horiAdvance >> 6);
+        break;
+    }
+
+    /* Underline: draw a horizontal line at baseline + offset */
+    if (want_ul && adv > 0)
+    {
+        int uy = y + (int)(URF_UNDERLINE_OFF_PT * font_size_px / 12.0 + 0.5);
+        int uth = (int)(URF_UNDERLINE_TH_PT * font_size_px / 12.0 + 0.5);
+
+        if (uth < 1)
+            uth = 1;
+
+        for (px = (unsigned int)x; px < (unsigned int)(x + adv) && px < w; px++)
+        {
+            for (j = 0; j < uth; j++)
+            {
+                py = (unsigned int)(uy + j);
+
+                if (py < h)
+                    buf[py * w + px] = 0; /* black */
+            }
+        }
+    }
+
+    return adv;
+}
+
+static int urf_pager_start_page(urf_pager *pg)
+{
+    if (urf_page_header(pg->fp, pg->page_w, pg->page_h, (unsigned int)pg->dpi) != 0)
+        return -1;
+
+    memset(pg->buf, 255, (size_t)pg->page_w * pg->page_h);
+
+    pg->y = pg->margin + pg->ascender;
+    pg->in_page = 1;
+
+    return 0;
+}
+
+static int urf_pager_close_page(urf_pager *pg)
+{
+    if (!pg->in_page)
+        return 0;
+
+    if (urf_encode_page(pg->fp, pg->buf, pg->page_w, pg->page_h) != 0)
+        return -1;
+
+    pg->page_count++;
+    pg->in_page = 0;
+
+    return 0;
+}
+
+/* Ensure there is room for one more line; page-break if needed */
+static int urf_pager_ensure_line(urf_pager *pg)
+{
+    if (!pg->in_page)
+    {
+        if (urf_pager_start_page(pg) != 0)
+            return -1;
+
+        return 0;
+    }
+
+    if (pg->y + pg->line_height > (int)(pg->page_h - pg->margin))
+    {
+        if (urf_pager_close_page(pg) != 0)
+            return -1;
+
+        if (urf_pager_start_page(pg) != 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+static int urf_pager_blank_line(urf_pager *pg)
+{
+    if (urf_pager_ensure_line(pg) != 0)
+        return -1;
+
+    pg->y += pg->line_height;
+    return 0;
+}
+
+/* Render para chars [start, end) at (x, y) with attributes and optional word_space for justify */
+static int urf_pager_render_line(urf_pager *pg, const urf_para *para, int start, int end, int x, int word_space)
+{
+    int i;
+    int px = x;
+
+    for (i = start; i < end; i++)
+    {
+        unsigned int cp = para->chars[i].cp;
+        unsigned short mask = para->chars[i].mask;
+        int adv;
+
+        if (cp == '\t')
+        {
+            int col = (px - pg->margin) / pg->space_width;
+            int spaces = pg->tab_width - (col % pg->tab_width);
+            int s;
+
+            if (spaces <= 0)
+                spaces = pg->tab_width;
+
+            for (s = 0; s < spaces; s++)
+                px += urf_render_char_attr(pg->uf, pg->buf, pg->page_w, pg->page_h, px, pg->y, ' ', 0, pg->font_size_px, pg->space_width);
+        }
+        else if (cp < 0x20 || cp == 0x7F)
+        {
+            px += urf_render_char_attr(pg->uf, pg->buf, pg->page_w, pg->page_h, px, pg->y, ' ', 0, pg->font_size_px, pg->space_width);
+        }
+        else
+        {
+            adv = urf_render_char_attr(pg->uf, pg->buf, pg->page_w, pg->page_h, px, pg->y, cp, mask, pg->font_size_px, pg->space_width);
+            px += adv;
+
+            /* Justify: add extra space after each word */
+            if (word_space > 0 && cp == ' ')
+                px += word_space;
+        }
+    }
+
+    return 0;
+}
+
+/* Flush a paragraph: wrap into visual lines, apply alignment, page-break as needed */
+static int urf_pager_emit_para(urf_pager *pg, const urf_para *para)
+{
+    int start;
+    int use_forced;
+
+    if (para->len == 0)
+        return urf_pager_blank_line(pg);
+
+    start = 0;
+    use_forced = 1;
+
+    while (start < para->len)
+    {
+        int end;
+        int trim_end;
+        int line_w;
+        int x;
+        int align;
+        int is_last_line;
+        int n_spaces;
+        int j;
+        int word_space = 0;
+        int hyphenated = 0;
+        urf_wchar saved_char = {0, 0};
+        int saved_at = -1;
+        int bi;
+
+        /* Try forced break from editor */
+        bi = use_forced ? urf_para_find_break(para, start) : -1;
+
+        if (bi >= 0)
+        {
+            int fb_end = para->breaks_pos[bi];
+            int fb_w = urf_measure_range(para, pg->uf, start, fb_end, pg->margin, pg->space_width, pg->tab_width);
+
+            if (fb_w <= pg->printable_w)
+            {
+                end = fb_end;
+                hyphenated = (para->breaks_hyph[bi] == 1);
+            }
+            else
+            {
+                use_forced = 0;
+                end = urf_wrap_next(para, pg->uf, start, pg->printable_w, pg->margin, pg->space_width, pg->tab_width, pg->hyph, pg->hyph_user, &hyphenated);
+            }
+        }
+        else
+        {
+            end = urf_wrap_next(para, pg->uf, start, pg->printable_w, pg->margin, pg->space_width, pg->tab_width, pg->hyph, pg->hyph_user, &hyphenated);
+        }
+
+        if (end <= start)
+            end = start + 1;
+
+        is_last_line = (end >= para->len);
+
+        /* Trim trailing spaces */
+        trim_end = end;
+
+        while (trim_end > start && para->chars[trim_end - 1].cp == ' ')
+            trim_end--;
+
+        /* Insert hyphen at wrap point */
+        if (hyphenated && end < para->len && trim_end == end)
+        {
+            urf_para *mp = (urf_para *)para;
+            unsigned short mask_at = trim_end > start ? mp->chars[trim_end - 1].mask : 0;
+
+            saved_at = end;
+            saved_char = mp->chars[end];
+            mp->chars[end].cp = '-';
+            mp->chars[end].mask = mask_at;
+            trim_end = end + 1;
+        }
+
+        if (urf_pager_ensure_line(pg) != 0)
+        {
+            if (saved_at >= 0)
+                ((urf_para *)para)->chars[saved_at] = saved_char;
+
+            return -1;
+        }
+
+        align = (int)para->align;
+
+        if (trim_end > start && align == EA_ALIGN_CENTER)
+        {
+            line_w = urf_measure_range(para, pg->uf, start, trim_end, pg->margin, pg->space_width, pg->tab_width);
+
+            x = pg->margin + (pg->printable_w - line_w) / 2;
+
+            if (x < pg->margin)
+                x = pg->margin;
+        }
+        else if (trim_end > start && align == EA_ALIGN_RIGHT)
+        {
+            line_w = urf_measure_range(para, pg->uf, start, trim_end, pg->margin, pg->space_width, pg->tab_width);
+
+            x = (int)pg->page_w - pg->margin - line_w;
+
+            if (x < pg->margin)
+                x = pg->margin;
+        }
+        else if (trim_end > start && align == EA_ALIGN_JUST && (!is_last_line || start == 0))
+        {
+            line_w = urf_measure_range(para, pg->uf, start, trim_end, pg->margin, pg->space_width, pg->tab_width);
+
+            n_spaces = 0;
+
+            for (j = start; j < trim_end; j++)
+            {
+                if (para->chars[j].cp == ' ')
+                    n_spaces++;
+            }
+
+            if (n_spaces > 0 && line_w < pg->printable_w)
+            {
+                word_space = (pg->printable_w - line_w) / n_spaces;
+
+                if (word_space > pg->font_size_px / 2)
+                    word_space = pg->font_size_px / 2;
+            }
+
+            x = pg->margin;
+        }
+        else
+        {
+            x = pg->margin;
+        }
+
+        if (trim_end > start)
+        {
+            if (urf_pager_render_line(pg, para, start, trim_end, x, word_space) != 0)
+            {
+                if (saved_at >= 0)
+                    ((urf_para *)para)->chars[saved_at] = saved_char;
+
+                return -1;
+            }
+        }
+
+        if (saved_at >= 0)
+            ((urf_para *)para)->chars[saved_at] = saved_char;
+
+        pg->y += pg->line_height;
+
+        start = end;
+
+        /* Skip leading spaces on the next visual line */
+        while (start < para->len && para->chars[start].cp == ' ')
+            start++;
     }
 
     return 0;
@@ -410,14 +1074,17 @@ static int urf_font_open(const TeConfig *cfg, int dpi, UrfFont *uf)
     if (!cfg)
         return -1;
 
-    p = cfg->ttf_font[0] ? cfg->ttf_font : urf_default_font();
+    /* Use print-specific font if set, otherwise fall back to the screen TTF font */
+    p = cfg->print_font_path[0] ? cfg->print_font_path : cfg->ttf_font[0] ? cfg->ttf_font
+                                                                          : urf_default_font();
 
     e = FT_Init_FreeType(&uf->lib);
 
     if (e)
         return -1;
 
-    size = cfg->ttf_size > 0 ? cfg->ttf_size : URF_FONT_SIZE_PT;
+    size = cfg->print_font_size > 0 ? cfg->print_font_size : cfg->ttf_size > 0 ? cfg->ttf_size
+                                                                               : URF_FONT_SIZE_PT;
 
     e = FT_New_Face(uf->lib, p, 0, &uf->faces[0]);
 
@@ -462,7 +1129,7 @@ static int urf_font_open(const TeConfig *cfg, int dpi, UrfFont *uf)
     return 0;
 }
 
-static int urf_export_cleanup(unsigned char **buf, UrfFont *uf, char *err, size_t errsz, const char *msg)
+static int urf_export_cleanup(unsigned char **buf, UrfFont *uf, urf_para *para, char *err, size_t errsz, const char *msg)
 {
     if (buf && *buf)
     {
@@ -470,33 +1137,31 @@ static int urf_export_cleanup(unsigned char **buf, UrfFont *uf, char *err, size_
         *buf = NULL;
     }
 
+    if (para)
+        urf_para_free(para);
+
     urf_font_close(uf);
 
     return urf_seterr(err, errsz, msg);
 }
 
-int urf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, size_t errsz, char *warn, size_t warnsz)
+int urf_export_ex(const struct Ed *ed, FILE *fp, const TeConfig *cfg, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     UrfFont uf;
+    urf_para para;
+    urf_pager pg;
     const char *media = NULL;
     unsigned char *buf = NULL;
     double page_w_in;
     double page_h_in;
     unsigned int page_w;
     unsigned int page_h;
-    unsigned int printable_w;
     int dpi;
     int margin;
-    int line_height;
-    int ascender;
     int char_width;
-    int space_width;
-    int tab_width;
-    int row;
-    int page_count;
-    int y;
-    int warned;
     long header_pos;
+    int row;
+    int rc;
 
     if (err && errsz > 0)
         err[0] = '\0';
@@ -506,12 +1171,25 @@ int urf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
 
     memset(&uf, 0, sizeof(uf));
 
+    urf_para_init(&para);
+
+    memset(&pg, 0, sizeof(pg));
+
     if (!ed || !fp || !cfg)
         return urf_seterr(err, errsz, "invalid arguments");
 
-    media = cfg->print_media[0] ? cfg->print_media : "iso_a4_210x297mm";
+    media = cfg->print_media[0] ? cfg->print_media : "na_letter_8.5x11in";
 
     urf_parse_media(media, &page_w_in, &page_h_in);
+
+    /* Orientation: 3=portrait 4=landscape 5=rev-land 6=rev-port. For landscape variants, swap width and height */
+    if (cfg->print_orientation == 4 || cfg->print_orientation == 5)
+    {
+        double t = page_w_in;
+
+        page_w_in = page_h_in;
+        page_h_in = t;
+    }
 
     dpi = (cfg->print_resolution_x > 0 && cfg->print_resolution_y > 0) ? cfg->print_resolution_x : URF_DPI;
 
@@ -527,13 +1205,9 @@ int urf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
         return urf_seterr(err, errsz, "page too small for margins");
     }
 
-    printable_w = page_w - (unsigned int)(2 * margin);
-
     if (urf_font_open(cfg, dpi, &uf) != 0)
         return urf_seterr(err, errsz, "cannot load font");
 
-    line_height = (int)(uf.faces[0]->size->metrics.height >> 6);
-    ascender = (int)(uf.faces[0]->size->metrics.ascender >> 6);
     char_width = (int)(uf.faces[0]->size->metrics.max_advance >> 6);
 
     if (char_width <= 0)
@@ -543,200 +1217,172 @@ int urf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, si
         return urf_seterr(err, errsz, "font has zero advance");
     }
 
-    space_width = urf_font_advance(&uf, ' ');
-
-    if (space_width <= 0)
-        space_width = char_width;
-
-    tab_width = cfg->tab_width > 0 ? cfg->tab_width : 4;
-
+    /* Write URF file header with placeholder page count */
     if (fwrite("UNIRAST\0", 1, 8, fp) != 8)
-        return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
+        return urf_export_cleanup(&buf, &uf, &para, err, errsz, "write error");
 
     header_pos = ftell(fp);
 
     if (header_pos < 0)
-        return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
+        return urf_export_cleanup(&buf, &uf, &para, err, errsz, "write error");
 
     if (urf_write_u32(fp, 0) != 0)
-        return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
+        return urf_export_cleanup(&buf, &uf, &para, err, errsz, "write error");
 
     buf = urf_page_new(page_w, page_h);
 
     if (!buf)
-        return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
+        return urf_export_cleanup(&buf, &uf, &para, err, errsz, "write error");
 
-    page_count = 0;
-    y = margin + ascender;
-    warned = 0;
+    /* Initialize pager */
+    pg.fp = fp;
+    pg.buf = buf;
+    pg.page_w = page_w;
+    pg.page_h = page_h;
+    pg.dpi = dpi;
+    pg.margin = margin;
+    pg.printable_w = (int)page_w - 2 * margin;
+    pg.line_height = (int)(uf.faces[0]->size->metrics.height >> 6);
+    pg.ascender = (int)(uf.faces[0]->size->metrics.ascender >> 6);
+    pg.space_width = urf_font_advance(&uf, ' ');
 
-    for (row = 0; row < ed->count; row++)
+    if (pg.space_width <= 0)
+        pg.space_width = char_width;
+
+    pg.tab_width = cfg->tab_width > 0 ? cfg->tab_width : 4;
+    pg.font_size_px = (int)(uf.faces[0]->size->metrics.height >> 6);
+    pg.uf = &uf;
+    pg.hyph = hyph;
+    pg.hyph_user = hyph_user;
+    pg.page_count = 0;
+    pg.in_page = 0;
+
+    rc = 0;
+
+    /* Build paragraphs from consecutive non-empty lines, re-wrapping to page width */
+    for (row = 0; row < ed->count && rc == 0; row++)
     {
-        const EdLine *ln = ed->lines[row];
-        int start;
-        int len;
+        const EdLine *ln = NULL;
+        const EdAttrRun *runs = NULL;
+        int n_runs;
+        int brk;
+        int is_last;
 
-        if (!ln)
-            continue;
+        ln = ed->lines[row];
+        n_runs = ed_attr_runs(ln, &runs);
+        is_last = (row == ed->count - 1);
+        brk = is_last ? (int)LB_PARA : (int)ln->brk;
 
-        len = ln->len;
-
-        if (len <= 0)
+        /* Empty line = paragraph break */
+        if (ln->len == 0)
         {
-            if (y + line_height > (int)(page_h - margin))
+            if (para.has_content)
             {
-                if (urf_page_header(fp, page_w, page_h, dpi) != 0)
-                    return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
+                if (urf_pager_emit_para(&pg, &para) != 0)
+                    rc = -1;
 
-                if (urf_encode_page(fp, buf, page_w, page_h) != 0)
-                    return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
-
-                page_count++;
-
-                memset(buf, 255, (size_t)page_w * page_h);
-
-                y = margin + ascender;
+                urf_para_reset(&para);
             }
 
-            y += line_height;
+            if (rc == 0)
+            {
+                if (urf_pager_blank_line(&pg) != 0)
+                    rc = -1;
+            }
 
             continue;
         }
 
-        start = 0;
-
-        while (start < len)
+        /* First line of a paragraph? Adopt its alignment */
+        if (!para.has_content)
         {
-            int seg_start = start;
-            int seg_end = len;
-            int k;
-            int x = margin;
-            int last_space = -1;
-            int overflow = 0;
-            unsigned int cp;
+            para.align = ln->para_align;
+            para.has_content = 1;
+        }
 
-            for (k = start; k < len; k++)
+        if (urf_para_append_edline(&para, ln, runs, n_runs) != 0)
+        {
+            rc = -1;
+            break;
+        }
+
+        /* Join consecutive non-empty lines within a paragraph */
+        if (brk == LB_SPACE)
+        {
+            if (urf_para_push(&para, ' ', 0) != 0)
             {
-                int adv;
-
-                cp = ed_line_char(ln, k);
-
-                if (cp == ' ')
-                    last_space = k;
-
-                adv = urf_char_advance(&uf, x, margin, space_width, tab_width, cp);
-
-                if (x + adv > (int)(margin + printable_w) && k > start)
-                {
-                    overflow = 1;
-
-                    if (last_space > start)
-                        seg_end = last_space;
-                    else
-                        seg_end = k;
-
-                    break;
-                }
-
-                x += adv;
+                rc = -1;
+                break;
             }
-
-            if (seg_end <= seg_start)
-                seg_end = seg_start + 1;
-
-            if (overflow && last_space > start)
-                start = last_space + 1;
-            else
-                start = seg_end;
-
-            if (y + line_height > (int)(page_h - margin))
+        }
+        else if (brk == LB_HYPHEN || brk == LB_WORD)
+        {
+            if (urf_para_add_break(&para, brk == LB_HYPHEN ? 1 : 0) != 0)
             {
-                if (urf_page_header(fp, page_w, page_h, dpi) != 0)
-                    return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
-
-                if (urf_encode_page(fp, buf, page_w, page_h) != 0)
-                    return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
-
-                page_count++;
-
-                memset(buf, 255, (size_t)page_w * page_h);
-
-                y = margin + ascender;
+                rc = -1;
+                break;
             }
+        }
+        else if (brk == LB_PARA)
+        {
+            if (urf_pager_emit_para(&pg, &para) != 0)
+                rc = -1;
 
-            x = margin;
-
-            for (k = seg_start; k < seg_end; k++)
-            {
-                int adv;
-
-                cp = ed_line_char(ln, k);
-
-                if (cp == '\t')
-                {
-                    int col;
-                    int spaces;
-                    int s;
-
-                    col = (x - margin) / space_width;
-                    spaces = tab_width - (col % tab_width);
-
-                    if (spaces <= 0)
-                        spaces = tab_width;
-
-                    for (s = 0; s < spaces; s++)
-                        x += urf_font_render(&uf, buf, page_w, page_h, x, y, ' ');
-                }
-                else if (cp < 0x20 || cp == 0x7F)
-                {
-                    x += urf_font_render(&uf, buf, page_w, page_h, x, y, ' ');
-                }
-                else
-                {
-                    adv = urf_font_render(&uf, buf, page_w, page_h, x, y, cp);
-
-                    if (adv == 0 && cp > 0x7F)
-                    {
-                        if (!warned && warn && warnsz > 0)
-                        {
-                            snprintf(warn, warnsz, "character U+%04X could not be rendered", cp);
-                            warned = 1;
-                        }
-                    }
-
-                    x += adv;
-                }
-            }
-
-            y += line_height;
+            urf_para_reset(&para);
         }
     }
 
-    if (y > margin + ascender || page_count == 0)
+    /* Flush any pending paragraph */
+    if (rc == 0 && para.has_content)
     {
-        if (urf_page_header(fp, page_w, page_h, dpi) != 0)
-            return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
-
-        if (urf_encode_page(fp, buf, page_w, page_h) != 0)
-            return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
-
-        page_count++;
+        if (urf_pager_emit_para(&pg, &para) != 0)
+            rc = -1;
     }
 
-    if (fseek(fp, header_pos, SEEK_SET) != 0)
-        return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
+    /* Close the last page (or emit a blank page if document is empty) */
+    if (rc == 0)
+    {
+        if (pg.in_page || pg.page_count == 0)
+        {
+            if (!pg.in_page)
+            {
+                if (urf_pager_start_page(&pg) != 0)
+                    rc = -1;
+            }
 
-    if (urf_write_u32(fp, (unsigned int)page_count) != 0)
-        return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
+            if (rc == 0)
+            {
+                if (urf_pager_close_page(&pg) != 0)
+                    rc = -1;
+            }
+        }
+    }
 
-    if (fseek(fp, 0, SEEK_END) != 0)
-        return urf_export_cleanup(&buf, &uf, err, errsz, "write error");
+    /* Patch the page count in the file header */
+    if (rc == 0)
+    {
+        if (fseek(fp, header_pos, SEEK_SET) != 0)
+            rc = -1;
+        else if (urf_write_u32(fp, (unsigned int)pg.page_count) != 0)
+            rc = -1;
+        else if (fseek(fp, 0, SEEK_END) != 0)
+            rc = -1;
+    }
 
+    urf_para_free(&para);
     free(buf);
 
     urf_font_close(&uf);
 
+    if (rc != 0)
+        return urf_seterr(err, errsz, "write error");
+
     return 0;
+}
+
+int urf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, size_t errsz, char *warn, size_t warnsz)
+{
+    return urf_export_ex(ed, fp, cfg, NULL, NULL, err, errsz, warn, warnsz);
 }
 
 #endif

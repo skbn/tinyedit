@@ -21,6 +21,7 @@
 #define CINTERFACE
 
 #include <windows.h>
+#include <initguid.h>
 #include <objbase.h>
 #include <sapi.h>
 
@@ -28,6 +29,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+static void *sapi_open(const TtsOpts *opts);
+static void sapi_close(void *backend_data);
+static void sapi_apply_opts(void *backend_data, const TtsOpts *opts);
+static int sapi_begin(void *backend_data, const char *utf8_chunk, int len);
+static int sapi_poll(void *backend_data);
+static void sapi_pause(void *backend_data);
+static void sapi_resume(void *backend_data);
+static void sapi_stop(void *backend_data);
+static unsigned long sapi_sigmask(void *backend_data);
 
 const TtsBackendVT tts_backend_sapi_vt =
     {

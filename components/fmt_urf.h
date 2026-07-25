@@ -16,6 +16,7 @@
 #include <stddef.h>
 
 #include "config.h"
+#include "layout.h"
 
 struct Ed;
 
@@ -26,6 +27,9 @@ extern "C"
 
     /* Write ed as an Apple Raster (image/urf) job */
     int urf_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, size_t errsz, char *warn, size_t warnsz);
+
+    /* Extended export with hyphenation callback (matches pdf_export_ex) */
+    int urf_export_ex(const struct Ed *ed, FILE *fp, const TeConfig *cfg, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz);
 
 #ifdef __cplusplus
 }
