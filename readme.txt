@@ -17,6 +17,7 @@ Main features:
 - Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
 - Experimental grammar/style checker with rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1); grammar checks only work on UTF-8 text
 - Partial rich-text support for .rtf and .wp/.wp4 files
+- Experimental built-in printing (PDF, PCL, URF; optional IPP/AirPrint network printing)
 - Configurable via file or menu
  
 Building
@@ -129,7 +130,44 @@ Available charsets:
 - LATIN-2 (ISO-8859-2, Central European)
 
 Rich text and legacy file formats
-tinyedit can open and save .rtf and .wp/.wp4 files with partial rich-text support. When such a file is loaded, the editor switches to rich mode and the formatting shortcuts (Ctrl+Alt+B/I/U/L/E/R/J on Unix/Windows, Alt+Shift+B/I/U/L/E/R/J on AmigaOS) become available. RTF preserves bold/italic/underline/alignment but drops color. WP 4.2 requires an 8-bit charset for saving and does not store font/size.
+tinyedit can open and save .rtf and .wp/.wp4 files with partial rich-text support. When such a
+file is loaded, the editor switches to rich mode and the formatting shortcuts (Ctrl+Alt+B/I/U/L/E/R/J
+on Unix/Windows, Alt+Shift+B/I/U/L/E/R/J on AmigaOS) become available. RTF preserves bold/italic/underline/alignment
+but drops color. WP 4.1.12 - 4.2 requires an 8-bit charset for saving and does not store font/size
+For best compatibility with WordPerfect 4.1.12 - 4.2 it is recommended to set the charset to CP437 both
+for reading (View) and saving (Save), either per-file with F3 / Alt+C or as the default charset in Setup
+
+
+Printing
+tinyedit includes experimental built-in printing support with a unified print dialog. Press
+Ctrl+Alt+M (Alt+Shift+M on AmigaOS) to open the print popup
+
+Output formats:
+- PDF: default format, always available. Used for local printing on Unix (piped to lp/lpr) and
+  Windows (shell print verb on a temporary PDF)
+- PCL: PCL 5/6 for legacy laser and inkjet printers
+- URF (Apple Raster): required by AirPrint-compatible printers; requires FreeType (USE_URF=1)
+
+Local printing:
+- Unix: pipes the generated PDF to lp (fallback lpr); CUPS handles the rest. A specific printer
+  can be set in Setup
+- Windows: writes a temporary PDF and invokes the shell print verb; alternatively lists installed
+  printers via the Win32 spooler
+- AmigaOS: writes charset-converted text directly to PRT: (printer.device); reads PrinterPrefs to
+  identify the configured driver
+
+Network printing (IPP / AirPrint):
+Optional IPP/IPPS client (USE_IPP=1) sends jobs directly to network printers. Combined with
+mDNS/Bonjour discovery, tinyedit can find AirPrint printers on the LAN, query their capabilities
+(media sizes, duplex, color, quality, copies, orientation, number-up, sources, types, resolutions)
+via Get-Printer-Attributes, and submit jobs with Print-Job. TLS (ipps://) is supported via the
+platform HTTP client; on AmigaOS this requires AmiSSL (WITH_AMISSL=1)
+
+Print options:
+The print dialog exposes the media size, duplex (sides), color mode, quality, copies, orientation,
+number-up, media source, media type, resolution, document format and the print font (path and size,
+alternative to the screen font)
+These map to IPP job attributes when printing over IPP/IPPS, and are remembered across sessions
 
 
 Other useful shortcuts

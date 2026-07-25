@@ -79,8 +79,6 @@ make -f Makefile.unix USE_TTS=1
 - Debian/Ubuntu: `sudo apt install espeak-ng` (also installs `espeak-ng-data`)
 - Arch Linux: `sudo pacman -S espeak-ng`
 - FreeBSD: `doas pkg install espeak-ng`
-- NetBSD: `pkgin install espeak-ng`
-- OpenBSD: `pkg_add espeak`
 - macOS: `brew install espeak-ng` (or use the built-in `say` command)
 
 No build-time dependency is required: tinyedit spawns the TTS backend as a subprocess at runtime
@@ -316,6 +314,10 @@ For TLS-protected IPP on AmigaOS, place the AmiSSL SDK alongside the tinyedit di
 ```
 AMISSL_SDK=AmiSSL make -f Makefile.amiga USE_IPP=1 WITH_AMISSL=1 clean all
 ```
+
+### Print options
+
+The print dialog exposes the media size, duplex (sides), color mode, quality, copies, orientation, number-up, media source, media type, resolution, document format and the **print font** (path and size, alternative to the screen font). These map to IPP job attributes when printing over IPP/IPPS, and are remembered across sessions
 
 ## Usage
 
@@ -602,11 +604,12 @@ tinyedit can open and save `.rtf` and `.wp`/`.wp4` files with partial rich-text 
   - Color information is dropped
   - Non-ASCII characters are written as `\u` escapes with a `?` fallback
 
-- **WordPerfect 4.2** import/export (`.wp`, `.wp4`):
+- **WordPerfect 4.1.12 - 4.2** import/export (`.wp`, `.wp4`):
   - Preserves bold, italic, underline and paragraph alignment
   - Requires an 8-bit charset (e.g. LATIN-1, CP850, CP1252) for saving; UTF-8 is rejected
   - Characters that cannot be represented in the selected output charset are replaced with `?` and a warning is shown
   - Font and size are not written
+  - For best compatibility with WordPerfect 4.1.12 - 4.2 it is recommended to set the charset to CP437 both for reading (View) and saving (Save), either per-file with F3 / Alt+C or as the default charset in Setup
 
 When a rich-text file is loaded, the editor switches to rich mode and the text-formatting shortcuts are available:
 - Unix/Windows: `Ctrl+Alt+B/I/U/L/E/R/J` for bold, italic, underline, align left, center, right, justify

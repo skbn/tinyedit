@@ -79,8 +79,6 @@ make -f Makefile.unix USE_TTS=1
 - Debian/Ubuntu: `sudo apt install espeak-ng` (instala también `espeak-ng-data`)
 - Arch Linux: `sudo pacman -S espeak-ng`
 - FreeBSD: `doas pkg install espeak-ng`
-- NetBSD: `pkgin install espeak-ng`
-- OpenBSD: `pkg_add espeak`
 - macOS: `brew install espeak-ng` (o usa el comando `say` nativo)
 
 No requiere dependencia en tiempo de compilación: tinyedit ejecuta el backend TTS como subproceso en tiempo de ejecución
@@ -316,6 +314,10 @@ Para IPP protegido con TLS en AmigaOS, coloca el SDK de AmiSSL junto al director
 ```
 AMISSL_SDK=AmiSSL make -f Makefile.amiga USE_IPP=1 WITH_AMISSL=1 clean all
 ```
+
+### Opciones de impresión
+
+El diálogo de impresión expone el tamaño de media, dúplex (sides), modo de color, calidad, copias, orientación, número-por-hoja, media source, media type, resolución, formato de documento y la **fuente de impresión** (ruta y tamaño, alternativa a la fuente de pantalla). Estos se mapean a atributos IPP al imprimir por IPP/IPPS, y se recuerdan entre sesiones
 
 ## Uso
 
@@ -603,17 +605,18 @@ tinyedit puede abrir y guardar archivos `.rtf` y `.wp`/`.wp4` con soporte parcia
   - La información de color se descarta.
   - Los caracteres no ASCII se escriben como escapes `\u` con respaldo `?`.
 
-- **WordPerfect 4.2** importación/exportación (`.wp`, `.wp4`):
+- **WordPerfect 4.1.12 - 4.2** importación/exportación (`.wp`, `.wp4`):
   - Conserva negrita, cursiva, subrayado y alineación de párrafo.
   - Requiere un charset de 8 bits (p. ej. LATIN-1, CP850, CP1252) para guardar; UTF-8 se rechaza.
   - Los caracteres que no se puedan representar en el charset de salida se reemplazan por `?` y se muestra una advertencia.
   - No se escriben fuente ni tamaño.
+  - Para máxima compatibilidad con WordPerfect 4.1.12 - 4.2 se recomienda usar CP437 tanto al leer (View) como al guardar (Save), ya sea por archivo con F3 / Alt+C o como charset por defecto en Setup
 
 Cuando se carga un archivo de texto enriquecido, el editor pasa a modo rico y los atajos de formato están disponibles:
 - Unix/Windows: `Ctrl+Alt+B/I/U/L/E/R/J` para negrita, cursiva, subrayado, alinear izquierda, centrar, derecha, justificar.
-- AmigaOS: `Alt+Shift+B/I/U/L/E/R/J` para los mismos comandos.
+- AmigaOS: `Alt+Shift+B/I/U/L/E/R/J` para los mismos comandos
 
-Se pueden mezclar archivos de texto plano y enriquecido en pestañas, pero el formato rico solo se conserva al guardar en `.rtf` o `.wp`/`.wp4`.
+Se pueden mezclar archivos de texto plano y enriquecido en pestañas, pero el formato rico solo se conserva al guardar en `.rtf` o `.wp`/`.wp4`
 
 ## Capturas de Pantalla
 

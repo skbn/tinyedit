@@ -16,6 +16,7 @@ Características principales:
 - Pegado con corchetes (Unix/Linux)
 - Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
 - Corrector gramatical/estilístico experimental con packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1)
+- Impresión experimental integrada (PDF, PCL, URF; impresión de red IPP/AirPrint opcional)
 - Configurable vía archivo o menú
  
 Compilación
@@ -128,7 +129,43 @@ Charsets disponibles:
 - LATIN-2 (ISO-8859-2, Europeo central)
 
 Formatos de texto enriquecido y heredados
-tinyedit puede abrir y guardar archivos .rtf y .wp/.wp4 con soporte parcial de texto enriquecido. Al cargar uno de esos archivos, el editor pasa a modo rico y los atajos de formato (Ctrl+Alt+B/I/U/L/E/R/J en Unix/Windows, Alt+Shift+B/I/U/L/E/R/J en AmigaOS) quedan disponibles. RTF conserva negrita/cursiva/subrayado/alineación pero descarta el color. WP 4.2 requiere un charset de 8 bits para guardar y no almacena fuente ni tamaño.
+tinyedit puede abrir y guardar archivos .rtf y .wp/.wp4 con soporte parcial de texto enriquecido
+Al cargar uno de esos archivos, el editor pasa a modo rico y los atajos de formato (Ctrl+Alt+B/I/U/L/E/R/J
+en Unix/Windows, Alt+Shift+B/I/U/L/E/R/J en AmigaOS) quedan disponibles. RTF conserva negrita/cursiva/subrayado/alineación
+pero descarta el color. WP 4.1.12 - 4.2 requiere un charset de 8 bits para guardar y no almacena fuente
+ni tamaño. Para máxima compatibilidad con WordPerfect 4.1.12 - 4.2 se recomienda usar CP437 tanto
+al leer (View) como al guardar (Save), ya sea por archivo con F3 / Alt+C o como charset por defecto en Setup
+
+Impresión
+tinyedit incluye soporte experimental de impresión integrado con un diálogo de impresión unificado. Presiona
+Ctrl+Alt+M (Alt+Shift+M en AmigaOS) para abrir la ventana de impresión
+
+Formatos de salida:
+- PDF: formato por defecto, siempre disponible. Usado para impresión local en Unix (pipe a lp/lpr) y
+  Windows (shell print verb sobre un PDF temporal)
+- PCL: PCL 5/6 para impresoras láser e inyección de tinta antiguas
+- URF (Apple Raster): requerido por impresoras compatibles con AirPrint; requiere FreeType (USE_URF=1)
+
+Impresión local:
+- Unix: envía el PDF generado a lp (fallback lpr); CUPS se encarga del resto. Se puede indicar una
+  impresora concreta en Setup
+- Windows: escribe un PDF temporal e invoca el shell print verb; alternativamente lista las impresoras
+  instaladas vía el spooler de Win32
+- AmigaOS: escribe texto convertido de charset directamente a PRT: (printer.device); lee PrinterPrefs
+  para identificar el driver configurado
+
+Impresión de red (IPP / AirPrint):
+Cliente IPP/IPPS opcional (USE_IPP=1) que envía trabajos directamente a impresoras de red. Combinado con
+el descubrimiento mDNS/Bonjour, tinyedit puede encontrar impresoras AirPrint en la LAN, consultar sus
+capacidades (tamaños de media, dúplex, color, calidad, copias, orientación, número-por-hoja, sources,
+types, resoluciones) vía Get-Printer-Attributes, y enviar trabajos con Print-Job. TLS (ipps://) se
+soporta vía el cliente HTTP de la plataforma; en AmigaOS requiere AmiSSL (WITH_AMISSL=1)
+
+Opciones de impresión:
+El diálogo de impresión expone el tamaño de media, dúplex (sides), modo de color, calidad, copias,
+orientación, número-por-hoja, media source, media type, resolución, formato de documento y la fuente
+de impresión (ruta y tamaño, alternativa a la fuente de pantalla). Estos se mapean a atributos IPP al
+imprimir por IPP/IPPS, y se recuerdan entre sesiones
 
 Otros atajos útiles
 - Ctrl+W: rewrap bloque de cita FTN reply

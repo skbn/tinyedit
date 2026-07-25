@@ -1,0 +1,101 @@
+Short:        Lightweight text editor
+Author:       Ervras
+Uploader:     ervras@aim.com
+Type:         text/edit
+Version:      1.3.7
+Replaces:	  text/edit/tinyedit_aos.lha
+Architecture: m68k-amigaos > 3.1
+Distribution: Aminet
+Requires:     AmiSSL util/libs/AmiSSL-v5-OS3
+
+Tinyedit is a small, lightweight text editor for AmigaOS with charset
+conversion support.
+
+Features include:
+- Read/write UTF-8 files with charset conversion
+- Multiple charset support (CP437, CP850, CP865, CP866, CP1252, LATIN-1,
+LATIN-2, UTF-8)
+- TTF rendering with full Unicode support (including emojis) via FreeType
+- Tabbed interface for multiple files
+- Syntax highlighting
+- Configurable colors and TTF fonts (Amiga palette mapping)
+- Mouse support
+- Auto-wrap and hard-wrap text modes
+- Undo/redo support
+- Search and replace functionality
+- Spell checker, hyphenation, thesaurus (optional native implementations)
+- Translator panel (online backends + offline StarDict-compatible dictionaries)
+- Grammar checker (experimental, UTF-8 text only)
+- Partial rich-text support for .rtf and .wp/.wp4 files
+- Experimental built-in printing (PDF, PCL, URF; optional IPP/IPPS/AirPrint via AmiSSL)
+- Clipboard support
+- Unicode glyph picker
+- Customizable via config file (ENVARC:tinyedit/config)
+- Experimental support to rtf 1.x and wordperfect 4.1.12 - 4.2
+
+Update with native spell checker, hyphenation and thesaurus (optional),
+translator panel, syntax highlighting, tabbed interface, glyph picker and mouse support
+
+*Requires AmiSSL only when using the online translator with HTTPS
+
+Tested TrueType fonts: Symbola.ttf, unifont_sample-17.0.04.otf,
+NotoColorEmoji-emojicompat.ttf, Symbola_hint.ttf, NotoSansCJK-Regular.ttf,
+NotoColorEmoji.ttf, DejaVuSansMono.ttf, LiberationMono-Regular.ttf
+
+Dictionaries tested with the native spell checker include es_ES and en_US/
+en_GB from the LibreOffice Dictionaries Collection. Place the .aff and .dic
+files in ENVARC:dictionaries (or set SPELL_DICT_PATH).
+
+Hyphenation tested with hyph_es and hyph_en_US files from the LibreOffice
+Dictionaries Collection (hyph_*.dic format). Place them in the configured
+hyphenation dictionary path.
+
+Thesaurus tested with th_es_ES and th_en_US files from the LibreOffice
+Dictionaries Collection (th_*.idx/.dat format). Place them in the configured
+thesaurus dictionary path.
+
+StarDict-compatible offline dictionaries can be obtained from:
+https://stardict.uber.space/ (mirror), http://download.huzheng.org/ or
+https://freedict.org/downloads/. Place the .ifo, .idx and .dict files in the
+configured dictionary path
+
+Grammar checker (experimental) uses bundled .rul rule packs and only works
+with UTF-8 text. Additional rule packs can be generated from LanguageTool XML
+files using tools/lt2rul.py
+
+RTF and WordPerfect 4.1.12 - 4.2 files can be loaded and saved with partial formatting
+support (bold/italic/underline/alignment). WP 4.1.12 - 4.2 saving requires an 8-bit charset
+For best compatibility it is recommended to set the charset to CP437 both for reading
+(View) and saving (Save), either per-file with F3 / Alt+C or as the default charset in Setup
+
+Printing (experimental):
+tinyedit includes built-in printing support with a unified print dialog. Press
+Alt+Shift+M to open the print popup
+
+Output formats:
+- PDF: default format, always available
+- PCL: PCL 5/6 for legacy laser and inkjet printers
+- URF (Apple Raster): required by AirPrint-compatible printers; uses the bundled
+  FreeType (always enabled on AmigaOS)
+
+Local printing on AmigaOS writes charset-converted text directly to PRT:
+(printer.device); reads PrinterPrefs to identify the configured driver
+
+Network printing (IPP / AirPrint):
+Optional IPP/IPPS client (USE_IPP=1) sends jobs directly to network printers
+Combined with mDNS/Bonjour discovery, tinyedit can find AirPrint printers on the
+LAN, query their capabilities via Get-Printer-Attributes, and submit jobs with
+Print-Job. TLS (ipps://) on AmigaOS requires AmiSSL (WITH_AMISSL=1)
+
+Print options:
+The print dialog exposes the media size, duplex, color mode, quality, copies,
+orientation, number-up, media source, media type, resolution, document format
+and the print font (path and size, alternative to the screen font). These map
+to IPP job attributes when printing over IPP/IPPS, and are remembered across
+sessions
+
+Other sources:
+wooorm/dictionaries on GitHub and the TinyMCE hunspell dictionary packages
+
+Source code:
+https://github.com/skbn/tinyedit
