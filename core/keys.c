@@ -45,7 +45,9 @@ int wrapper_read_key(wint_t *out_wch)
         int wrc2;
 
         nodelay(stdscr, TRUE);
+
         wrc2 = get_wch(&wch2);
+
         nodelay(stdscr, FALSE);
 
         if (wrc2 != ERR && wrc2 != KEY_CODE_YES)

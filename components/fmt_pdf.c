@@ -23,11 +23,22 @@
 #include "../core/utf8.h"
 #include "../core/charset.h"
 
+/* FreeType is available when URF is enabled (Unix) or bundled (Amiga/Win32) */
+#if defined(HAVE_URF) || defined(USE_FREETYPE)
+#define PDF_HAVE_FREETYPE 1
+#endif
+
+#ifdef PDF_HAVE_FREETYPE
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#endif
+
 /* Page geometry defaults: US Letter, 1" margins, 12pt, 14.4pt leading */
 #define PDF_DEFAULT_PAGE_W 612.0
 #define PDF_DEFAULT_PAGE_H 792.0
 #define PDF_MARGIN_IN 1.0
 #define PDF_FONT_SIZE 12.0
+#define PDF_FT_DPI_DEFAULT 300 /* Fallback when cfg->print_resolution_x is 0 */
 #define PDF_LEADING_MUL 1.2    /* Line height = size * 1.2 */
 #define PDF_UNDERLINE_OFF -1.5 /* Points below baseline */
 #define PDF_UNDERLINE_TH 0.6   /* Line thickness */
@@ -123,6 +134,7 @@ typedef struct
 
 struct ttf_face
 {
+    char path[TE_CFG_STR_MAX];
     unsigned char *bytes;
     size_t len;
 
@@ -178,6 +190,14 @@ struct ttf_face
     /* Rebuilt TTF subset bytes, NULL until ttf_face_subset(), used by FontFile2 */
     unsigned char *subset_bytes;
     size_t subset_len;
+
+#ifdef PDF_HAVE_FREETYPE
+    FT_Face ft_face;
+    int ft_valid;
+    int ft_dpi;
+    double ft_size_pt;
+    int *ft_adv_1000;
+#endif
 };
 
 /* Shared font context; mode 0 = base-14 Helvetica, mode 1 = TTF with fallback */
@@ -187,6 +207,10 @@ typedef struct pdf_font_ctx_tag
     struct ttf_face faces[PDF_MAX_TTF_FACES];
     int n_faces;
     int face_type0_id[PDF_MAX_TTF_FACES]; /* obj id of the Type0 font per face */
+
+#ifdef PDF_HAVE_FREETYPE
+    FT_Library ft_lib;
+#endif
 } pdf_font_ctx;
 
 /* Descriptor for one table going into the subset output */
@@ -356,26 +380,36 @@ static int ttf_bes16(const unsigned char *p)
 
 static void ttf_face_free(struct ttf_face *f)
 {
-    if (f && f->bytes)
+    if (!f)
+        return;
+
+    if (f->bytes)
         free(f->bytes);
 
-    if (f && f->gid_to_cp)
+    if (f->gid_to_cp)
         free(f->gid_to_cp);
 
-    if (f && f->used_gids)
+    if (f->used_gids)
         free(f->used_gids);
 
-    if (f && f->gid_map)
+    if (f->gid_map)
         free(f->gid_map);
 
-    if (f && f->gid_rev)
+    if (f->gid_rev)
         free(f->gid_rev);
 
-    if (f && f->subset_bytes)
+    if (f->subset_bytes)
         free(f->subset_bytes);
 
-    if (f)
-        memset(f, 0, sizeof(*f));
+#ifdef PDF_HAVE_FREETYPE
+    if (f->ft_face)
+        FT_Done_Face(f->ft_face);
+
+    if (f->ft_adv_1000)
+        free(f->ft_adv_1000);
+#endif
+
+    memset(f, 0, sizeof(*f));
 }
 
 /* Build reverse GID->codepoint map from cmap subtables, format 12 first */
@@ -510,6 +544,9 @@ static int ttf_face_load(struct ttf_face *f, const char *path)
     const unsigned char *maxp = NULL;
 
     memset(f, 0, sizeof(*f));
+
+    strncpy(f->path, path, sizeof(f->path) - 1);
+    f->path[sizeof(f->path) - 1] = '\0';
 
     fp = fopen(path, "rb");
 
@@ -825,6 +862,27 @@ static int ttf_face_advance(const struct ttf_face *f, int gid)
     return (int)ttf_be16(h + (f->num_h_metrics - 1) * 4);
 }
 
+/* Advance in 1/1000 em using FreeType metrics when available */
+static int ttf_face_pdf_advance(const struct ttf_face *f, int gid)
+{
+    int adv;
+
+#ifdef PDF_HAVE_FREETYPE
+    if (f->ft_valid && f->ft_adv_1000 && gid >= 0 && gid < f->num_glyphs)
+    {
+        if (f->ft_adv_1000[gid] >= 0)
+            return f->ft_adv_1000[gid];
+    }
+#endif
+
+    adv = ttf_face_advance(f, gid);
+
+    if (f->units_per_em > 0)
+        return adv * 1000 / f->units_per_em;
+
+    return 500;
+}
+
 static void pdf_font_ctx_init(pdf_font_ctx *fc)
 {
     memset(fc, 0, sizeof(*fc));
@@ -840,6 +898,11 @@ static void pdf_font_ctx_free(pdf_font_ctx *fc)
     for (i = 0; i < fc->n_faces; i++)
         ttf_face_free(&fc->faces[i]);
 
+#ifdef PDF_HAVE_FREETYPE
+    if (fc->ft_lib)
+        FT_Done_FreeType(fc->ft_lib);
+#endif
+
     memset(fc, 0, sizeof(*fc));
 }
 
@@ -849,6 +912,12 @@ static int pdf_font_ctx_try_ttf(pdf_font_ctx *fc, const TeConfig *cfg)
     int i;
     int fi;
     const char *primary = NULL;
+
+#ifdef PDF_HAVE_FREETYPE
+    double size_pt = PDF_FONT_SIZE;
+    int dpi = PDF_FT_DPI_DEFAULT;
+    FT_Error e;
+#endif
 
     if (!cfg || !cfg->ttf_font[0])
         return -1;
@@ -869,6 +938,77 @@ static int pdf_font_ctx_try_ttf(pdf_font_ctx *fc, const TeConfig *cfg)
         if (ttf_face_load(&fc->faces[fc->n_faces], cfg->ttf_fallback[i]) == 0)
             fc->n_faces++;
     }
+
+#ifdef PDF_HAVE_FREETYPE
+    /* Use configured print resolution and font size; 0 means fallback */
+    if (cfg->print_resolution_x > 0)
+        dpi = cfg->print_resolution_x;
+
+    if (cfg->print_resolution_y > 0 && cfg->print_resolution_y > dpi)
+        dpi = cfg->print_resolution_y;
+
+    if (cfg->print_font_size > 0)
+        size_pt = cfg->print_font_size;
+    else if (cfg->ttf_size > 0)
+        size_pt = cfg->ttf_size;
+
+    e = FT_Init_FreeType(&fc->ft_lib);
+
+    if (e == 0)
+    {
+        for (fi = 0; fi < fc->n_faces; fi++)
+        {
+            struct ttf_face *fp2 = &fc->faces[fi];
+
+            if (fp2->is_otf)
+                continue;
+
+            e = FT_New_Face(fc->ft_lib, fp2->path, 0, &fp2->ft_face);
+
+            if (e != 0)
+                continue;
+
+            e = FT_Set_Char_Size(fp2->ft_face, (FT_F26Dot6)(size_pt * 64.0), 0, dpi, 0);
+
+            if (e != 0)
+            {
+                FT_Done_Face(fp2->ft_face);
+                fp2->ft_face = NULL;
+                continue;
+            }
+
+            fp2->ft_valid = 1;
+            fp2->ft_dpi = dpi;
+            fp2->ft_size_pt = size_pt;
+
+            /* Cache FreeType advances for all glyphs to avoid reloading */
+            fp2->ft_adv_1000 = (int *)malloc((size_t)fp2->num_glyphs * sizeof(int));
+
+            if (fp2->ft_adv_1000)
+            {
+                int k;
+
+                for (k = 0; k < fp2->num_glyphs; k++)
+                {
+                    if (FT_Load_Glyph(fp2->ft_face, (FT_UInt)k, FT_LOAD_DEFAULT) == 0)
+                    {
+                        int px = fp2->ft_face->glyph->metrics.horiAdvance >> 6;
+                        double pt = (double)px * 72.0 / (double)dpi;
+
+                        fp2->ft_adv_1000[k] = (int)(pt * 1000.0 / size_pt + 0.5);
+
+                        if (fp2->ft_adv_1000[k] <= 0)
+                            fp2->ft_adv_1000[k] = -1;
+                    }
+                    else
+                    {
+                        fp2->ft_adv_1000[k] = -1;
+                    }
+                }
+            }
+        }
+    }
+#endif
 
     /* Set up subset tracking and GID renumbering for loaded TTF faces */
     for (fi = 0; fi < fc->n_faces; fi++)
@@ -916,7 +1056,6 @@ static int pdf_font_ctx_lookup(const pdf_font_ctx *fc, unsigned int cp, int *out
 {
     int i;
     int gid;
-    int upem;
 
     for (i = 0; i < fc->n_faces; i++)
     {
@@ -924,14 +1063,9 @@ static int pdf_font_ctx_lookup(const pdf_font_ctx *fc, unsigned int cp, int *out
 
         if (gid > 0)
         {
-            upem = fc->faces[i].units_per_em;
-
-            if (upem <= 0)
-                continue;
-
             *out_face = i;
             *out_gid = gid;
-            *out_adv_1000 = ttf_face_advance(&fc->faces[i], gid) * 1000 / upem;
+            *out_adv_1000 = ttf_face_pdf_advance(&fc->faces[i], gid);
 
             return 0;
         }
@@ -947,7 +1081,6 @@ static int pdf_ctx_cp_advance(const pdf_font_ctx *fc, unsigned int cp, unsigned 
     int gid;
     int adv;
     unsigned char b;
-    int upem;
 
     if (fc && fc->mode == 1)
     {
@@ -962,9 +1095,7 @@ static int pdf_ctx_cp_advance(const pdf_font_ctx *fc, unsigned int cp, unsigned 
         if (out_face_idx)
             *out_face_idx = 0;
 
-        upem = fc->faces[0].units_per_em;
-
-        return upem > 0 ? ttf_face_advance(&fc->faces[0], 0) * 1000 / upem : 500;
+        return ttf_face_pdf_advance(&fc->faces[0], 0);
     }
 
     if (out_face_idx)
@@ -2102,7 +2233,6 @@ static int pdf_para_wrap_next(const pdf_para *p, const pdf_font_ctx *fc, int sta
                 int word_start = i;
                 int word_end = i;
                 int wlen;
-                int hy_widths_len = 0;
 
                 while (word_start > start && p->chars[word_start - 1].cp != ' ' && p->chars[word_start - 1].cp != '\t')
                     word_start--;
@@ -2342,7 +2472,7 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
                     /* Codepoint absent in all faces: use notdef of primary */
                     want_face = 0;
                     gid = 0;
-                    adv_1000 = fc->faces[0].units_per_em > 0 ? ttf_face_advance(&fc->faces[0], 0) * 1000 / fc->faces[0].units_per_em : 500;
+                    adv_1000 = ttf_face_pdf_advance(&fc->faces[0], 0);
 
                     if (lossy)
                         (*lossy)++;
@@ -3137,7 +3267,6 @@ static int pdf_write_ttf_tounicode(pdf_out *o, const struct ttf_face *f, int id)
 static int pdf_write_ttf_widths(pdf_out *o, const struct ttf_face *f)
 {
     int i;
-    int upem = f->units_per_em;
 
     if (pdf_puts(o, "/W [") != 0)
         return -1;
@@ -3151,7 +3280,7 @@ static int pdf_write_ttf_widths(pdf_out *o, const struct ttf_face *f)
         for (i = 0; i < f->n_sub_gids; i++)
         {
             int old = f->gid_rev[i];
-            int adv = ttf_face_advance(f, old) * 1000 / upem;
+            int adv = ttf_face_pdf_advance(f, old);
 
             if (pdf_printf(o, "%s%d", i > 0 ? " " : "", adv) != 0)
                 return -1;
@@ -3169,7 +3298,7 @@ static int pdf_write_ttf_widths(pdf_out *o, const struct ttf_face *f)
             if (!f->used_gids[i])
                 continue;
 
-            adv = ttf_face_advance(f, i) * 1000 / upem;
+            adv = ttf_face_pdf_advance(f, i);
 
             if (pdf_printf(o, " %d [%d]", i, adv) != 0)
                 return -1;
@@ -3184,7 +3313,7 @@ static int pdf_write_ttf_widths(pdf_out *o, const struct ttf_face *f)
         {
             int adv;
 
-            adv = ttf_face_advance(f, i) * 1000 / upem;
+            adv = ttf_face_pdf_advance(f, i);
 
             if (pdf_printf(o, "%s%d", i > 0 ? " " : "", adv) != 0)
                 return -1;

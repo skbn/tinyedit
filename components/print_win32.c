@@ -15,12 +15,31 @@
 #include <stdio.h>
 
 #include "print_win32.h"
+#include "editor.h"
+#include "fmt_rtf.h"
 
 #ifdef PLATFORM_WIN32
 
 #include <windows.h>
 #include <winspool.h>
 #include <shellapi.h>
+#include <richedit.h>
+
+#if defined(USE_FREETYPE) || defined(HAVE_URF)
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#endif
+
+#ifndef CCHBINNAME
+#define CCHBINNAME 24
+#endif
+
+typedef struct
+{
+    const unsigned char *data;
+    size_t length;
+    size_t offset;
+} W32RtfStream;
 
 /* UTF-16 -> UTF-8 with guaranteed NUL terminator */
 static void w32_utf16_to_utf8(const wchar_t *w, char *out, size_t outsz)
@@ -386,6 +405,268 @@ int win32_get_printer_info(const char *printer_name, Win32PrinterInfo *info)
         HeapFree(GetProcessHeap(), 0, dm);
 
     return 0;
+}
+
+static DWORD CALLBACK w32_rtf_read(DWORD_PTR cookie, LPBYTE buffer, LONG count, LONG *read)
+{
+    W32RtfStream *stream = (W32RtfStream *)cookie;
+    size_t size;
+
+    if (!stream || !buffer || !read)
+        return 1;
+
+    size = stream->length - stream->offset;
+
+    if (size > (size_t)count)
+        size = (size_t)count;
+
+    memcpy(buffer, stream->data + stream->offset, size);
+
+    stream->offset += size;
+    *read = (LONG)size;
+
+    return 0;
+}
+
+static int w32_rtf_cleanup(FILE *fp, unsigned char *rtf, HANDLE printer, DEVMODEW *dm, HDC hdc, HMODULE module, HWND rich, int rc)
+{
+    if (rich)
+    {
+        SendMessageW(rich, EM_FORMATRANGE, FALSE, 0);
+        DestroyWindow(rich);
+    }
+
+    if (module)
+        FreeLibrary(module);
+
+    if (hdc)
+        DeleteDC(hdc);
+
+    if (dm)
+        HeapFree(GetProcessHeap(), 0, dm);
+
+    if (printer)
+        ClosePrinter(printer);
+
+    if (rtf)
+        HeapFree(GetProcessHeap(), 0, rtf);
+
+    if (fp)
+        fclose(fp);
+
+    return rc;
+}
+
+#if defined(USE_FREETYPE) || defined(HAVE_URF)
+static int w32_get_ttf_family(const char *path, char *out, size_t outsz)
+{
+    FT_Library lib = NULL;
+    FT_Face face = NULL;
+    const char *family = NULL;
+
+    if (!path || !path[0] || !out || outsz == 0)
+        return -1;
+
+    out[0] = '\0';
+
+    if (FT_Init_FreeType(&lib) != 0)
+        return -1;
+
+    if (FT_New_Face(lib, path, 0, &face) != 0)
+    {
+        FT_Done_FreeType(lib);
+        return -1;
+    }
+
+    family = face->family_name;
+
+    if (family && family[0])
+    {
+        strncpy(out, family, outsz - 1);
+        out[outsz - 1] = '\0';
+    }
+
+    FT_Done_Face(face);
+    FT_Done_FreeType(lib);
+
+    return out[0] ? 0 : -1;
+}
+#endif
+
+int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const char *job_name)
+{
+    DOCINFOW doc;
+    EDITSTREAM input;
+    FORMATRANGE range;
+    W32RtfStream stream;
+    HANDLE printer = NULL;
+    DEVMODEW *dm = NULL;
+    HDC hdc = NULL;
+    HWND rich = NULL;
+    HMODULE module = NULL;
+    FILE *fp = NULL;
+    unsigned char *rtf = NULL;
+    wchar_t wprinter[512];
+    wchar_t wjob[TE_CFG_STR_MAX];
+    LONG dm_size;
+    LONG next;
+    long size;
+    DWORD count;
+    int rc = -1;
+
+    if (!ed)
+        return -1;
+
+    fp = tmpfile();
+
+    if (fp)
+    {
+        const char *font_path = NULL;
+        char font_name[128];
+        int font_size_hp = 0;
+
+        font_name[0] = '\0';
+
+#ifdef USE_FREETYPE
+        if (cfg)
+        {
+            font_path = cfg->print_font_path[0] ? cfg->print_font_path : (cfg->ttf_font[0] ? cfg->ttf_font : NULL);
+
+            if (font_path && font_path[0])
+                w32_get_ttf_family(font_path, font_name, sizeof(font_name));
+        }
+#endif
+
+        if (cfg && cfg->print_font_size > 0)
+            font_size_hp = cfg->print_font_size * 2;
+        else if (cfg && cfg->ttf_size > 0)
+            font_size_hp = cfg->ttf_size * 2;
+
+        if (rtf_export_with_font(ed, fp, font_name[0] ? font_name : NULL, font_size_hp) != 0)
+        {
+            fclose(fp);
+            return w32_rtf_cleanup(NULL, NULL, NULL, NULL, NULL, NULL, NULL, -1);
+        }
+
+        if (fflush(fp) != 0 || fseek(fp, 0, SEEK_END) != 0)
+            return w32_rtf_cleanup(fp, NULL, NULL, NULL, NULL, NULL, NULL, -1);
+    }
+    else
+    {
+        return w32_rtf_cleanup(NULL, NULL, NULL, NULL, NULL, NULL, NULL, -1);
+    }
+
+    size = ftell(fp);
+
+    if (size < 0 || fseek(fp, 0, SEEK_SET) != 0)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    rtf = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)size);
+
+    if (!rtf || fread(rtf, 1, (size_t)size, fp) != (size_t)size)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    memset(wprinter, 0, sizeof(wprinter));
+
+    if (cfg && cfg->print_local_name[0])
+        w32_utf8_to_utf16(cfg->print_local_name, wprinter, (int)(sizeof(wprinter) / sizeof(wprinter[0])));
+    else
+    {
+        count = (DWORD)(sizeof(wprinter) / sizeof(wprinter[0]));
+
+        if (!GetDefaultPrinterW(wprinter, &count))
+            return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+    }
+
+    if (!OpenPrinterW(wprinter, &printer, NULL))
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    dm_size = DocumentPropertiesW(NULL, printer, wprinter, NULL, NULL, 0);
+
+    if (dm_size <= 0)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    dm = (DEVMODEW *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (SIZE_T)dm_size);
+
+    if (!dm || DocumentPropertiesW(NULL, printer, wprinter, dm, NULL, DM_OUT_BUFFER) < 0)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    hdc = CreateDCW(NULL, wprinter, NULL, dm);
+
+    if (!hdc)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    module = LoadLibraryW(L"Msftedit.dll");
+
+    if (!module)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    rich = CreateWindowExW(0, MSFTEDIT_CLASS, L"", WS_POPUP, 0, 0, 0, 0, NULL, NULL, module, NULL);
+
+    if (!rich)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    memset(&stream, 0, sizeof(stream));
+
+    stream.data = rtf;
+    stream.length = (size_t)size;
+
+    memset(&input, 0, sizeof(input));
+
+    input.dwCookie = (DWORD_PTR)&stream;
+    input.pfnCallback = w32_rtf_read;
+
+    /* EM_STREAMIN returns the number of characters read on success, 0 on failure */
+    if (SendMessageW(rich, EM_STREAMIN, SF_RTF, (LPARAM)&input) == 0)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    memset(&doc, 0, sizeof(doc));
+    memset(wjob, 0, sizeof(wjob));
+    doc.cbSize = sizeof(doc);
+
+    if (job_name && job_name[0])
+    {
+        w32_utf8_to_utf16(job_name, wjob, (int)(sizeof(wjob) / sizeof(wjob[0])));
+        doc.lpszDocName = wjob;
+    }
+
+    if (StartDocW(hdc, &doc) <= 0)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    memset(&range, 0, sizeof(range));
+
+    range.hdc = hdc;
+    range.hdcTarget = hdc;
+    range.rc.right = GetDeviceCaps(hdc, HORZRES) * 1440 / GetDeviceCaps(hdc, LOGPIXELSX);
+    range.rc.bottom = GetDeviceCaps(hdc, VERTRES) * 1440 / GetDeviceCaps(hdc, LOGPIXELSY);
+    range.rcPage = range.rc;
+    range.chrg.cpMin = 0;
+    range.chrg.cpMax = -1;
+
+    do
+    {
+        if (StartPage(hdc) <= 0)
+        {
+            AbortDoc(hdc);
+            return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+        }
+
+        next = (LONG)SendMessageW(rich, EM_FORMATRANGE, TRUE, (LPARAM)&range);
+
+        if (EndPage(hdc) <= 0 || next <= range.chrg.cpMin)
+        {
+            AbortDoc(hdc);
+            return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+        }
+
+        range.chrg.cpMin = next;
+    } while (next < GetWindowTextLengthW(rich));
+
+    if (EndDoc(hdc) <= 0)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    rc = 0;
+    return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, rc);
 }
 
 int win32_print_file(const char *printer_name, const char *file_path)

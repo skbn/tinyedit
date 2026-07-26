@@ -14,6 +14,10 @@
 
 #include <stddef.h>
 
+#include "config.h"
+
+struct Ed;
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -70,6 +74,8 @@ extern "C"
 
     /* Shell-print file_path to printer_name (NULL = system default); returns 0 or -1 */
     int win32_print_file(const char *printer_name, const char *file_path);
+
+    int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const char *job_name);
 
 #ifdef __cplusplus
 }

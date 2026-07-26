@@ -16,7 +16,7 @@ Características principales:
 - Pegado con corchetes (Unix/Linux)
 - Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
 - Corrector gramatical/estilístico experimental con packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1)
-- Impresión experimental integrada (PDF, PCL, URF; impresión de red IPP/AirPrint opcional)
+- Impresión experimental integrada (PDF, PCL, URF; impresión de red IPP/AirPrint opcional; impresión nativa RichEdit en Windows. Persistencia de perfil por impresora)
 - Configurable vía archivo o menú
  
 Compilación
@@ -142,15 +142,19 @@ Ctrl+Alt+M (Alt+Shift+M en AmigaOS) para abrir la ventana de impresión
 
 Formatos de salida:
 - PDF: formato por defecto, siempre disponible. Usado para impresión local en Unix (pipe a lp/lpr) y
-  Windows (shell print verb sobre un PDF temporal)
+  Windows (fallback shell print verb sobre un PDF temporal). Los anchos de glifo del PDF ahora se
+  calculan con FreeType a la resolución y tamaño de fuente de impresión configurados, para un layout
+  de texto más preciso
 - PCL: PCL 5/6 para impresoras láser e inyección de tinta antiguas
 - URF (Apple Raster): requerido por impresoras compatibles con AirPrint; requiere FreeType (USE_URF=1)
 
 Impresión local:
 - Unix: envía el PDF generado a lp (fallback lpr); CUPS se encarga del resto. Se puede indicar una
   impresora concreta en Setup
-- Windows: escribe un PDF temporal e invoca el shell print verb; alternativamente lista las impresoras
-  instaladas vía el spooler de Win32
+- Windows: imprime nativamente vía el control RichEdit (Msftedit.dll, EM_FORMATRANGE) directamente al
+  DC de la impresora, exportando el documento como RTF con la fuente de impresión configurada; si
+  RichEdit no está disponible, usa el shell print verb sobre un PDF temporal. Las impresoras
+  instaladas se listan vía el spooler de Win32
 - AmigaOS: escribe texto convertido de charset directamente a PRT: (printer.device); lee PrinterPrefs
   para identificar el driver configurado
 
@@ -165,7 +169,10 @@ Opciones de impresión:
 El diálogo de impresión expone el tamaño de media, dúplex (sides), modo de color, calidad, copias,
 orientación, número-por-hoja, media source, media type, resolución, formato de documento y la fuente
 de impresión (ruta y tamaño, alternativa a la fuente de pantalla). Estos se mapean a atributos IPP al
-imprimir por IPP/IPPS, y se recuerdan entre sesiones
+imprimir por IPP/IPPS, y se recuerdan entre sesiones. Las opciones de impresión se guardan por
+impresora en la caché persistente (printer_cache) como un PrinterProfile, de modo que cada impresora
+recuerda su propia media, calidad, fuente, etc. y se restauran automáticamente al seleccionar esa
+impresora de nuevo
 
 Otros atajos útiles
 - Ctrl+W: rewrap bloque de cita FTN reply

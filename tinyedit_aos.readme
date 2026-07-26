@@ -2,7 +2,7 @@ Short:        Lightweight text editor
 Author:       Ervras
 Uploader:     ervras@aim.com
 Type:         text/edit
-Version:      1.3.8
+Version:      1.3.9
 Replaces:	  text/edit/tinyedit_aos.lha
 Architecture: m68k-amigaos > 3.1
 Distribution: Aminet
@@ -27,7 +27,8 @@ LATIN-2, UTF-8)
 - Translator panel (online backends + offline StarDict-compatible dictionaries)
 - Grammar checker (experimental, UTF-8 text only)
 - Partial rich-text support for .rtf and .wp/.wp4 files
-- Experimental built-in printing (PDF, PCL, URF; optional IPP/IPPS/AirPrint via AmiSSL)
+- Experimental built-in printing (PDF, PCL, URF; optional IPP/IPPS/AirPrint
+via AmiSSL. Per-printer profile persistence)
 - Clipboard support
 - Unicode glyph picker
 - Customizable via config file (ENVARC:tinyedit/config)
@@ -73,9 +74,11 @@ tinyedit includes built-in printing support with a unified print dialog. Press
 Alt+Shift+M to open the print popup
 
 Output formats:
-- PDF: default format, always available
+- PDF: default format, always available. PDF glyph widths are computed with the
+  bundled FreeType at the configured print resolution and font size for more
+  accurate text layout
 - PCL: PCL 5/6 for legacy laser and inkjet printers
-- URF (Apple Raster): required by AirPrint-compatible printers; uses the bundled
+- URF (Apple Raster): required by AirPrint-compatible printers. Uses the bundled
   FreeType (always enabled on AmigaOS)
 
 Local printing on AmigaOS writes charset-converted text directly to PRT:
@@ -92,7 +95,10 @@ The print dialog exposes the media size, duplex, color mode, quality, copies,
 orientation, number-up, media source, media type, resolution, document format
 and the print font (path and size, alternative to the screen font). These map
 to IPP job attributes when printing over IPP/IPPS, and are remembered across
-sessions
+sessions. Print settings are saved per-printer in the persistent cache
+(printer_cache) as a PrinterProfile, so each printer recalls its own media,
+quality, font, etc. and is restored automatically when that printer is
+selected again
 
 Other sources:
 wooorm/dictionaries on GitHub and the TinyMCE hunspell dictionary packages

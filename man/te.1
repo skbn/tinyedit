@@ -330,7 +330,9 @@ PDF \(em default format, always available; used for local printing on Unix
 .Xr lp 1
 with an
 .Xr lpr 1
-fallback) and Windows (shell print verb on a temporary PDF)
+fallback) and Windows (fallback shell print verb on a temporary PDF). PDF
+glyph widths are computed with FreeType at the configured print resolution
+and font size for more accurate text layout
 .It
 PCL \(em PCL 5/6 for legacy laser and inkjet printers
 .It
@@ -347,8 +349,12 @@ Unix-like systems: pipes the generated PDF to
 .Xr lpr 1 ) ;
 CUPS handles the rest. A specific printer can be set in Setup
 .It
-Windows: writes a temporary PDF and invokes the shell print verb;
-alternatively lists installed printers via the Win32 spooler
+Windows: prints natively via the RichEdit control
+.Pq Pa Msftedit.dll , Sy EM_FORMATRANGE
+directly to the printer DC, exporting the document as RTF with the
+configured print font; falls back to the shell print verb on a temporary
+PDF if RichEdit is unavailable. Installed printers are listed via the
+Win32 spooler
 .It
 AmigaOS: writes charset-converted text directly to
 .Pa PRT:
@@ -385,7 +391,13 @@ The print dialog exposes the media size, duplex (sides), color mode, quality,
 copies, orientation, number-up, media source, media type, resolution,
 document format and the print font (path and size, alternative to the screen
 font). These map to IPP job attributes when printing over IPP/IPPS, and are
-remembered across sessions
+remembered across sessions. Print settings are saved per-printer in the
+persistent cache
+.Pq Pa printer_cache
+as a
+.Sy PrinterProfile ,
+so each printer recalls its own media, quality, font, etc. and is restored
+automatically when that printer is selected again
 .Sh TTF RENDERING
 On AmigaOS and Windows,
 .Nm te

@@ -326,13 +326,13 @@ $(OBJDIR)/ed_attr.o: $(COMPDIR)/ed_attr.c $(COMPDIR)/ed_attr.h $(COMPDIR)/editor
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/ed_attr.c -o $@
 
 $(OBJDIR)/fmt_rtf.o: $(COMPDIR)/fmt_rtf.c $(COMPDIR)/fmt_rtf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/fmt_rtf.c -o $@
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_rtf.c -o $@
 
 $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/fmt_wp4.c -o $@
 
 $(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c $(COMPDIR)/fmt_pdf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/fmt_pdf.c -o $@
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_pdf.c -o $@
 
 $(OBJDIR)/fmt_pcl.o: $(COMPDIR)/fmt_pcl.c $(COMPDIR)/fmt_pcl.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/fmt_pcl.c -o $@
@@ -347,7 +347,7 @@ $(OBJDIR)/print_amiga.o: $(COMPDIR)/print_amiga.c $(COMPDIR)/print_amiga.h | $(O
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print_amiga.c -o $@
 
 $(OBJDIR)/print_win32.o: $(COMPDIR)/print_win32.c $(COMPDIR)/print_win32.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print_win32.c -o $@
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/print_win32.c -o $@
 
 $(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -360,7 +360,7 @@ $(OBJDIR)/te_app.o: $(UIDIR)/te_app.c $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_keys.o: $(UIDIR)/ui_keys.c $(UIDIR)/ui_keys.h $(UIDIR)/te.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $< -o $@
 
 $(OBJDIR)/ui_view.o: $(UIDIR)/ui_view.c $(UIDIR)/ui_view.h $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@

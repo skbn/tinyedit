@@ -135,6 +135,9 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
     int rc;
     int have_path = 0;
 
+    if (win32_print_rtf_document(ed, cfg, file_path) == 0)
+        return 0;
+
     /* Stage the PDF next to the source file if known, else in %TEMP% */
     if (file_path && file_path[0])
     {

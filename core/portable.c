@@ -248,12 +248,14 @@ int pf_mkdir_path(const char *path)
     {
         if (*p == '/' || *p == '\\')
         {
+            char sep = *p;
+
             *p = '\0';
 
             if (!pf_path_exists(tmp))
                 port_mkdir_one(tmp);
 
-            *p = '/';
+            *p = sep;
         }
     }
 

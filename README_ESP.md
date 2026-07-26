@@ -13,9 +13,14 @@ Editor de texto ligero para AmigaOS, Linux y Windows usando ncurses
 - Guiones (hyphenation) con implementación nativa (AmigaOS/Windows) o libhyphen (*nix) (opcional, USE_HYPHEN=1)
 - Tesauro (thesaurus) con implementación nativa (AmigaOS/Windows) o libmythes (*nix) (opcional, USE_MYTHES=1)
 - Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
-- Corrector gramatical/estilístico experimental usando packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1); la revisión gramatical solo funciona sobre texto UTF-8
+- Corrector gramatical/estilístico experimental usando packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1)
+- La revisión gramatical solo funciona sobre texto UTF-8
 - Soporte parcial de texto enriquecido para archivos .rtf y .wp/.wp4
-- Impresión experimental integrada: salida PDF, PCL y URF (Apple Raster); impresión local vía `lp`/`lpr` (Unix), shell print verb (Windows) o `PRT:` (AmigaOS); impresión de red IPP/IPPS opcional con descubrimiento mDNS/Bonjour (AirPrint)
+- Impresión experimental integrada: salida PDF, PCL y URF (Apple Raster)
+- Impresión local vía `lp`/`lpr` (Unix)
+- Impresión nativa RichEdit (Windows) o `PRT:` (AmigaOS)
+- Impresión de red IPP/IPPS opcional con descubrimiento mDNS/Bonjour (AirPrint)
+- Persistencia de perfil por impresora
 - Panel de traductor con soporte online y diccionario offline compatible con StarDict
 - Soporte de ratón (funciona en terminal, SSH y sesiones remotas)
 - Colores configurables (y fuentes TTF en AmigaOS)
@@ -275,7 +280,7 @@ El editor puede renderizar el documento a varios formatos de descripción de pá
 ### Impresión local
 
 - **Unix/*nix**: pipea el PDF generado a `lp -s` (fallback `lpr`); CUPS se encarga del resto
-- **Windows**: escribe un PDF temporal e invoca el shell print verb; alternativamente lista las impresoras instaladas vía el spooler Win32
+- **Windows**: imprime nativamente vía el control RichEdit (`Msftedit.dll`, `EM_FORMATRANGE`) directamente al DC de la impresora, exportando el documento como RTF con la fuente de impresión configurada; si RichEdit no está disponible, usa el shell print verb sobre un PDF temporal. Las impresoras instaladas se listan vía el spooler Win32
 - **AmigaOS**: escribe texto convertido de charset directamente a `PRT:` (printer.device); lee PrinterPrefs para identificar el driver configurado
 
 ### Impresión de red (IPP / AirPrint)
@@ -317,7 +322,7 @@ AMISSL_SDK=AmiSSL make -f Makefile.amiga USE_IPP=1 WITH_AMISSL=1 clean all
 
 ### Opciones de impresión
 
-El diálogo de impresión expone el tamaño de media, dúplex (sides), modo de color, calidad, copias, orientación, número-por-hoja, media source, media type, resolución, formato de documento y la **fuente de impresión** (ruta y tamaño, alternativa a la fuente de pantalla). Estos se mapean a atributos IPP al imprimir por IPP/IPPS, y se recuerdan entre sesiones
+El diálogo de impresión expone el tamaño de media, dúplex (sides), modo de color, calidad, copias, orientación, número-por-hoja, media source, media type, resolución, formato de documento y la **fuente de impresión** (ruta y tamaño, alternativa a la fuente de pantalla). Estos se mapean a atributos IPP al imprimir por IPP/IPPS, y se recuerdan entre sesiones. Las opciones de impresión se guardan por impresora en la caché persistente (`printer_cache`) como un `PrinterProfile`, de modo que cada impresora recuerda su propia media, calidad, fuente, etc. y se restauran automáticamente al seleccionar esa impresora de nuevo
 
 ## Uso
 

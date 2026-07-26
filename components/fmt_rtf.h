@@ -27,6 +27,9 @@ extern "C"
     /* Write ed as RTF 1.x. Returns 0 on success, -1 on I/O error */
     int rtf_export(const struct Ed *ed, FILE *fp);
 
+    /* Same as rtf_export but overrides the default font table with the given font family name (e.g. "DejaVu Sans Mono") and size in half-points */
+    int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, int font_size_half_pt);
+
 #ifdef __cplusplus
 }
 #endif

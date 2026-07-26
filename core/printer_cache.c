@@ -31,6 +31,55 @@ static const char *pcache_path(void)
     return buf;
 }
 
+static void pc_copy(char *dst, size_t dstsz, const char *src)
+{
+    if (!dst || dstsz == 0)
+        return;
+
+    strncpy(dst, src ? src : "", dstsz - 1);
+    dst[dstsz - 1] = '\0';
+}
+
+static char *pc_field(char **cursor)
+{
+    char *field = NULL;
+    char *bar = NULL;
+
+    if (!cursor || !*cursor)
+        return NULL;
+
+    field = *cursor;
+    bar = strchr(field, '|');
+
+    if (bar)
+    {
+        *bar = '\0';
+        *cursor = bar + 1;
+    }
+    else
+    {
+        *cursor = NULL;
+    }
+
+    return field;
+}
+
+static int pc_number(const char *s)
+{
+    char *end = NULL;
+    long value;
+
+    if (!s || !s[0])
+        return 0;
+
+    value = strtol(s, &end, 10);
+
+    if (!end || *end || value < -2147483647L || value > 2147483647L)
+        return 0;
+
+    return (int)value;
+}
+
 /* Trim trailing whitespace in place */
 static void rstrip(char *s)
 {
@@ -73,7 +122,41 @@ int printer_cache_load(PrinterCache *pc)
             continue;
         }
 
-        if (strncmp(line, "PRINTER ", 8) == 0 && pc->count < PCACHE_MAX)
+        if (strncmp(line, "DEFAULT ", 8) == 0)
+        {
+            pc_copy(pc->default_uri, sizeof(pc->default_uri), line + 8);
+        }
+        else if (strncmp(line, "PROFILE ", 8) == 0)
+        {
+            char *cursor = line + 8;
+            char *uri = pc_field(&cursor);
+            PrinterCacheEntry *entry = printer_cache_find(pc, uri);
+
+            if (entry)
+            {
+                pc_copy(entry->profile.document_format, sizeof(entry->profile.document_format), pc_field(&cursor));
+                pc_copy(entry->profile.media, sizeof(entry->profile.media), pc_field(&cursor));
+                pc_copy(entry->profile.sides, sizeof(entry->profile.sides), pc_field(&cursor));
+                pc_copy(entry->profile.color_mode, sizeof(entry->profile.color_mode), pc_field(&cursor));
+
+                entry->profile.quality = pc_number(pc_field(&cursor));
+                entry->profile.copies = pc_number(pc_field(&cursor));
+                entry->profile.orientation = pc_number(pc_field(&cursor));
+                entry->profile.number_up = pc_number(pc_field(&cursor));
+
+                pc_copy(entry->profile.media_source, sizeof(entry->profile.media_source), pc_field(&cursor));
+                pc_copy(entry->profile.media_type, sizeof(entry->profile.media_type), pc_field(&cursor));
+
+                entry->profile.resolution_x = pc_number(pc_field(&cursor));
+                entry->profile.resolution_y = pc_number(pc_field(&cursor));
+                entry->profile.resolution_units = pc_number(pc_field(&cursor));
+
+                pc_copy(entry->profile.font_path, sizeof(entry->profile.font_path), pc_field(&cursor));
+
+                entry->profile.font_size = pc_number(pc_field(&cursor));
+            }
+        }
+        else if (strncmp(line, "PRINTER ", 8) == 0 && pc->count < PCACHE_MAX)
         {
             char *rest = line + 8;
             char *bar1 = strchr(rest, '|');
@@ -129,11 +212,35 @@ int printer_cache_save(const PrinterCache *pc)
     fprintf(f, "# tinyedit printer cache\n");
     fprintf(f, "# discovered %ld\n", pc->last_discovery);
 
+    if (pc->default_uri[0])
+        fprintf(f, "DEFAULT %s\n", pc->default_uri);
+
     for (i = 0; i < pc->count; i++)
+    {
+        const PrinterProfile *profile = &pc->entries[i].profile;
+
         fprintf(f, "PRINTER %s|%s|%s\n", pc->entries[i].name, pc->entries[i].uri, pc->entries[i].kind);
+        fprintf(f, "PROFILE %s|%s|%s|%s|%s|%d|%d|%d|%d|%s|%s|%d|%d|%d|%s|%d\n", pc->entries[i].uri, profile->document_format, profile->media, profile->sides, profile->color_mode, profile->quality, profile->copies, profile->orientation, profile->number_up, profile->media_source, profile->media_type, profile->resolution_x, profile->resolution_y, profile->resolution_units, profile->font_path, profile->font_size);
+    }
 
     fclose(f);
     return 0;
+}
+
+PrinterCacheEntry *printer_cache_find(PrinterCache *pc, const char *uri)
+{
+    int i;
+
+    if (!pc || !uri || !uri[0])
+        return NULL;
+
+    for (i = 0; i < pc->count; i++)
+    {
+        if (strcmp(pc->entries[i].uri, uri) == 0)
+            return &pc->entries[i];
+    }
+
+    return NULL;
 }
 
 int printer_cache_add(PrinterCache *pc, const char *name, const char *uri, const char *kind)

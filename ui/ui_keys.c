@@ -34,6 +34,10 @@
 #if defined(HAVE_URF)
 #include "../components/fmt_urf.h"
 #endif
+#if defined(USE_FREETYPE) || defined(HAVE_URF)
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#endif
 #include "ui_editor_helper.h"
 #include "ui_view.h"
 #include "ui_keys.h"
@@ -304,7 +308,44 @@ int do_save(TeApp *app)
 
         if (fp)
         {
-            rc = rtf_export(te_app_get_editor(app), fp);
+            TeConfig *cfg = &app->cfg;
+            const char *font_path = cfg->print_font_path[0] ? cfg->print_font_path : (cfg->ttf_font[0] ? cfg->ttf_font : NULL);
+            char font_name[128];
+            int font_size_hp = 0;
+
+            font_name[0] = '\0';
+
+#if defined(USE_FREETYPE) || defined(HAVE_URF)
+            if (font_path && font_path[0])
+            {
+                FT_Library lib = NULL;
+                FT_Face face = NULL;
+
+                if (FT_Init_FreeType(&lib) == 0)
+                {
+                    if (FT_New_Face(lib, font_path, 0, &face) == 0)
+                    {
+                        if (face->family_name && face->family_name[0])
+                        {
+                            strncpy(font_name, face->family_name, sizeof(font_name) - 1);
+                            font_name[sizeof(font_name) - 1] = '\0';
+                        }
+
+                        FT_Done_Face(face);
+                    }
+
+                    FT_Done_FreeType(lib);
+                }
+            }
+#endif
+
+            if (cfg->print_font_size > 0)
+                font_size_hp = cfg->print_font_size * 2;
+            else if (cfg->ttf_size > 0)
+                font_size_hp = cfg->ttf_size * 2;
+
+            rc = rtf_export_with_font(te_app_get_editor(app), fp, font_name[0] ? font_name : NULL, font_size_hp);
+
             fclose(fp);
         }
 

@@ -809,7 +809,7 @@ static int rtf_write_cp(FILE *fp, unsigned int cp)
     return fprintf(fp, "\\u%d?", (int)(0xDC00 + (cp & 0x3FF)) - 65536) < 0 ? -1 : 0;
 }
 
-int rtf_export(const struct Ed *ed, FILE *fp)
+int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, int font_size_half_pt)
 {
     static const char *aw[] = {"\\ql", "\\qc", "\\qr", "\\qj"};
     struct rtf_state cur;
@@ -820,8 +820,22 @@ int rtf_export(const struct Ed *ed, FILE *fp)
     if (!ed || !fp)
         return -1;
 
-    if (fputs("{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1{\\fonttbl{\\f0\\fnil Default;}}\n", fp) == EOF)
-        return -1;
+    if (font_name && font_name[0])
+    {
+        if (fprintf(fp, "{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1{\\fonttbl{\\f0\\fnil %s;}}\n", font_name) < 0)
+            return -1;
+    }
+    else
+    {
+        if (fputs("{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1{\\fonttbl{\\f0\\fnil Default;}}\n", fp) == EOF)
+            return -1;
+    }
+
+    if (font_size_half_pt > 0)
+    {
+        if (fprintf(fp, "\\f0\\fs%d\n", font_size_half_pt) < 0)
+            return -1;
+    }
 
     for (row = 0; row < ed->count; row++)
     {
@@ -948,4 +962,9 @@ int rtf_export(const struct Ed *ed, FILE *fp)
     }
 
     return fputs("}\n", fp) == EOF ? -1 : 0;
+}
+
+int rtf_export(const struct Ed *ed, FILE *fp)
+{
+    return rtf_export_with_font(ed, fp, NULL, 0);
 }

@@ -15,7 +15,7 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 - Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
 - Experimental grammar/style checker using rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1); grammar checks only work on UTF-8 text
 - Partial rich-text support for .rtf and .wp/.wp4 files
-- Experimental built-in printing: PDF, PCL and URF (Apple Raster) output; local printing via `lp`/`lpr` (Unix), shell print verb (Windows) or `PRT:` (AmigaOS); optional IPP/IPPS network printing with mDNS/Bonjour (AirPrint) discovery
+- Experimental built-in printing: PDF, PCL and URF (Apple Raster) output; local printing via `lp`/`lpr` (Unix), native RichEdit printing (Windows) or `PRT:` (AmigaOS); optional IPP/IPPS network printing with mDNS/Bonjour (AirPrint) discovery; per-printer profile persistence
 - Translator panel with online support and StarDict-compatible offline dictionary
 - Mouse support (works in terminal, SSH and remote sessions)
 - Configurable colors (and TTF fonts on AmigaOS)
@@ -275,7 +275,7 @@ The editor can render the document to several page-description formats, chosen a
 ### Local printing
 
 - **Unix/*nix**: pipes the generated PDF to `lp -s` (fallback `lpr`); CUPS handles the rest
-- **Windows**: writes a temp PDF and invokes the shell print verb; alternatively lists installed printers via the Win32 spooler
+- **Windows**: prints natively via the RichEdit control (`Msftedit.dll`, `EM_FORMATRANGE`) directly to the printer DC, exporting the document as RTF with the configured print font; falls back to the shell print verb on a temp PDF if RichEdit is unavailable. Installed printers are listed via the Win32 spooler
 - **AmigaOS**: writes charset-converted text directly to `PRT:` (printer.device); reads PrinterPrefs to identify the configured driver
 
 ### Network printing (IPP / AirPrint)
@@ -317,7 +317,7 @@ AMISSL_SDK=AmiSSL make -f Makefile.amiga USE_IPP=1 WITH_AMISSL=1 clean all
 
 ### Print options
 
-The print dialog exposes the media size, duplex (sides), color mode, quality, copies, orientation, number-up, media source, media type, resolution, document format and the **print font** (path and size, alternative to the screen font). These map to IPP job attributes when printing over IPP/IPPS, and are remembered across sessions
+The print dialog exposes the media size, duplex (sides), color mode, quality, copies, orientation, number-up, media source, media type, resolution, document format and the **print font** (path and size, alternative to the screen font). These map to IPP job attributes when printing over IPP/IPPS, and are remembered across sessions. Print settings are saved per-printer in the persistent cache (`printer_cache`) as a `PrinterProfile`, so each printer recalls its own media, quality, font, etc. and is restored automatically when that printer is selected again
 
 ## Usage
 

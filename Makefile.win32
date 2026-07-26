@@ -41,14 +41,21 @@ USE_URF ?= 0
 # Compiler (native MSYS2 MinGW)
 CC = gcc
 
+FTDIR = $(HERE)freetype
+ZLIBDIR = $(HERE)zlib
+PNGDIR = $(HERE)libpng
+FTINC = -I$(FTDIR)/include
+ZLIBINC = -I$(ZLIBDIR)
+PNGINC = -I$(PNGDIR)
+
 # Compiler flags
 CFLAGS = -I$(HERE) -I$(HERE)core -I$(HERE)components -I$(HERE)ui -I$(HERE)spellchecker \
-         $(ZLIBINC) $(PNGINC) \
+         $(FTINC) $(ZLIBINC) $(PNGINC) \
          -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes -Wdeclaration-after-statement -Wimplicit-function-declaration -Wno-unused-parameter -std=gnu89 -O2
 LFLAGS = -mwindows
 
 # Platform-specific defines
-CDEFS = -DPLATFORM_WIN32 -DNO_TYPEDEF_BOOL -D_WINDOWS
+CDEFS = -DPLATFORM_WIN32 -DNO_TYPEDEF_BOOL -D_WINDOWS -DUSE_FREETYPE
 
 # URF (Apple Raster) support. Requires FreeType.
 ifeq ($(USE_URF),1)
@@ -567,7 +574,7 @@ $(OBJDIR)/ed_attr.o: $(COMPDIR)/ed_attr.c $(COMPDIR)/ed_attr.h $(COMPDIR)/editor
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/fmt_rtf.o: $(COMPDIR)/fmt_rtf.c $(COMPDIR)/fmt_rtf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CDEFS) $(FTINC) -c $< -o $@
 
 $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -588,7 +595,7 @@ $(OBJDIR)/print_amiga.o: $(COMPDIR)/print_amiga.c $(COMPDIR)/print_amiga.h | $(O
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/print_win32.o: $(COMPDIR)/print_win32.c $(COMPDIR)/print_win32.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CDEFS) $(FTINC) -c $< -o $@
 
 $(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
@@ -604,7 +611,7 @@ $(OBJDIR)/ui_popup.o: $(UIDIR)/ui_popup.c | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/ui_keys.o: $(UIDIR)/ui_keys.c $(UIDIR)/ui_keys.h $(UIDIR)/te.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CDEFS) $(FTINC) -c $< -o $@
 
 $(OBJDIR)/ui_view.o: $(UIDIR)/ui_view.c $(UIDIR)/ui_view.h $(UIDIR)/te.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@

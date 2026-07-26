@@ -25,12 +25,32 @@ extern "C"
 
 #define PCACHE_STALE_SECONDS (24 * 60 * 60)
 
+    typedef struct
+    {
+        char document_format[256];
+        char media[256];
+        char sides[256];
+        char color_mode[256];
+        int quality;
+        int copies;
+        int orientation;
+        int number_up;
+        char media_source[256];
+        char media_type[256];
+        int resolution_x;
+        int resolution_y;
+        int resolution_units;
+        char font_path[256];
+        int font_size;
+    } PrinterProfile;
+
     /* One printer entry, either discovered or added manually */
     typedef struct
     {
         char name[96];
         char uri[192]; /* ipp://host:port/path or local:name */
         char kind[16]; /* "local" / "ipp" / "ipps" */
+        PrinterProfile profile;
     } PrinterCacheEntry;
 
     typedef struct
@@ -38,6 +58,7 @@ extern "C"
         PrinterCacheEntry entries[PCACHE_MAX];
         int count;
         long last_discovery; /* unix time; 0 = never */
+        char default_uri[192];
     } PrinterCache;
 
     /* Load cache from ~/.tinyedit_printers or ENVARC:tinyedit/printers */
@@ -48,6 +69,8 @@ extern "C"
 
     /* Add entry if not already present (by uri); returns 1 if added, 0 if dup */
     int printer_cache_add(PrinterCache *pc, const char *name, const char *uri, const char *kind);
+
+    PrinterCacheEntry *printer_cache_find(PrinterCache *pc, const char *uri);
 
     /* Clear all entries and reset timestamp */
     void printer_cache_clear(PrinterCache *pc);
