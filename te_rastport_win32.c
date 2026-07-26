@@ -1085,9 +1085,6 @@ static struct TEGlyph *te_get_glyph(struct TERenderContext *dc, ULONG cp)
         gi = first_gi;
     }
 
-    if (cp > 0xFFFF)
-        fprintf(stderr, "[te_get_glyph] cp=U+%04lX font=%s gi=%u w=%d h=%d format=%d\n", (unsigned long)cp, fnt->path[0] ? fnt->path : "?", (unsigned int)gi, g->width, g->height, g->format);
-
     g->next = dc->buckets[h];
     dc->buckets[h] = g;
 
