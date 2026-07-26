@@ -1327,7 +1327,7 @@ void ui_editor_print(TeApp *app)
     else if (strcmp(doc_fmt, "image/urf") == 0)
         prc = urf_export_ex(ed, mem, cfg, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
     else
-        prc = pcl_export(ed, mem, cfg, err, sizeof(err), warn, sizeof(warn));
+        prc = pcl_export_ex(ed, mem, cfg, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
 
 #if defined(PLATFORM_UNIX)
     fclose(mem);

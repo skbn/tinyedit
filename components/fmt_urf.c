@@ -1022,12 +1022,7 @@ static int urf_pager_emit_para(urf_pager *pg, const urf_para *para)
             }
 
             if (n_spaces > 0 && line_w < pg->printable_w)
-            {
                 word_space = (pg->printable_w - line_w) / n_spaces;
-
-                if (word_space > pg->font_size_px / 2)
-                    word_space = pg->font_size_px / 2;
-            }
 
             x = pg->margin;
         }

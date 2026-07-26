@@ -156,7 +156,7 @@ def decode_urf(path):
 
 
 def decode_urf_proper(path):
-    """Clean decoder that builds the image correctly."""
+    """Clean decoder that builds the image correctly"""
     with open(path, "rb") as f:
         data = f.read()
 

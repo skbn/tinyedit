@@ -2896,12 +2896,7 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
             }
 
             if (n_spaces > 0 && line_w < avail)
-            {
                 word_space = (avail - line_w) / (double)n_spaces;
-
-                if (word_space > p->font_size * 0.5)
-                    word_space = p->font_size * 0.5;
-            }
 
             x = p->margin_l;
         }

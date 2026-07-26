@@ -16,6 +16,7 @@
 #include <stddef.h>
 
 #include "config.h"
+#include "layout.h"
 
 struct Ed;
 
@@ -24,8 +25,11 @@ extern "C"
 {
 #endif
 
-    /* Write ed as a PCL 3/5 text job */
+    /* Write ed as a PCL 5 text job with paragraph reflow, attributes, alignment and margins */
     int pcl_export(const struct Ed *ed, FILE *fp, const TeConfig *cfg, char *err, size_t errsz, char *warn, size_t warnsz);
+
+    /* Extended export with hyphenation callback (matches pdf_export_ex / urf_export_ex) */
+    int pcl_export_ex(const struct Ed *ed, FILE *fp, const TeConfig *cfg, LayoutHyphenFn hyph, void *hyph_user, char *err, size_t errsz, char *warn, size_t warnsz);
 
 #ifdef __cplusplus
 }

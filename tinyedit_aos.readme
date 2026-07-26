@@ -9,7 +9,7 @@ Distribution: Aminet
 Requires:     AmiSSL util/libs/AmiSSL-v5-OS3
 
 Tinyedit is a small, lightweight text editor for AmigaOS with charset
-conversion support.
+conversion support
 
 Features include:
 - Read/write UTF-8 files with charset conversion

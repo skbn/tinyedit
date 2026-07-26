@@ -1476,6 +1476,19 @@ int ui_files_is_urf(const char *path)
     return n > 4 && strcasecmp(path + n - 4, ".urf") == 0;
 }
 
+/* PCL 5 is export-only: we save by extension but never open it back */
+int ui_files_is_pcl(const char *path)
+{
+    size_t n;
+
+    if (!path)
+        return 0;
+
+    n = strlen(path);
+
+    return n > 4 && strcasecmp(path + n - 4, ".pcl") == 0;
+}
+
 int ui_files_open_path(TeApp *app, const char *path)
 {
     FILE *fp = NULL;

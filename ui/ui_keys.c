@@ -30,6 +30,7 @@
 #include "../components/fmt_rtf.h"
 #include "../components/fmt_wp4.h"
 #include "../components/fmt_pdf.h"
+#include "../components/fmt_pcl.h"
 #if defined(HAVE_URF)
 #include "../components/fmt_urf.h"
 #endif
@@ -440,6 +441,46 @@ int do_save(TeApp *app)
             te_status(app, "Saved: %s (%s)", te_app_get_filename(app), uwarn);
     }
 #endif
+    else if (ui_files_is_pcl(te_app_get_filename(app)))
+    {
+        /* PCL 5 export: printer job stream, no round-trip */
+        FILE *fp = NULL;
+        char perr[128];
+        char pwarn[128];
+        int rc = -1;
+
+        perr[0] = '\0';
+        pwarn[0] = '\0';
+
+        fp = fopen(te_app_get_filename(app), "wb");
+
+        if (fp)
+        {
+            LayoutHyphenFn hy = NULL;
+            void *hy_user = NULL;
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+            if (app->hyph_wrap_enabled && app->hyph_handle)
+            {
+                hy = ui_layout_hyphen;
+                hy_user = app;
+            }
+#endif
+
+            rc = pcl_export_ex(te_app_get_editor(app), fp, &app->cfg, hy, hy_user, perr, sizeof(perr), pwarn, sizeof(pwarn));
+
+            fclose(fp);
+        }
+
+        if (rc != 0)
+        {
+            te_status(app, "PCL error: %s", perr[0] ? perr : "cannot write");
+            return -1;
+        }
+
+        if (pwarn[0])
+            te_status(app, "Saved: %s (%s)", te_app_get_filename(app), pwarn);
+    }
     else if (ed_save_to_file(te_app_get_editor(app), te_app_get_filename(app), app->charset_out) != 0)
     {
         te_status(app, "Cannot write: %s", te_app_get_filename(app));
