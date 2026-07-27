@@ -251,6 +251,7 @@ static void cycle_syntax_lang(TeApp *app)
 
 int do_save(TeApp *app)
 {
+    static TeConfig export_cfg;
     int r = 0;
     char dir_input[1024];
     char name_input[1024];
@@ -411,6 +412,19 @@ int do_save(TeApp *app)
         perr[0] = '\0';
         pwarn[0] = '\0';
 
+        /* Use defaults from fmt_pdf, not printer-specific settings */
+        export_cfg = app->cfg;
+
+        export_cfg.print_media[0] = '\0';
+        export_cfg.print_orientation = 0;
+        export_cfg.print_resolution_x = 0;
+        export_cfg.print_resolution_y = 0;
+        export_cfg.print_resolution_units = 0;
+        export_cfg.print_margin_left_mm = -1;
+        export_cfg.print_margin_right_mm = -1;
+        export_cfg.print_margin_top_mm = -1;
+        export_cfg.print_margin_bottom_mm = -1;
+
         fp = fopen(te_app_get_filename(app), "wb");
 
         if (fp)
@@ -427,7 +441,7 @@ int do_save(TeApp *app)
             }
 #endif
 
-            rc = pdf_export_ex(te_app_get_editor(app), fp, &app->cfg, hy, hy_user, perr, sizeof(perr), pwarn, sizeof(pwarn));
+            rc = pdf_export_ex(te_app_get_editor(app), fp, &export_cfg, hy, hy_user, perr, sizeof(perr), pwarn, sizeof(pwarn));
             fclose(fp);
         }
 
@@ -452,6 +466,19 @@ int do_save(TeApp *app)
         uerr[0] = '\0';
         uwarn[0] = '\0';
 
+        /* Use defaults from fmt_urf, not printer-specific settings */
+        export_cfg = app->cfg;
+
+        export_cfg.print_media[0] = '\0';
+        export_cfg.print_orientation = 0;
+        export_cfg.print_resolution_x = 0;
+        export_cfg.print_resolution_y = 0;
+        export_cfg.print_resolution_units = 0;
+        export_cfg.print_margin_left_mm = -1;
+        export_cfg.print_margin_right_mm = -1;
+        export_cfg.print_margin_top_mm = -1;
+        export_cfg.print_margin_bottom_mm = -1;
+
         fp = fopen(te_app_get_filename(app), "wb");
 
         if (fp)
@@ -467,7 +494,7 @@ int do_save(TeApp *app)
             }
 #endif
 
-            rc = urf_export_ex(te_app_get_editor(app), fp, &app->cfg, hy, hy_user, uerr, sizeof(uerr), uwarn, sizeof(uwarn));
+            rc = urf_export_ex(te_app_get_editor(app), fp, &export_cfg, hy, hy_user, uerr, sizeof(uerr), uwarn, sizeof(uwarn));
 
             fclose(fp);
         }
@@ -493,6 +520,19 @@ int do_save(TeApp *app)
         perr[0] = '\0';
         pwarn[0] = '\0';
 
+        /* Use defaults from fmt_pcl, not printer-specific settings */
+        export_cfg = app->cfg;
+
+        export_cfg.print_media[0] = '\0';
+        export_cfg.print_orientation = 0;
+        export_cfg.print_resolution_x = 0;
+        export_cfg.print_resolution_y = 0;
+        export_cfg.print_resolution_units = 0;
+        export_cfg.print_margin_left_mm = -1;
+        export_cfg.print_margin_right_mm = -1;
+        export_cfg.print_margin_top_mm = -1;
+        export_cfg.print_margin_bottom_mm = -1;
+
         fp = fopen(te_app_get_filename(app), "wb");
 
         if (fp)
@@ -508,7 +548,7 @@ int do_save(TeApp *app)
             }
 #endif
 
-            rc = pcl_export_ex(te_app_get_editor(app), fp, &app->cfg, hy, hy_user, perr, sizeof(perr), pwarn, sizeof(pwarn));
+            rc = pcl_export_ex(te_app_get_editor(app), fp, &export_cfg, hy, hy_user, perr, sizeof(perr), pwarn, sizeof(pwarn));
 
             fclose(fp);
         }

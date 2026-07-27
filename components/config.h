@@ -156,6 +156,10 @@ typedef struct
     int print_resolution_x;                  /* 0=unset */
     int print_resolution_y;                  /* 0=unset */
     int print_resolution_units;              /* 3=dpi 4=dpc 0=unset */
+    int print_margin_left_mm;
+    int print_margin_right_mm;
+    int print_margin_top_mm;
+    int print_margin_bottom_mm;
 
     /* Amiga color palette mapping (COLORMAP): physical pen for each logical color */
     int color_map[16];

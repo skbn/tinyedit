@@ -34,6 +34,8 @@
 #define CCHBINNAME 24
 #endif
 
+#define WIN32_PRINT_MARGIN_TWIPS 1440
+
 typedef struct
 {
     const unsigned char *data;
@@ -143,6 +145,106 @@ static void w32_paper_to_ipp(WORD dmpaper, char *out, size_t outsz)
     out[outsz - 1] = '\0';
 }
 
+static void w32_bin_to_attr(WORD bin, char *out, size_t outsz)
+{
+    const char *value = NULL;
+
+    switch (bin)
+    {
+    case DMBIN_AUTO:
+        value = "auto";
+        break;
+    case DMBIN_UPPER:
+        value = "tray-1";
+        break;
+    case DMBIN_LOWER:
+        value = "tray-2";
+        break;
+    case DMBIN_MIDDLE:
+        value = "tray-3";
+        break;
+    case DMBIN_MANUAL:
+        value = "manual";
+        break;
+    case DMBIN_ENVELOPE:
+        value = "envelope";
+        break;
+    default:
+        snprintf(out, outsz, "win32-bin-%u", (unsigned int)bin);
+        return;
+    }
+
+    strncpy(out, value, outsz - 1);
+    out[outsz - 1] = '\0';
+}
+
+static WORD w32_attr_to_bin(const char *value)
+{
+    unsigned int bin;
+    char tail;
+
+    if (!value)
+        return 0;
+
+    if (strcmp(value, "auto") == 0)
+        return DMBIN_AUTO;
+
+    if (strcmp(value, "tray-1") == 0)
+        return DMBIN_UPPER;
+
+    if (strcmp(value, "tray-2") == 0)
+        return DMBIN_LOWER;
+
+    if (strcmp(value, "tray-3") == 0)
+        return DMBIN_MIDDLE;
+
+    if (strcmp(value, "manual") == 0)
+        return DMBIN_MANUAL;
+
+    if (strcmp(value, "envelope") == 0)
+        return DMBIN_ENVELOPE;
+
+    if (sscanf(value, "win32-bin-%u%c", &bin, &tail) == 1 && bin <= 65535U)
+        return (WORD)bin;
+
+    return 0;
+}
+
+static void w32_media_type_to_attr(DWORD type, char *out, size_t outsz)
+{
+    if (type == DMMEDIA_STANDARD)
+        strncpy(out, "stationery", outsz - 1);
+    else if (type == DMMEDIA_GLOSSY)
+        strncpy(out, "photographic", outsz - 1);
+    else
+    {
+        snprintf(out, outsz, "win32-media-%lu", (unsigned long)type);
+        return;
+    }
+
+    out[outsz - 1] = '\0';
+}
+
+static DWORD w32_attr_to_media_type(const char *value)
+{
+    unsigned long type;
+    char tail;
+
+    if (!value)
+        return 0;
+
+    if (strcmp(value, "stationery") == 0)
+        return DMMEDIA_STANDARD;
+
+    if (strcmp(value, "photographic") == 0)
+        return DMMEDIA_GLOSSY;
+
+    if (sscanf(value, "win32-media-%lu%c", &type, &tail) == 1 && type <= 65535UL)
+        return (DWORD)type;
+
+    return 0;
+}
+
 int win32_list_printers(char names[][64], int max)
 {
     DWORD needed = 0;
@@ -213,6 +315,8 @@ int win32_get_printer_info(const char *printer_name, Win32PrinterInfo *info)
     LONG has_color;
     LONG duplex;
     LONG max_copies;
+    LONG n_bins;
+    LONG n_types;
     int i;
     LONG n_res;
 
@@ -225,6 +329,9 @@ int win32_get_printer_info(const char *printer_name, Win32PrinterInfo *info)
     info->default_sides = -1;
     info->default_color_mode = -1;
     info->default_quality = -1;
+    info->default_orientation = -1;
+    info->default_media_source = -1;
+    info->default_media_type = -1;
 
     w32_utf8_to_utf16(printer_name, wprinter, (int)(sizeof(wprinter) / sizeof(wprinter[0])));
 
@@ -362,6 +469,68 @@ int win32_get_printer_info(const char *printer_name, Win32PrinterInfo *info)
         }
     }
 
+    if (dm && (dm->dmFields & DM_ORIENTATION))
+    {
+        info->orientations[0] = 3;
+        info->orientations[1] = 4;
+        info->n_orientations = 2;
+
+        if (dm->dmOrientation == DMORIENT_PORTRAIT)
+            info->default_orientation = 0;
+        else if (dm->dmOrientation == DMORIENT_LANDSCAPE)
+            info->default_orientation = 1;
+    }
+
+    n_bins = DeviceCapabilitiesW(wprinter, NULL, DC_BINS, NULL, NULL);
+
+    if (n_bins > 0)
+    {
+        WORD *bins = (WORD *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)n_bins * sizeof(WORD));
+
+        if (bins)
+        {
+            if (DeviceCapabilitiesW(wprinter, NULL, DC_BINS, (LPWSTR)bins, NULL) == n_bins)
+            {
+                for (i = 0; i < n_bins && info->n_media_sources < PRWIN_MAX_BINS; i++)
+                {
+                    w32_bin_to_attr(bins[i], info->media_sources[info->n_media_sources], sizeof(info->media_sources[0]));
+
+                    if (dm && dm->dmDefaultSource == bins[i])
+                        info->default_media_source = info->n_media_sources;
+
+                    info->n_media_sources++;
+                }
+            }
+
+            HeapFree(GetProcessHeap(), 0, bins);
+        }
+    }
+
+    n_types = DeviceCapabilitiesW(wprinter, NULL, DC_MEDIATYPES, NULL, NULL);
+
+    if (n_types > 0)
+    {
+        DWORD *types = (DWORD *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)n_types * sizeof(DWORD));
+
+        if (types)
+        {
+            if (DeviceCapabilitiesW(wprinter, NULL, DC_MEDIATYPES, (LPWSTR)types, NULL) == n_types)
+            {
+                for (i = 0; i < n_types && info->n_media_types < PRWIN_MAX_TYPES; i++)
+                {
+                    w32_media_type_to_attr(types[i], info->media_types[info->n_media_types], sizeof(info->media_types[0]));
+
+                    if (dm && dm->dmMediaType == types[i])
+                        info->default_media_type = info->n_media_types;
+
+                    info->n_media_types++;
+                }
+            }
+
+            HeapFree(GetProcessHeap(), 0, types);
+        }
+    }
+
     /* Resolutions: DC_ENUMRESOLUTIONS returns pairs of LONGs [x, y] in DPI */
     n_res = DeviceCapabilitiesW(wprinter, NULL, DC_ENUMRESOLUTIONS, NULL, NULL);
 
@@ -405,6 +574,183 @@ int win32_get_printer_info(const char *printer_name, Win32PrinterInfo *info)
         HeapFree(GetProcessHeap(), 0, dm);
 
     return 0;
+}
+
+static WORD w32_ipp_to_paper(const char *media)
+{
+    unsigned int paper;
+    char tail;
+
+    if (!media || !media[0])
+        return 0;
+
+    if (strcmp(media, "na_letter_8.5x11in") == 0)
+        return DMPAPER_LETTER;
+
+    if (strcmp(media, "na_legal_8.5x14in") == 0)
+        return DMPAPER_LEGAL;
+
+    if (strcmp(media, "iso_a3_297x420mm") == 0)
+        return DMPAPER_A3;
+
+    if (strcmp(media, "iso_a4_210x297mm") == 0)
+        return DMPAPER_A4;
+
+    if (strcmp(media, "iso_a5_148x210mm") == 0)
+        return DMPAPER_A5;
+
+    if (strcmp(media, "iso_a6_105x148mm") == 0)
+        return DMPAPER_A6;
+
+    if (strcmp(media, "iso_b4_250x353mm") == 0)
+        return DMPAPER_B4;
+
+    if (strcmp(media, "iso_b5_176x250mm") == 0)
+        return DMPAPER_B5;
+
+    if (strcmp(media, "na_executive_7.25x10.5in") == 0)
+        return DMPAPER_EXECUTIVE;
+
+    if (strcmp(media, "na_ledger_11x17in") == 0)
+        return DMPAPER_TABLOID;
+
+    if (strcmp(media, "na_number-10_4.125x9.5in") == 0)
+        return DMPAPER_ENV_10;
+
+    if (strcmp(media, "iso_dl_110x220mm") == 0)
+        return DMPAPER_ENV_DL;
+
+    if (strcmp(media, "iso_c5_162x229mm") == 0)
+        return DMPAPER_ENV_C5;
+
+    if (strcmp(media, "iso_c6_114x162mm") == 0)
+        return DMPAPER_ENV_C6;
+
+    if (sscanf(media, "custom_dmpaper_%u%c", &paper, &tail) == 1 && paper <= 65535U)
+        return (WORD)paper;
+
+    return 0;
+}
+
+static void w32_apply_devmode(DEVMODEW *dm, const TeConfig *cfg)
+{
+    WORD paper;
+    DWORD supported_fields;
+    DWORD media_type;
+    int dpi_x;
+    int dpi_y;
+
+    if (!dm || !cfg)
+        return;
+
+    supported_fields = dm->dmFields;
+    paper = w32_ipp_to_paper(cfg->print_media);
+
+    if (paper && (supported_fields & DM_PAPERSIZE))
+    {
+        dm->dmPaperSize = (short)paper;
+        dm->dmFields |= DM_PAPERSIZE;
+    }
+
+    if ((supported_fields & DM_ORIENTATION) && (cfg->print_orientation == 3 || cfg->print_orientation == 6))
+    {
+        dm->dmOrientation = DMORIENT_PORTRAIT;
+        dm->dmFields |= DM_ORIENTATION;
+    }
+    else if ((supported_fields & DM_ORIENTATION) && (cfg->print_orientation == 4 || cfg->print_orientation == 5))
+    {
+        dm->dmOrientation = DMORIENT_LANDSCAPE;
+        dm->dmFields |= DM_ORIENTATION;
+    }
+
+    if ((supported_fields & DM_COPIES) && cfg->print_copies > 0 && cfg->print_copies <= 32767)
+    {
+        dm->dmCopies = (short)cfg->print_copies;
+        dm->dmFields |= DM_COPIES;
+    }
+
+    if ((supported_fields & DM_COLOR) && strcmp(cfg->print_color_mode, "color") == 0)
+    {
+        dm->dmColor = DMCOLOR_COLOR;
+        dm->dmFields |= DM_COLOR;
+    }
+    else if ((supported_fields & DM_COLOR) && strcmp(cfg->print_color_mode, "monochrome") == 0)
+    {
+        dm->dmColor = DMCOLOR_MONOCHROME;
+        dm->dmFields |= DM_COLOR;
+    }
+
+    if ((supported_fields & DM_DUPLEX) && strcmp(cfg->print_sides, "one-sided") == 0)
+    {
+        dm->dmDuplex = DMDUP_SIMPLEX;
+        dm->dmFields |= DM_DUPLEX;
+    }
+    else if ((supported_fields & DM_DUPLEX) && strcmp(cfg->print_sides, "two-sided-long-edge") == 0)
+    {
+        dm->dmDuplex = DMDUP_VERTICAL;
+        dm->dmFields |= DM_DUPLEX;
+    }
+    else if ((supported_fields & DM_DUPLEX) && strcmp(cfg->print_sides, "two-sided-short-edge") == 0)
+    {
+        dm->dmDuplex = DMDUP_HORIZONTAL;
+        dm->dmFields |= DM_DUPLEX;
+    }
+
+    if ((supported_fields & (DM_PRINTQUALITY | DM_YRESOLUTION)) == (DM_PRINTQUALITY | DM_YRESOLUTION) && cfg->print_resolution_x > 0 && cfg->print_resolution_y > 0)
+    {
+        dpi_x = cfg->print_resolution_x;
+        dpi_y = cfg->print_resolution_y;
+
+        if (cfg->print_resolution_units == 4)
+        {
+            dpi_x = (dpi_x * 254 + 50) / 100;
+            dpi_y = (dpi_y * 254 + 50) / 100;
+        }
+
+        if (dpi_x > 0 && dpi_x <= 32767 && dpi_y > 0 && dpi_y <= 32767)
+        {
+            dm->dmPrintQuality = (short)dpi_x;
+            dm->dmYResolution = (short)dpi_y;
+            dm->dmFields |= DM_PRINTQUALITY | DM_YRESOLUTION;
+        }
+    }
+    else if ((supported_fields & DM_PRINTQUALITY) && cfg->print_quality == 3)
+    {
+        dm->dmPrintQuality = DMRES_DRAFT;
+        dm->dmFields |= DM_PRINTQUALITY;
+    }
+    else if ((supported_fields & DM_PRINTQUALITY) && cfg->print_quality == 4)
+    {
+        dm->dmPrintQuality = DMRES_MEDIUM;
+        dm->dmFields |= DM_PRINTQUALITY;
+    }
+    else if ((supported_fields & DM_PRINTQUALITY) && cfg->print_quality == 5)
+    {
+        dm->dmPrintQuality = DMRES_HIGH;
+        dm->dmFields |= DM_PRINTQUALITY;
+    }
+
+    if (supported_fields & DM_DEFAULTSOURCE)
+    {
+        paper = w32_attr_to_bin(cfg->print_media_source);
+
+        if (paper)
+        {
+            dm->dmDefaultSource = paper;
+            dm->dmFields |= DM_DEFAULTSOURCE;
+        }
+    }
+
+    if (supported_fields & DM_MEDIATYPE)
+    {
+        media_type = w32_attr_to_media_type(cfg->print_media_type);
+
+        if (media_type)
+        {
+            dm->dmMediaType = media_type;
+            dm->dmFields |= DM_MEDIATYPE;
+        }
+    }
 }
 
 static DWORD CALLBACK w32_rtf_read(DWORD_PTR cookie, LPBYTE buffer, LONG count, LONG *read)
@@ -511,7 +857,20 @@ int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const cha
     LONG dm_size;
     LONG next;
     long size;
+    size_t rtf_length;
     DWORD count;
+    int dpi_x;
+    int dpi_y;
+    int phys_w;
+    int phys_h;
+    int phys_off_x;
+    int phys_off_y;
+    int print_w;
+    int print_h;
+    LONG margin_left;
+    LONG margin_right;
+    LONG margin_top;
+    LONG margin_bottom;
     int rc = -1;
 
     if (!ed)
@@ -561,9 +920,10 @@ int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const cha
     if (size < 0 || fseek(fp, 0, SEEK_SET) != 0)
         return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
 
-    rtf = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)size);
+    rtf_length = (size_t)size;
+    rtf = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, rtf_length);
 
-    if (!rtf || fread(rtf, 1, (size_t)size, fp) != (size_t)size)
+    if (!rtf || fread(rtf, 1, rtf_length, fp) != rtf_length)
         return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
 
     memset(wprinter, 0, sizeof(wprinter));
@@ -591,6 +951,11 @@ int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const cha
     if (!dm || DocumentPropertiesW(NULL, printer, wprinter, dm, NULL, DM_OUT_BUFFER) < 0)
         return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
 
+    w32_apply_devmode(dm, cfg);
+
+    if (DocumentPropertiesW(NULL, printer, wprinter, dm, dm, DM_IN_BUFFER | DM_OUT_BUFFER) < 0)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
     hdc = CreateDCW(NULL, wprinter, NULL, dm);
 
     if (!hdc)
@@ -601,7 +966,7 @@ int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const cha
     if (!module)
         return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
 
-    rich = CreateWindowExW(0, MSFTEDIT_CLASS, L"", WS_POPUP, 0, 0, 0, 0, NULL, NULL, module, NULL);
+    rich = CreateWindowExW(0, MSFTEDIT_CLASS, L"", WS_POPUP | ES_MULTILINE, 0, 0, 0, 0, NULL, NULL, module, NULL);
 
     if (!rich)
         return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
@@ -609,7 +974,7 @@ int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const cha
     memset(&stream, 0, sizeof(stream));
 
     stream.data = rtf;
-    stream.length = (size_t)size;
+    stream.length = rtf_length;
 
     memset(&input, 0, sizeof(input));
 
@@ -630,20 +995,57 @@ int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const cha
         doc.lpszDocName = wjob;
     }
 
-    if (StartDocW(hdc, &doc) <= 0)
+    dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
+    dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+    phys_w = GetDeviceCaps(hdc, PHYSICALWIDTH);
+    phys_h = GetDeviceCaps(hdc, PHYSICALHEIGHT);
+    phys_off_x = GetDeviceCaps(hdc, PHYSICALOFFSETX);
+    phys_off_y = GetDeviceCaps(hdc, PHYSICALOFFSETY);
+    print_w = GetDeviceCaps(hdc, HORZRES);
+    print_h = GetDeviceCaps(hdc, VERTRES);
+
+    if (dpi_x <= 0 || dpi_y <= 0 || phys_w <= 0 || phys_h <= 0 || print_w <= 0 || print_h <= 0)
         return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
 
     memset(&range, 0, sizeof(range));
 
     range.hdc = hdc;
     range.hdcTarget = hdc;
-    range.rc.right = GetDeviceCaps(hdc, HORZRES) * 1440 / GetDeviceCaps(hdc, LOGPIXELSX);
-    range.rc.bottom = GetDeviceCaps(hdc, VERTRES) * 1440 / GetDeviceCaps(hdc, LOGPIXELSY);
-    range.rcPage = range.rc;
-    range.chrg.cpMin = 0;
-    range.chrg.cpMax = -1;
+    range.rcPage.right = MulDiv(phys_w, 1440, dpi_x);
+    range.rcPage.bottom = MulDiv(phys_h, 1440, dpi_y);
+    range.rc.left = MulDiv(phys_off_x, 1440, dpi_x);
+    range.rc.top = MulDiv(phys_off_y, 1440, dpi_y);
+    range.rc.right = range.rc.left + MulDiv(print_w, 1440, dpi_x);
+    range.rc.bottom = range.rc.top + MulDiv(print_h, 1440, dpi_y);
 
-    do
+    margin_left = cfg && cfg->print_margin_left_mm >= 0 ? MulDiv(cfg->print_margin_left_mm, 14400, 254) : WIN32_PRINT_MARGIN_TWIPS;
+    margin_right = cfg && cfg->print_margin_right_mm >= 0 ? MulDiv(cfg->print_margin_right_mm, 14400, 254) : WIN32_PRINT_MARGIN_TWIPS;
+    margin_top = cfg && cfg->print_margin_top_mm >= 0 ? MulDiv(cfg->print_margin_top_mm, 14400, 254) : WIN32_PRINT_MARGIN_TWIPS;
+    margin_bottom = cfg && cfg->print_margin_bottom_mm >= 0 ? MulDiv(cfg->print_margin_bottom_mm, 14400, 254) : WIN32_PRINT_MARGIN_TWIPS;
+
+    if (range.rc.right - range.rc.left > margin_left + margin_right)
+    {
+        range.rc.left += margin_left;
+        range.rc.right -= margin_right;
+    }
+
+    if (range.rc.bottom - range.rc.top > margin_top + margin_bottom)
+    {
+        range.rc.top += margin_top;
+        range.rc.bottom -= margin_bottom;
+    }
+
+    SendMessageW(rich, EM_SETTARGETDEVICE, (WPARAM)hdc, (LPARAM)(range.rc.right - range.rc.left));
+    SendMessageW(rich, EM_SETSEL, 0, (LPARAM)-1);
+    SendMessageW(rich, EM_EXGETSEL, 0, (LPARAM)&range.chrg);
+
+    if (range.chrg.cpMax <= range.chrg.cpMin)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    if (StartDocW(hdc, &doc) <= 0)
+        return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
+
+    while (range.chrg.cpMin < range.chrg.cpMax)
     {
         if (StartPage(hdc) <= 0)
         {
@@ -653,14 +1055,14 @@ int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const cha
 
         next = (LONG)SendMessageW(rich, EM_FORMATRANGE, TRUE, (LPARAM)&range);
 
-        if (EndPage(hdc) <= 0 || next <= range.chrg.cpMin)
+        if (next <= range.chrg.cpMin || EndPage(hdc) <= 0)
         {
             AbortDoc(hdc);
             return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);
         }
 
         range.chrg.cpMin = next;
-    } while (next < GetWindowTextLengthW(rich));
+    }
 
     if (EndDoc(hdc) <= 0)
         return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, -1);

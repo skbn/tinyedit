@@ -2400,8 +2400,8 @@ int ed_segment_should_justify(unsigned char align, int last_subrow, int only_sub
     if (align != EA_ALIGN_JUST)
         return 0;
 
-    /* Justify every sub-row except the last one of a multi-line paragraph */
-    if (last_subrow && !only_subrow)
+    /* Justify every sub-row except the last one of a paragraph */
+    if (last_subrow)
         return 0;
 
     return 1;

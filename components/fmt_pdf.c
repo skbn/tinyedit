@@ -341,9 +341,27 @@ static void pdf_pager_init_geometry(pdf_pager *p, const TeConfig *cfg)
     double ph = PDF_DEFAULT_PAGE_H;
     double m = PDF_MARGIN_IN * 72.0;
     double t;
+    double left = m;
+    double right = m;
+    double top = m;
+    double bottom = m;
 
     if (cfg)
+    {
         pdf_parse_media(cfg->print_media, &pw, &ph);
+
+        if (cfg->print_margin_left_mm >= 0)
+            left = cfg->print_margin_left_mm * 72.0 / 25.4;
+
+        if (cfg->print_margin_right_mm >= 0)
+            right = cfg->print_margin_right_mm * 72.0 / 25.4;
+
+        if (cfg->print_margin_top_mm >= 0)
+            top = cfg->print_margin_top_mm * 72.0 / 25.4;
+
+        if (cfg->print_margin_bottom_mm >= 0)
+            bottom = cfg->print_margin_bottom_mm * 72.0 / 25.4;
+    }
 
     /* Orientation: 3=portrait 4=landscape 5=rev-land 6=rev-port. For landscape variants, swap width and height */
     if (cfg && (cfg->print_orientation == 4 || cfg->print_orientation == 5))
@@ -355,10 +373,10 @@ static void pdf_pager_init_geometry(pdf_pager *p, const TeConfig *cfg)
 
     p->page_w = pw;
     p->page_h = ph;
-    p->margin_l = m;
-    p->margin_r = m;
-    p->margin_t = m;
-    p->margin_b = m;
+    p->margin_l = left;
+    p->margin_r = right;
+    p->margin_t = top;
+    p->margin_b = bottom;
 }
 
 static unsigned int ttf_be16(const unsigned char *p)
@@ -3014,7 +3032,7 @@ static int pdf_pager_emit_para(pdf_pager *p, const pdf_para *para, int *lossy)
             if (x < p->margin_l)
                 x = p->margin_l;
         }
-        else if (trim_end > start && align == EA_ALIGN_JUST && (!is_last_line || start == 0))
+        else if (trim_end > start && align == EA_ALIGN_JUST && !is_last_line)
         {
             line_w = pdf_para_measure_range(para, p->fc, start, trim_end, p->font_size, p->tab_width);
             n_spaces = 0;

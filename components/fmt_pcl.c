@@ -209,9 +209,27 @@ static void pcl_pager_init_geometry(pcl_pager *p, const TeConfig *cfg)
     double ph = PCL_DEFAULT_PAGE_H_IN;
     double m = PCL_MARGIN_IN;
     double t;
+    double left = m;
+    double right = m;
+    double top = m;
+    double bottom = m;
 
     if (cfg)
+    {
         pcl_parse_media(cfg->print_media, &pw, &ph);
+
+        if (cfg->print_margin_left_mm >= 0)
+            left = cfg->print_margin_left_mm / 25.4;
+
+        if (cfg->print_margin_right_mm >= 0)
+            right = cfg->print_margin_right_mm / 25.4;
+
+        if (cfg->print_margin_top_mm >= 0)
+            top = cfg->print_margin_top_mm / 25.4;
+
+        if (cfg->print_margin_bottom_mm >= 0)
+            bottom = cfg->print_margin_bottom_mm / 25.4;
+    }
 
     /* Orientation: 3=portrait 4=landscape 5=rev-land 6=rev-port. For landscape variants, swap width and height */
     if (cfg && (cfg->print_orientation == 4 || cfg->print_orientation == 5))
@@ -223,10 +241,10 @@ static void pcl_pager_init_geometry(pcl_pager *p, const TeConfig *cfg)
 
     p->page_w_dp = pw * 720.0;
     p->page_h_dp = ph * 720.0;
-    p->margin_l_dp = m * 720.0;
-    p->margin_r_dp = m * 720.0;
-    p->margin_t_dp = m * 720.0;
-    p->margin_b_dp = m * 720.0;
+    p->margin_l_dp = left * 720.0;
+    p->margin_r_dp = right * 720.0;
+    p->margin_t_dp = top * 720.0;
+    p->margin_b_dp = bottom * 720.0;
 }
 
 /* Paragraph model (ported from fmt_pdf.c / fmt_urf.c, adapted for PCL output) */
@@ -955,7 +973,7 @@ static int pcl_pager_emit_para(pcl_pager *pg, const pcl_para *para, int paper)
             if (x_dp < pg->margin_l_dp)
                 x_dp = pg->margin_l_dp;
         }
-        else if (trim_end > start && align == EA_ALIGN_JUST && (!is_last_line || start == 0))
+        else if (trim_end > start && align == EA_ALIGN_JUST && !is_last_line)
         {
             line_w = pcl_measure_range(para, pg, start, trim_end);
             n_spaces = 0;

@@ -31,6 +31,14 @@ extern "C"
 #define PRWIN_MAX_RES 8
 #endif
 
+#ifndef PRWIN_MAX_BINS
+#define PRWIN_MAX_BINS 12
+#endif
+
+#ifndef PRWIN_MAX_TYPES
+#define PRWIN_MAX_TYPES 12
+#endif
+
     /* One printer resolution pair, values are DPI on Windows */
     typedef struct
     {
@@ -54,6 +62,15 @@ extern "C"
         int qualities[3];
         int n_qualities;
         int default_quality;
+        int orientations[2];
+        int n_orientations;
+        int default_orientation;
+        char media_sources[PRWIN_MAX_BINS][64];
+        int n_media_sources;
+        int default_media_source;
+        char media_types[PRWIN_MAX_TYPES][64];
+        int n_media_types;
+        int default_media_type;
 
         /* Resolutions from DC_ENUMRESOLUTIONS, mapped later to IPP resolutions */
         Win32Resolution resolutions[PRWIN_MAX_RES];

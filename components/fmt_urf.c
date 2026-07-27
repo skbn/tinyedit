@@ -1009,7 +1009,7 @@ static int urf_pager_emit_para(urf_pager *pg, const urf_para *para)
             if (x < pg->margin)
                 x = pg->margin;
         }
-        else if (trim_end > start && align == EA_ALIGN_JUST && (!is_last_line || start == 0))
+        else if (trim_end > start && align == EA_ALIGN_JUST && !is_last_line)
         {
             line_w = urf_measure_range(para, pg->uf, start, trim_end, pg->margin, pg->space_width, pg->tab_width);
 

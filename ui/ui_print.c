@@ -316,12 +316,41 @@ static void wiz_profile_load(TeConfig *cfg, const PrinterProfile *profile)
     if (!cfg || !profile)
         return;
 
-    strncpy(cfg->print_document_format, profile->document_format, sizeof(cfg->print_document_format) - 1);
-    strncpy(cfg->print_media, profile->media, sizeof(cfg->print_media) - 1);
-    strncpy(cfg->print_sides, profile->sides, sizeof(cfg->print_sides) - 1);
-    strncpy(cfg->print_color_mode, profile->color_mode, sizeof(cfg->print_color_mode) - 1);
-    strncpy(cfg->print_media_source, profile->media_source, sizeof(cfg->print_media_source) - 1);
-    strncpy(cfg->print_media_type, profile->media_type, sizeof(cfg->print_media_type) - 1);
+    if (profile->document_format[0])
+    {
+        strncpy(cfg->print_document_format, profile->document_format, sizeof(cfg->print_document_format) - 1);
+        cfg->print_document_format[sizeof(cfg->print_document_format) - 1] = '\0';
+    }
+
+    if (profile->media[0])
+    {
+        strncpy(cfg->print_media, profile->media, sizeof(cfg->print_media) - 1);
+        cfg->print_media[sizeof(cfg->print_media) - 1] = '\0';
+    }
+
+    if (profile->sides[0])
+    {
+        strncpy(cfg->print_sides, profile->sides, sizeof(cfg->print_sides) - 1);
+        cfg->print_sides[sizeof(cfg->print_sides) - 1] = '\0';
+    }
+
+    if (profile->color_mode[0])
+    {
+        strncpy(cfg->print_color_mode, profile->color_mode, sizeof(cfg->print_color_mode) - 1);
+        cfg->print_color_mode[sizeof(cfg->print_color_mode) - 1] = '\0';
+    }
+
+    if (profile->media_source[0])
+    {
+        strncpy(cfg->print_media_source, profile->media_source, sizeof(cfg->print_media_source) - 1);
+        cfg->print_media_source[sizeof(cfg->print_media_source) - 1] = '\0';
+    }
+
+    if (profile->media_type[0])
+    {
+        strncpy(cfg->print_media_type, profile->media_type, sizeof(cfg->print_media_type) - 1);
+        cfg->print_media_type[sizeof(cfg->print_media_type) - 1] = '\0';
+    }
 
     if (profile->font_path[0])
     {
@@ -329,19 +358,36 @@ static void wiz_profile_load(TeConfig *cfg, const PrinterProfile *profile)
         cfg->print_font_path[sizeof(cfg->print_font_path) - 1] = '\0';
     }
 
-    cfg->print_document_format[sizeof(cfg->print_document_format) - 1] = '\0';
-    cfg->print_media[sizeof(cfg->print_media) - 1] = '\0';
-    cfg->print_sides[sizeof(cfg->print_sides) - 1] = '\0';
-    cfg->print_color_mode[sizeof(cfg->print_color_mode) - 1] = '\0';
-    cfg->print_media_source[sizeof(cfg->print_media_source) - 1] = '\0';
-    cfg->print_media_type[sizeof(cfg->print_media_type) - 1] = '\0';
-    cfg->print_quality = profile->quality;
-    cfg->print_copies = profile->copies;
-    cfg->print_orientation = profile->orientation;
-    cfg->print_number_up = profile->number_up;
-    cfg->print_resolution_x = profile->resolution_x;
-    cfg->print_resolution_y = profile->resolution_y;
-    cfg->print_resolution_units = profile->resolution_units;
+    if (profile->quality > 0)
+        cfg->print_quality = profile->quality;
+
+    if (profile->copies > 0)
+        cfg->print_copies = profile->copies;
+
+    if (profile->orientation > 0)
+        cfg->print_orientation = profile->orientation;
+
+    if (profile->number_up > 0)
+        cfg->print_number_up = profile->number_up;
+
+    if (profile->resolution_x > 0 && profile->resolution_y > 0 && profile->resolution_units > 0)
+    {
+        cfg->print_resolution_x = profile->resolution_x;
+        cfg->print_resolution_y = profile->resolution_y;
+        cfg->print_resolution_units = profile->resolution_units;
+    }
+
+    if (profile->margin_left_mm >= 0)
+        cfg->print_margin_left_mm = profile->margin_left_mm;
+
+    if (profile->margin_right_mm >= 0)
+        cfg->print_margin_right_mm = profile->margin_right_mm;
+
+    if (profile->margin_top_mm >= 0)
+        cfg->print_margin_top_mm = profile->margin_top_mm;
+
+    if (profile->margin_bottom_mm >= 0)
+        cfg->print_margin_bottom_mm = profile->margin_bottom_mm;
 
     if (profile->font_size > 0)
         cfg->print_font_size = profile->font_size;
@@ -374,6 +420,10 @@ static void wiz_profile_save(PrinterProfile *profile, const TeConfig *cfg)
     profile->resolution_x = cfg->print_resolution_x;
     profile->resolution_y = cfg->print_resolution_y;
     profile->resolution_units = cfg->print_resolution_units;
+    profile->margin_left_mm = cfg->print_margin_left_mm;
+    profile->margin_right_mm = cfg->print_margin_right_mm;
+    profile->margin_top_mm = cfg->print_margin_top_mm;
+    profile->margin_bottom_mm = cfg->print_margin_bottom_mm;
     profile->font_size = cfg->print_font_size;
 }
 
@@ -726,6 +776,37 @@ static int wiz_edit_copies(int max_copies, int cfg_val, int *dst, int *dirty)
     return changed;
 }
 
+static int wiz_edit_margin(const char *title, int cfg_val, int *dst, int *dirty)
+{
+    static const char *items[] = {"Use default", "0 mm", "5 mm", "10 mm", "15 mm", "20 mm", "25 mm", "30 mm", "35 mm", "40 mm", "50 mm"};
+    static const int values[] = {-1, 0, 5, 10, 15, 20, 25, 30, 35, 40, 50};
+    int initial = 0;
+    int choice;
+    int i;
+
+    for (i = 0; i < (int)(sizeof(values) / sizeof(values[0])); i++)
+    {
+        if (values[i] == cfg_val)
+        {
+            initial = i;
+            break;
+        }
+    }
+
+    choice = ui_popup_list(title, items, (int)(sizeof(items) / sizeof(items[0])), initial);
+
+    if (choice < 0)
+        return -1;
+
+    if (values[choice] == cfg_val)
+        return 0;
+
+    *dst = values[choice];
+    *dirty = 1;
+
+    return 1;
+}
+
 static int wiz_edit_orientation(const IppPrinterInfo *info, int cfg_val, int *dst, int *dirty)
 {
     const char *labels[IPP_MAX_ORIENTATIONS];
@@ -894,8 +975,8 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
     const char *ident = NULL;
     const char *st = NULL;
     char title[128];
-    char labels[13][96];
-    const char *items[14];
+    char labels[17][96];
+    const char *items[18];
     int idx_fmt = -1;
     int idx_media = -1;
     int idx_sides = -1;
@@ -907,6 +988,10 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
     int idx_source = -1;
     int idx_type = -1;
     int idx_resolution = -1;
+    int idx_margin_left = -1;
+    int idx_margin_right = -1;
+    int idx_margin_top = -1;
+    int idx_margin_bottom = -1;
     int idx_back = -1;
     int idx_save = -1;
     int n = 0;
@@ -952,6 +1037,10 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
         idx_source = -1;
         idx_type = -1;
         idx_resolution = -1;
+        idx_margin_left = -1;
+        idx_margin_right = -1;
+        idx_margin_top = -1;
+        idx_margin_bottom = -1;
         idx_back = -1;
         idx_save = -1;
         n = 0;
@@ -1107,6 +1196,46 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
             n++;
         }
 
+        idx_margin_left = n;
+
+        snprintf(labels[n], sizeof(labels[n]), "Left margin: %s", work.print_margin_left_mm >= 0 ? "" : "default");
+
+        if (work.print_margin_left_mm >= 0)
+            snprintf(labels[n], sizeof(labels[n]), "Left margin: %d mm", work.print_margin_left_mm);
+
+        items[n] = labels[n];
+        n++;
+
+        idx_margin_right = n;
+
+        snprintf(labels[n], sizeof(labels[n]), "Right margin: %s", work.print_margin_right_mm >= 0 ? "" : "default");
+
+        if (work.print_margin_right_mm >= 0)
+            snprintf(labels[n], sizeof(labels[n]), "Right margin: %d mm", work.print_margin_right_mm);
+
+        items[n] = labels[n];
+        n++;
+
+        idx_margin_top = n;
+
+        snprintf(labels[n], sizeof(labels[n]), "Top margin: %s", work.print_margin_top_mm >= 0 ? "" : "default");
+
+        if (work.print_margin_top_mm >= 0)
+            snprintf(labels[n], sizeof(labels[n]), "Top margin: %d mm", work.print_margin_top_mm);
+
+        items[n] = labels[n];
+        n++;
+
+        idx_margin_bottom = n;
+
+        snprintf(labels[n], sizeof(labels[n]), "Bottom margin: %s", work.print_margin_bottom_mm >= 0 ? "" : "default");
+
+        if (work.print_margin_bottom_mm >= 0)
+            snprintf(labels[n], sizeof(labels[n]), "Bottom margin: %d mm", work.print_margin_bottom_mm);
+
+        items[n] = labels[n];
+        n++;
+
         idx_back = n;
         items[n] = "Back";
         n++;
@@ -1117,7 +1246,7 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
 
         snprintf(title, sizeof(title), "Options for %s", ident);
 
-        initial = 0;
+        initial = choice >= 0 && choice < n ? choice : 0;
 
         choice = ui_popup_list(title, items, n, initial);
 
@@ -1182,6 +1311,22 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
         else if (choice == idx_resolution)
         {
             changed = wiz_edit_resolution(info, work.print_resolution_x, work.print_resolution_y, work.print_resolution_units, &work.print_resolution_x, &work.print_resolution_y, &work.print_resolution_units, &dirty);
+        }
+        else if (choice == idx_margin_left)
+        {
+            changed = wiz_edit_margin("Left margin", work.print_margin_left_mm, &work.print_margin_left_mm, &dirty);
+        }
+        else if (choice == idx_margin_right)
+        {
+            changed = wiz_edit_margin("Right margin", work.print_margin_right_mm, &work.print_margin_right_mm, &dirty);
+        }
+        else if (choice == idx_margin_top)
+        {
+            changed = wiz_edit_margin("Top margin", work.print_margin_top_mm, &work.print_margin_top_mm, &dirty);
+        }
+        else if (choice == idx_margin_bottom)
+        {
+            changed = wiz_edit_margin("Bottom margin", work.print_margin_bottom_mm, &work.print_margin_bottom_mm, &dirty);
         }
 
         if (changed < 0)
@@ -1441,6 +1586,30 @@ void ui_editor_print_options(TeApp *app)
 
         info.n_qualities = w.n_qualities;
         info.default_quality = w.default_quality;
+
+        for (i = 0; i < w.n_orientations && i < (int)(sizeof(info.orientations) / sizeof(info.orientations[0])); i++)
+            info.orientations[i] = w.orientations[i];
+
+        info.n_orientations = i;
+        info.default_orientation = w.default_orientation < i ? w.default_orientation : -1;
+
+        for (i = 0; i < w.n_media_sources && i < (int)(sizeof(info.media_sources) / sizeof(info.media_sources[0])); i++)
+        {
+            strncpy(info.media_sources[i], w.media_sources[i], sizeof(info.media_sources[0]) - 1);
+            info.media_sources[i][sizeof(info.media_sources[0]) - 1] = '\0';
+        }
+
+        info.n_media_sources = i;
+        info.default_media_source = w.default_media_source < i ? w.default_media_source : -1;
+
+        for (i = 0; i < w.n_media_types && i < (int)(sizeof(info.media_types) / sizeof(info.media_types[0])); i++)
+        {
+            strncpy(info.media_types[i], w.media_types[i], sizeof(info.media_types[0]) - 1);
+            info.media_types[i][sizeof(info.media_types[0]) - 1] = '\0';
+        }
+
+        info.n_media_types = i;
+        info.default_media_type = w.default_media_type < i ? w.default_media_type : -1;
 
         for (i = 0; i < w.n_resolutions && i < (int)(sizeof(info.resolutions) / sizeof(info.resolutions[0])); i++)
         {

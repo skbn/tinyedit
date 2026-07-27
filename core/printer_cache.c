@@ -131,6 +131,7 @@ int printer_cache_load(PrinterCache *pc)
             char *cursor = line + 8;
             char *uri = pc_field(&cursor);
             PrinterCacheEntry *entry = printer_cache_find(pc, uri);
+            char *field = NULL;
 
             if (entry)
             {
@@ -154,6 +155,22 @@ int printer_cache_load(PrinterCache *pc)
                 pc_copy(entry->profile.font_path, sizeof(entry->profile.font_path), pc_field(&cursor));
 
                 entry->profile.font_size = pc_number(pc_field(&cursor));
+
+                field = pc_field(&cursor);
+
+                entry->profile.margin_left_mm = field ? pc_number(field) : -1;
+
+                field = pc_field(&cursor);
+
+                entry->profile.margin_right_mm = field ? pc_number(field) : -1;
+
+                field = pc_field(&cursor);
+
+                entry->profile.margin_top_mm = field ? pc_number(field) : -1;
+
+                field = pc_field(&cursor);
+
+                entry->profile.margin_bottom_mm = field ? pc_number(field) : -1;
             }
         }
         else if (strncmp(line, "PRINTER ", 8) == 0 && pc->count < PCACHE_MAX)
@@ -182,6 +199,10 @@ int printer_cache_load(PrinterCache *pc)
                 strncpy(pc->entries[pc->count].kind, bar2 + 1, sizeof(pc->entries[0].kind) - 1);
                 pc->entries[pc->count].kind[sizeof(pc->entries[0].kind) - 1] = '\0';
 
+                pc->entries[pc->count].profile.margin_left_mm = -1;
+                pc->entries[pc->count].profile.margin_right_mm = -1;
+                pc->entries[pc->count].profile.margin_top_mm = -1;
+                pc->entries[pc->count].profile.margin_bottom_mm = -1;
                 pc->count++;
             }
         }
@@ -220,7 +241,7 @@ int printer_cache_save(const PrinterCache *pc)
         const PrinterProfile *profile = &pc->entries[i].profile;
 
         fprintf(f, "PRINTER %s|%s|%s\n", pc->entries[i].name, pc->entries[i].uri, pc->entries[i].kind);
-        fprintf(f, "PROFILE %s|%s|%s|%s|%s|%d|%d|%d|%d|%s|%s|%d|%d|%d|%s|%d\n", pc->entries[i].uri, profile->document_format, profile->media, profile->sides, profile->color_mode, profile->quality, profile->copies, profile->orientation, profile->number_up, profile->media_source, profile->media_type, profile->resolution_x, profile->resolution_y, profile->resolution_units, profile->font_path, profile->font_size);
+        fprintf(f, "PROFILE %s|%s|%s|%s|%s|%d|%d|%d|%d|%s|%s|%d|%d|%d|%s|%d|%d|%d|%d|%d\n", pc->entries[i].uri, profile->document_format, profile->media, profile->sides, profile->color_mode, profile->quality, profile->copies, profile->orientation, profile->number_up, profile->media_source, profile->media_type, profile->resolution_x, profile->resolution_y, profile->resolution_units, profile->font_path, profile->font_size, profile->margin_left_mm, profile->margin_right_mm, profile->margin_top_mm, profile->margin_bottom_mm);
     }
 
     fclose(f);
@@ -269,6 +290,10 @@ int printer_cache_add(PrinterCache *pc, const char *name, const char *uri, const
     strncpy(pc->entries[pc->count].kind, kind, sizeof(pc->entries[0].kind) - 1);
     pc->entries[pc->count].kind[sizeof(pc->entries[0].kind) - 1] = '\0';
 
+    pc->entries[pc->count].profile.margin_left_mm = -1;
+    pc->entries[pc->count].profile.margin_right_mm = -1;
+    pc->entries[pc->count].profile.margin_top_mm = -1;
+    pc->entries[pc->count].profile.margin_bottom_mm = -1;
     pc->count++;
 
     return 1;

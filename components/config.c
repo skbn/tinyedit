@@ -472,6 +472,10 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->print_resolution_x = 0;
     cfg->print_resolution_y = 0;
     cfg->print_resolution_units = 0;
+    cfg->print_margin_left_mm = -1;
+    cfg->print_margin_right_mm = -1;
+    cfg->print_margin_top_mm = -1;
+    cfg->print_margin_bottom_mm = -1;
 
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
     {
@@ -1400,6 +1404,18 @@ int te_cfg_load(TeConfig *cfg, const char *path)
                 cfg->print_resolution_units = ru;
             }
         }
+        else if (strcasecmp(word, "PRINT_MARGINS") == 0)
+        {
+            int left = -1, right = -1, top = -1, bottom = -1;
+
+            if (sscanf(rest, "%d %d %d %d", &left, &right, &top, &bottom) == 4 && left >= 0 && right >= 0 && top >= 0 && bottom >= 0 && left <= 100 && right <= 100 && top <= 100 && bottom <= 100)
+            {
+                cfg->print_margin_left_mm = left;
+                cfg->print_margin_right_mm = right;
+                cfg->print_margin_top_mm = top;
+                cfg->print_margin_bottom_mm = bottom;
+            }
+        }
     }
 
     fclose(f);
@@ -1554,7 +1570,8 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "PRINT_NUMBER_UP") == 0 ||
                 strcasecmp(word, "PRINT_MEDIA_SOURCE") == 0 ||
                 strcasecmp(word, "PRINT_MEDIA_TYPE") == 0 ||
-                strcasecmp(word, "PRINT_RESOLUTION") == 0
+                strcasecmp(word, "PRINT_RESOLUTION") == 0 ||
+                strcasecmp(word, "PRINT_MARGINS") == 0
 #ifdef HAVE_HUNSPELL
                 || strcasecmp(word, "SPELL_ENABLED") == 0 || strcasecmp(word, "SPELL_DICT_PATH") == 0 || strcasecmp(word, "SPELL_DICT_NAME") == 0 || strcasecmp(word, "SPELL_CUSTOM_DICT") == 0
 #ifdef HAVE_HYPHEN
@@ -1815,6 +1832,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
     if (cfg->print_resolution_x > 0 && cfg->print_resolution_y > 0 && cfg->print_resolution_units > 0)
         fprintf(out, "PRINT_RESOLUTION %d %d %d\n", cfg->print_resolution_x, cfg->print_resolution_y, cfg->print_resolution_units);
+
+    if (cfg->print_margin_left_mm >= 0 && cfg->print_margin_right_mm >= 0 && cfg->print_margin_top_mm >= 0 && cfg->print_margin_bottom_mm >= 0)
+        fprintf(out, "PRINT_MARGINS %d %d %d %d\n", cfg->print_margin_left_mm, cfg->print_margin_right_mm, cfg->print_margin_top_mm, cfg->print_margin_bottom_mm);
 
     fclose(out);
 

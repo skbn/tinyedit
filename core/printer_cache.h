@@ -42,6 +42,10 @@ extern "C"
         int resolution_units;
         char font_path[256];
         int font_size;
+        int margin_left_mm;
+        int margin_right_mm;
+        int margin_top_mm;
+        int margin_bottom_mm;
     } PrinterProfile;
 
     /* One printer entry, either discovered or added manually */
