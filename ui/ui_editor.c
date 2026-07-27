@@ -406,19 +406,19 @@ int editor_eff_wrap(TeApp *app)
     return cfgw;
 }
 
-/* Text width for soft-wrap and alignment. In rich mode, clamp to wrap_col */
+/* Text width for soft-wrap and alignment. Clamp to wrap_col when set */
 int editor_text_width(TeApp *app, int body_width)
 {
     int cfgw;
     int limit;
 
-    if (!app->rich_mode || body_width <= 0)
+    if (body_width <= 0)
         return body_width;
 
     cfgw = app->wrap_col;
 
     if (cfgw <= 0)
-        return body_width;
+        return body_width; /* Autowrap disabled: use full terminal width */
 
     limit = body_width - 1;
 
