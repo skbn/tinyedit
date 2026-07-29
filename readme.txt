@@ -17,7 +17,7 @@ Main features:
 - Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
 - Experimental grammar/style checker with rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1). Grammar checks only work on UTF-8 text
 - Partial rich-text support for .rtf and .wp/.wp4 files
-- Experimental built-in printing (PDF, PCL, URF; optional IPP/AirPrint network printing; native RichEdit printing on Windows. Per-printer profile persistence)
+- Experimental built-in printing (PDF, PCL, URF, PWG Raster; optional IPP/AirPrint network printing; native RichEdit printing on Windows. Per-printer profile persistence)
 - Configurable via file or menu
  
 Building
@@ -130,10 +130,15 @@ Available charsets:
 - LATIN-2 (ISO-8859-2, Central European)
 
 Rich text and legacy file formats
-tinyedit can open and save .rtf and .wp/.wp4 files with partial rich-text support. When such a
-file is loaded, the editor switches to rich mode and the formatting shortcuts (Ctrl+Alt+B/I/U/L/E/R/J
+tinyedit can open and save .rtf, .wp/.wp4, .docx and .odt files with partial rich-text
+support. DOCX (Office Open XML) and ODT (OpenDocument Text v1.3) are read/written through a
+bundled streaming ZIP reader/writer (core/zip_stream.c) and a minimal pull-based XML parser
+(core/xml_lite.c), with no external dependencies. When such a file is loaded, the editor
+switches to rich mode and the formatting shortcuts (Ctrl+Alt+B/I/U/L/E/R/J
 on Unix/Windows, Alt+Shift+B/I/U/L/E/R/J on AmigaOS) become available. RTF preserves bold/italic/underline/alignment
-but drops color. WP 4.1.12 - 4.2 requires an 8-bit charset for saving and does not store font/size
+but drops color. DOCX and ODT preserve bold/italic/underline/alignment and emit the
+hyphenation flag (w:autoHyphenation / fo:hyphenate) when hyphenation is enabled; font/size
+are not written. WP 4.1.12 - 4.2 requires an 8-bit charset for saving and does not store font/size
 For best compatibility with WordPerfect 4.1.12 - 4.2 it is recommended to set the charset to CP437 both
 for reading (View) and saving (Save), either per-file with F3 / Alt+C or as the default charset in Setup
 
@@ -147,7 +152,9 @@ Output formats:
   Windows (fallback shell print verb on a temporary PDF). PDF glyph widths are now computed with
   FreeType at the configured print resolution and font size for more accurate text layout
 - PCL: PCL 5/6 for legacy laser and inkjet printers
-- URF (Apple Raster): required by AirPrint-compatible printers; requires FreeType (USE_URF=1)
+- URF (Apple Raster): required by AirPrint-compatible printers; requires FreeType (USE_PRINTER=1)
+- PWG Raster (image/pwg-raster): accepted by many IPP/AirPrint printers; requires FreeType
+  (USE_PRINTER=1). Export only (no round-trip), written when saving to a .pwg file
 
 Local printing:
 - Unix: pipes the generated PDF to lp (fallback lpr); CUPS handles the rest. A specific printer
@@ -160,11 +167,13 @@ Local printing:
   identify the configured driver
 
 Network printing (IPP / AirPrint):
-Optional IPP/IPPS client (USE_IPP=1) sends jobs directly to network printers. Combined with
-mDNS/Bonjour discovery, tinyedit can find AirPrint printers on the LAN, query their capabilities
-(media sizes, duplex, color, quality, copies, orientation, number-up, sources, types, resolutions)
-via Get-Printer-Attributes, and submit jobs with Print-Job. TLS (ipps://) is supported via the
-platform HTTP client; on AmigaOS this requires AmiSSL (WITH_AMISSL=1)
+Optional IPP/IPPS client (USE_IPP=1) sends jobs directly to network printers. USE_IPP=1 implies
+USE_PRINTER=1, since AirPrint printers commonly advertise image/urf or image/pwg-raster as their
+supported document formats. Combined with mDNS/Bonjour discovery, tinyedit can find AirPrint
+printers on the LAN, query their capabilities (media sizes, duplex, color, quality, copies,
+orientation, number-up, sources, types, resolutions) via Get-Printer-Attributes, and submit jobs
+with Print-Job. TLS (ipps://) is supported via the platform HTTP client; on AmigaOS this requires
+AmiSSL (WITH_AMISSL=1)
 
 Print options:
 The print dialog exposes the media size, duplex (sides), color mode, quality, copies, orientation,

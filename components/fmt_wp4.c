@@ -73,6 +73,9 @@ struct wp4_ctx
 
     const char *charset;
 
+    /* Set when a 0x9F byte (hyphenation on) is seen */
+    int hyph_detected;
+
     char *err;
     size_t errsz;
 };
@@ -353,12 +356,11 @@ static int wp4_skip_mb(struct wp4_ctx *c, int code, signed char len)
     }
 }
 
-int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz)
+int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz, int *hyph_out)
 {
     struct wp4_ctx c;
     int ch;
     int ok = 1;
-    int i;
 
     if (err && errsz > 0)
         err[0] = '\0';
@@ -394,13 +396,17 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
 
         switch (ch)
         {
-        case 0x09:
+        case 0x09: /* Tab (WP 4.2 DOS spec) */
+        case 0x89: /* Tab after right margin (WP 4.1.12 Amiga uses this as a regular tab) */
         {
             char b = '\t';
 
             ok = (wp4_put_utf8(&c, &b, 1) == 0);
             break;
         }
+
+        case 0x99: /* Overstrike: WP 4.1.12 Amiga, no single-char equivalent, ignore */
+            break;
 
         case 0x0A: /* Hard return: real end of paragraph */
         case 0x0C: /* Hard page: no pages here, closest is a paragraph */
@@ -434,6 +440,14 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
             break;
         case 0xB3:
             c.mask &= (unsigned short)~EA_ITALIC;
+            ok = (wp4_style_edge(&c) == 0);
+            break;
+        case 0x92:
+            c.mask |= EA_STRIKE;
+            ok = (wp4_style_edge(&c) == 0);
+            break;
+        case 0x93:
+            c.mask &= (unsigned short)~EA_STRIKE;
             ok = (wp4_style_edge(&c) == 0);
             break;
 
@@ -559,8 +573,14 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
             break;
 
         case 0x9A: /* Cancel hyphenation of following word: no text */
+            break;
+
         case 0x9E: /* Hyphenation off */
+            c.hyph_detected = 0;
+            break;
+
         case 0x9F: /* Hyphenation on */
+            c.hyph_detected = 1;
             break;
 
         default:
@@ -639,6 +659,9 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
             ed->lines[i]->para_align = c.para_aligns[i];
     }
 
+    if (hyph_out)
+        *hyph_out = c.hyph_detected;
+
     free(c.text);
     free(c.brks);
     free(c.runs);
@@ -668,10 +691,32 @@ static int wp4_toggles(FILE *fp, unsigned short cur, unsigned short want)
             return -1;
     }
 
+    if ((want & EA_STRIKE) != (cur & EA_STRIKE))
+    {
+        if (fputc(want & EA_STRIKE ? 0x92 : 0x93, fp) == EOF)
+            return -1;
+    }
+
     return 0;
 }
 
-int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz)
+/* Pick export variant from extension: .wp4=DOS 4.2, .wp=Amiga 4.1.12 */
+int wp4_variant_for_path(const char *path)
+{
+    size_t n;
+
+    if (!path)
+        return WP4_VARIANT_DOS42;
+
+    n = strlen(path);
+
+    if (n > 4 && strcasecmp(path + n - 4, ".wp4") == 0)
+        return WP4_VARIANT_DOS42;
+
+    return WP4_VARIANT_AMIGA41;
+}
+
+int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, int hyph, int variant, char *err, size_t errsz, char *warn, size_t warnsz)
 {
     unsigned short cur;
     int dropped_layout = 0;
@@ -680,6 +725,7 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
     int i;
     int prev_align = EA_ALIGN_LEFT;
     int align;
+    int hyph_emitted = 0; /* Amiga variant: 0x9F emitted lazily before first hyphenated block */
 
     if (err && errsz > 0)
         err[0] = '\0';
@@ -693,6 +739,26 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
     if (wp4_charset_invalid(charset, err, errsz))
         return -1;
 
+    /* Force hyph on if the document has LB_HYPHEN lines, so WP keeps the soft hyphens */
+    if (!hyph)
+    {
+        for (row = 0; row < ed->count; row++)
+        {
+            if (ed->lines[row]->brk == LB_HYPHEN)
+            {
+                hyph = 1;
+                break;
+            }
+        }
+    }
+
+    /* Emit 0x9F (hyph on): DOS42 at BOF, Amiga 4.1 before hyphenated blocks */
+    if (hyph && variant == WP4_VARIANT_DOS42)
+    {
+        if (fputc(0x9F, fp) == EOF)
+            return -1;
+    }
+
     for (row = 0; row < ed->count; row++)
     {
         const EdLine *ln = ed->lines[row];
@@ -703,29 +769,55 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
         cur = 0;
         align = (int)ln->para_align;
 
-        if (prev_align == EA_ALIGN_JUST && align != EA_ALIGN_JUST)
+        /* Amiga 4.1: emit 0x9F lazily before first hyphenated line */
+        if (hyph && variant == WP4_VARIANT_AMIGA41 && !hyph_emitted && ln->brk == LB_HYPHEN)
+        {
+            if (fputc(0x9F, fp) == EOF)
+                return -1;
+            hyph_emitted = 1;
+        }
+
+        if (prev_align == EA_ALIGN_JUST && align != EA_ALIGN_JUST && ln->len > 0)
         {
             if (fputc(0x82, fp) == EOF)
                 return -1;
         }
 
-        if (prev_align != EA_ALIGN_JUST && align == EA_ALIGN_JUST)
+        if (prev_align != EA_ALIGN_JUST && align == EA_ALIGN_JUST && ln->len > 0)
         {
             /* 0x86 is the WP 4.1 Amiga justify-on marker, emitted at the transition only, matching how real WP 4.1 files are laid out */
             if (fputc(0x86, fp) == EOF)
                 return -1;
         }
 
-        if (align == EA_ALIGN_CENTER)
+        if (align == EA_ALIGN_CENTER && ln->len > 0)
         {
-            /* <C3><type><center col><start col><C3> - type=0, center col=42, start col=left margin */
-            if (fputc(0xC3, fp) == EOF || fputc(0x00, fp) == EOF || fputc(WP4_CENTER_COL, fp) == EOF || fputc(WP4_DEFAULT_LEFT_MARGIN, fp) == EOF || fputc(0xC3, fp) == EOF)
+            int scol = WP4_DEFAULT_LEFT_MARGIN;
+
+            /* WP 4.1.12 Amiga uses the real starting column, not the fixed left margin */
+            if (variant == WP4_VARIANT_AMIGA41)
+                scol = WP4_DEFAULT_RIGHT_MARGIN - ln->len;
+
+            if (scol < WP4_DEFAULT_LEFT_MARGIN)
+                scol = WP4_DEFAULT_LEFT_MARGIN;
+
+            /* <C3><type><center col><start col><C3> - type=0, center col=42, start col */
+            if (fputc(0xC3, fp) == EOF || fputc(0x00, fp) == EOF || fputc(WP4_CENTER_COL, fp) == EOF || fputc((unsigned char)scol, fp) == EOF || fputc(0xC3, fp) == EOF)
                 return -1;
         }
-        else if (align == EA_ALIGN_RIGHT)
+        else if (align == EA_ALIGN_RIGHT && ln->len > 0)
         {
-            /* <C4><align char><align col><start col><C4> - 0x0A hard new line, align col=75, start col=left margin */
-            if (fputc(0xC4, fp) == EOF || fputc(0x0A, fp) == EOF || fputc(WP4_DEFAULT_RIGHT_MARGIN, fp) == EOF || fputc(WP4_DEFAULT_LEFT_MARGIN, fp) == EOF || fputc(0xC4, fp) == EOF)
+            int scol = WP4_DEFAULT_LEFT_MARGIN;
+
+            /* WP 4.1.12 Amiga: scol = right_margin - text_length, the column where flush-right text begins */
+            if (variant == WP4_VARIANT_AMIGA41)
+                scol = WP4_DEFAULT_RIGHT_MARGIN - ln->len;
+
+            if (scol < WP4_DEFAULT_LEFT_MARGIN)
+                scol = WP4_DEFAULT_LEFT_MARGIN;
+
+            /* <C4><align char><align col><start col><C4> - 0x0A hard new line, align col=75, start col */
+            if (fputc(0xC4, fp) == EOF || fputc(0x0A, fp) == EOF || fputc(WP4_DEFAULT_RIGHT_MARGIN, fp) == EOF || fputc((unsigned char)scol, fp) == EOF || fputc(0xC4, fp) == EOF)
                 return -1;
         }
 
@@ -817,13 +909,13 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, char *err, si
                 return -1;
         }
 
-        /* Close paragraph alignment wrappers */
-        if (align == EA_ALIGN_CENTER)
+        /* Close paragraph alignment wrappers (only if a gate was emitted) */
+        if (align == EA_ALIGN_CENTER && ln->len > 0)
         {
             if (fputc(0x83, fp) == EOF)
                 return -1;
         }
-        else if (align == EA_ALIGN_RIGHT)
+        else if (align == EA_ALIGN_RIGHT && ln->len > 0)
         {
             if (fputc(0x84, fp) == EOF)
                 return -1;

@@ -15,8 +15,8 @@ Editor de texto ligero para AmigaOS, Linux y Windows usando ncurses
 - Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
 - Corrector gramatical/estilístico experimental usando packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1)
 - La revisión gramatical solo funciona sobre texto UTF-8
-- Soporte parcial de texto enriquecido para archivos .rtf y .wp/.wp4
-- Impresión experimental integrada: salida PDF, PCL y URF (Apple Raster)
+- Soporte parcial de texto enriquecido para archivos .rtf, .wp/.wp4, .docx (Office Open XML) y .odt (OpenDocument Text)
+- Impresión experimental integrada: salida PDF, PCL, URF (Apple Raster) y PWG Raster
 - Impresión local vía `lp`/`lpr` (Unix)
 - Impresión nativa RichEdit (Windows) o `PRT:` (AmigaOS)
 - Impresión de red IPP/IPPS opcional con descubrimiento mDNS/Bonjour (AirPrint)
@@ -97,14 +97,14 @@ make -f Makefile.unix USE_GRAMMAR=1
 
 Para compilar con soporte de exportación de impresión URF (Apple Raster) (opcional, requiere FreeType):
 ```bash
-make -f Makefile.unix USE_URF=1
+make -f Makefile.unix USE_PRINTER=1
 ```
 - Usa la librería FreeType del sistema vía `pkg-config freetype2` (fallback a `-I/usr/include/freetype2 -lfreetype`)
 - Debian/Ubuntu: `sudo apt install libfreetype-dev`
 - Arch Linux: `sudo pacman -S freetype2`
 - FreeBSD: `doas pkg install freetype2`
 - macOS: `brew install freetype`
-- Nota: `Makefile.unix.static` activa `USE_URF=1` por defecto; `Makefile.unix` por defecto usa `USE_URF=0`
+- Nota: `Makefile.unix.static` activa `USE_PRINTER=1` por defecto; `Makefile.unix` por defecto usa `USE_PRINTER=0`
 
 Diccionarios, patrones de guiones y datos de tesauro:
 - Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
@@ -140,7 +140,7 @@ make -f Makefile.win32 ARCH=win64 clean all
 
 Para activar la exportación de impresión URF (Apple Raster) (usa el FreeType integrado):
 ```bash
-make -f Makefile.win32 USE_URF=1 clean all
+make -f Makefile.win32 USE_PRINTER=1 clean all
 ```
 
 Para compilar con corrector ortográfico nativo (spellchecker/ como AmigaOS):
@@ -276,6 +276,7 @@ El editor puede renderizar el documento a varios formatos de descripción de pá
 - **PDF** — formato por defecto, siempre disponible; usado para impresión local en Unix (pipe a `lp`/`lpr`) y Windows (shell print verb sobre un PDF temporal)
 - **PCL** — PCL 5/6 para impresoras láser/inkjet antiguas
 - **URF (Apple Raster)** — requerido por impresoras compatibles con AirPrint; necesita FreeType (ver sección URF más abajo)
+- **PWG Raster** — `image/pwg-raster`, aceptado por muchas impresoras IPP/AirPrint; necesita FreeType (`USE_PRINTER=1`). Solo exportación (sin ida y vuelta), se escribe al guardar en un archivo `.pwg`
 
 ### Impresión local
 
@@ -295,23 +296,23 @@ Cliente IPP/IPPS opcional (`USE_IPP=1`) que envía trabajos directamente a impre
 
 | Flag | Efecto | Por defecto |
 | --- | --- | --- |
-| `USE_URF=1` | Activa exportación URF (Apple Raster); requiere FreeType | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: siempre activo |
-| `USE_IPP=1` | Activa impresión de red IPP/IPPS; incorpora `http_client` | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: 0 |
+| `USE_PRINTER=1` | Activa exportación URF + PWG raster; requiere FreeType | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: 1 |
+| `USE_IPP=1` | Activa impresión de red IPP/IPPS; incorpora `http_client`. **Implica `USE_PRINTER=1`** (las impresoras AirPrint suelen requerir URF/PWG raster) | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: 0 |
 | `WITH_AMISSL=1` | Solo AmigaOS: TLS para IPPS vía AmiSSL (requiere `USE_IPP=1` o `USE_TRANSLATE=1`) | 0 |
 
 Ejemplos:
 ```bash
 # Unix con URF + IPP
-make -f Makefile.unix USE_URF=1 USE_IPP=1
+make -f Makefile.unix USE_IPP=1
 
 # Windows con URF + IPP
-make -f Makefile.win32 USE_URF=1 USE_IPP=1 clean all
+make -f Makefile.win32 USE_IPP=1 clean all
 
 # AmigaOS con IPP sobre TLS (AirPrint a impresoras ipps://)
 make -f Makefile.amiga USE_IPP=1 WITH_AMISSL=1 clean all
 ```
 
-El build estático de Unix (`Makefile.unix.static`) activa tanto `USE_URF` como `USE_IPP` por defecto
+El build estático de Unix (`Makefile.unix.static`) activa tanto `USE_PRINTER` como `USE_IPP` por defecto
 
 ### Configuración de AmiSSL (AmigaOS, para IPPS)
 
@@ -596,32 +597,44 @@ tinyedit incluye un corrector gramatical/estilístico experimental al compilar c
 - Los packs de reglas se derivan de los XML de LanguageTool usando `tools/lt2rul.py`
 - Repositorio fuente de LanguageTool: https://github.com/languagetool-org/languagetool
 - Solo se extrae un subconjunto de reglas de LanguageTool (pares literales simples, puntuación, espacios, mayúsculas, repeticiones, emparejamiento de paréntesis y sugerencias de estilo)
-- **No es un corrector ortográfico/gramatical completo por idioma**: no sabe dónde poner acentos ni elegir palabras según el contexto de la frase o la morfología. Es un asistente ligero para problemas superficiales comunes.
+- **No es un corrector ortográfico/gramatical completo por idioma**: no sabe dónde poner acentos ni elegir palabras según el contexto de la frase o la morfología. Es un asistente ligero para problemas superficiales comunes
 
 Habilita y configura el pack de reglas desde Configuración (F4) en el panel de diccionario
 
 ## Formatos de Texto Enriquecido y Heredados
 
-tinyedit puede abrir y guardar archivos `.rtf` y `.wp`/`.wp4` con soporte parcial de texto enriquecido:
+tinyedit puede abrir y guardar archivos `.rtf`, `.wp`/`.wp4`, `.docx` y `.odt` con soporte parcial de texto enriquecido. DOCX y ODT se leen/escriben mediante un lector/escritor de ZIP en streaming integrado (`core/zip_stream.c`) y un parser XML pull minimalista (`core/xml_lite.c`), sin dependencias externas:
 
 - **RTF 1.x** importación/exportación (`.rtf`):
-  - Conserva **negrita**, *cursiva*, subrayado y alineación de párrafo.
-  - Lee información básica de fuente y tamaño, pero no las guarda.
-  - La información de color se descarta.
-  - Los caracteres no ASCII se escriben como escapes `\u` con respaldo `?`.
+  - Conserva **negrita**, *cursiva*, subrayado y alineación de párrafo
+  - Lee información básica de fuente y tamaño, pero no las guarda
+  - La información de color se descarta
+  - Los caracteres no ASCII se escriben como escapes `\u` con respaldo `?`
+
+- **DOCX (Office Open XML / WordprocessingML)** importación/exportación (`.docx`):
+  - Conserva negrita, cursiva, subrayado y alineación de párrafo
+  - Emite `<w:autoHyphenation/>` en `word/settings.xml` cuando la partición está activa
+  - El texto se guarda en UTF-8 en `word/document.xml`; se manejan tabuladores y espacios preservados
+  - No se escriben fuente ni tamaño
+
+- **ODT (OpenDocument Text v1.3)** importación/exportación (`.odt`):
+  - Conserva negrita, cursiva, subrayado y alineación de párrafo
+  - Lee `fo:hyphenate="true"` de los estilos de párrafo y lo emite de vuelta cuando la partición está activa
+  - Guarda `mimetype`, `content.xml` y `styles.xml` en un paquete ZIP deflate
+  - No se escriben fuente ni tamaño
 
 - **WordPerfect 4.1.12 - 4.2** importación/exportación (`.wp`, `.wp4`):
-  - Conserva negrita, cursiva, subrayado y alineación de párrafo.
-  - Requiere un charset de 8 bits (p. ej. LATIN-1, CP850, CP1252) para guardar; UTF-8 se rechaza.
-  - Los caracteres que no se puedan representar en el charset de salida se reemplazan por `?` y se muestra una advertencia.
-  - No se escriben fuente ni tamaño.
+  - Conserva negrita, cursiva, subrayado y alineación de párrafo
+  - Requiere un charset de 8 bits (p. ej. LATIN-1, CP850, CP1252) para guardar; UTF-8 se rechaza
+  - Los caracteres que no se puedan representar en el charset de salida se reemplazan por `?` y se muestra una advertencia
+  - No se escriben fuente ni tamaño
   - Para máxima compatibilidad con WordPerfect 4.1.12 - 4.2 se recomienda usar CP437 tanto al leer (View) como al guardar (Save), ya sea por archivo con F3 / Alt+C o como charset por defecto en Setup
 
 Cuando se carga un archivo de texto enriquecido, el editor pasa a modo rico y los atajos de formato están disponibles:
-- Unix/Windows: `Ctrl+Alt+B/I/U/L/E/R/J` para negrita, cursiva, subrayado, alinear izquierda, centrar, derecha, justificar.
+- Unix/Windows: `Ctrl+Alt+B/I/U/L/E/R/J` para negrita, cursiva, subrayado, alinear izquierda, centrar, derecha, justificar
 - AmigaOS: `Alt+Shift+B/I/U/L/E/R/J` para los mismos comandos
 
-Se pueden mezclar archivos de texto plano y enriquecido en pestañas, pero el formato rico solo se conserva al guardar en `.rtf` o `.wp`/`.wp4`
+Se pueden mezclar archivos de texto plano y enriquecido en pestañas, pero el formato rico solo se conserva al guardar en `.rtf`, `.wp`/`.wp4`, `.docx` o `.odt`
 
 ## Capturas de Pantalla
 

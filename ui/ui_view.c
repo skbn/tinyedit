@@ -411,6 +411,8 @@ int view_cursor_justify_shift(Ed *ed, int width)
     int seg_end = 0;
     int seg_len;
     int seg_vw;
+    int target_vw;
+    int hyph_reserve;
     int offsets[4096];
     int col_in_seg;
 
@@ -434,7 +436,11 @@ int view_cursor_justify_shift(Ed *ed, int width)
 
     seg_len = seg_end - seg_start;
 
-    if (seg_len <= 0 || seg_len > (int)(sizeof(offsets) / sizeof(offsets[0])))
+    /* Reserve matches painter: tail of soft-hyphenated line reserves 1 col */
+    hyph_reserve = (seg_end == len && ln->brk == LB_HYPHEN) ? 1 : 0;
+
+    /* Need seg_len+1 entries because we may query offsets[seg_len] below */
+    if (seg_len <= 0 || seg_len + 1 > (int)(sizeof(offsets) / sizeof(offsets[0])))
         return 0;
 
     /* Single-line paragraphs justify, last row of multi-line paragraph does not */
@@ -442,8 +448,9 @@ int view_cursor_justify_shift(Ed *ed, int width)
         return 0;
 
     seg_vw = wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab);
+    target_vw = width - hyph_reserve;
 
-    if (!ui_justify_offsets(&l[seg_start], seg_len, seg_vw, width, offsets))
+    if (!ui_justify_offsets(&l[seg_start], seg_len, seg_vw, target_vw, offsets))
         return 0;
 
     col_in_seg = info.col - seg_start;
@@ -451,8 +458,9 @@ int view_cursor_justify_shift(Ed *ed, int width)
     if (col_in_seg < 0)
         col_in_seg = 0;
 
-    if (col_in_seg >= seg_len)
-        col_in_seg = seg_len - 1;
+    /* offsets[seg_len] = total shift for cursor past last char of sub-row */
+    if (col_in_seg > seg_len)
+        col_in_seg = seg_len;
 
     return offsets[col_in_seg];
 }

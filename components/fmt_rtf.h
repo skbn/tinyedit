@@ -9,6 +9,10 @@
  * (at your option) any later version.
  */
 
+/* RTF (Rich Text Format) import/export
+ * Spec: Microsoft RTF Specification v1.6
+ * https://learn.microsoft.com/en-us/previous-versions/office/developer/office2000/aa140277(v=office.10) */
+
 #ifndef FMT_RTF_H
 #define FMT_RTF_H
 
@@ -21,14 +25,14 @@ extern "C"
 {
 #endif
 
-    /* Parse RTF from fp into ed; return 0 on success, -1 on error */
-    int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, size_t warnsz);
+    /* Parse RTF into ed; *hyph_out=1 if \hyphauto, 0 otherwise */
+    int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, size_t warnsz, int *hyph_out);
 
-    /* Write ed as RTF 1.x. Returns 0 on success, -1 on I/O error */
-    int rtf_export(const struct Ed *ed, FILE *fp);
+    /* Write ed as RTF 1.x; emit \hyphauto1 when hyph is non-zero */
+    int rtf_export(const struct Ed *ed, FILE *fp, int hyph);
 
-    /* Same as rtf_export but overrides the default font table with the given font family name (e.g. "DejaVu Sans Mono") and size in half-points */
-    int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, int font_size_half_pt);
+    /* Same but overrides font table (name + half-points size) */
+    int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, int font_size_half_pt, int hyph);
 
 #ifdef __cplusplus
 }

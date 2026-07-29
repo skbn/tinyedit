@@ -14,8 +14,8 @@ Lightweight text editor for AmigaOS, Linux and Windows using ncurses
 - Thesaurus with native implementation (AmigaOS/Windows) or libmythes (*nix) (optional, USE_MYTHES=1)
 - Text-to-speech (TTS) via espeak-ng on *nix, SAPI 5 on Windows, or narrator.device on AmigaOS (optional, USE_TTS=1)
 - Experimental grammar/style checker using rule packs derived from LanguageTool XML files (optional, USE_GRAMMAR=1); grammar checks only work on UTF-8 text
-- Partial rich-text support for .rtf and .wp/.wp4 files
-- Experimental built-in printing: PDF, PCL and URF (Apple Raster) output; local printing via `lp`/`lpr` (Unix), native RichEdit printing (Windows) or `PRT:` (AmigaOS); optional IPP/IPPS network printing with mDNS/Bonjour (AirPrint) discovery; per-printer profile persistence
+- Partial rich-text support for .rtf, .wp/.wp4, .docx (Office Open XML) and .odt (OpenDocument Text) files
+- Experimental built-in printing: PDF, PCL, URF (Apple Raster) and PWG Raster output; local printing via `lp`/`lpr` (Unix), native RichEdit printing (Windows) or `PRT:` (AmigaOS); optional IPP/IPPS network printing with mDNS/Bonjour (AirPrint) discovery; per-printer profile persistence
 - Translator panel with online support and StarDict-compatible offline dictionary
 - Mouse support (works in terminal, SSH and remote sessions)
 - Configurable colors (and TTF fonts on AmigaOS)
@@ -92,14 +92,14 @@ make -f Makefile.unix USE_GRAMMAR=1
 
 To compile with URF (Apple Raster) print export support (optional, requires FreeType):
 ```bash
-make -f Makefile.unix USE_URF=1
+make -f Makefile.unix USE_PRINTER=1
 ```
 - Uses the system FreeType library via `pkg-config freetype2` (falls back to `-I/usr/include/freetype2 -lfreetype`)
 - Debian/Ubuntu: `sudo apt install libfreetype-dev`
 - Arch Linux: `sudo pacman -S freetype2`
 - FreeBSD: `doas pkg install freetype2`
 - macOS: `brew install freetype`
-- Note: `Makefile.unix.static` enables `USE_URF=1` by default; `Makefile.unix` defaults to `USE_URF=0`
+- Note: `Makefile.unix.static` enables `USE_PRINTER=1` by default; `Makefile.unix` defaults to `USE_PRINTER=0`
 
 Dictionaries, hyphenation patterns and thesaurus data:
 - Debian/Ubuntu: `sudo apt install hunspell-es hunspell-en-us hyphen-es hyphen-en-us mythes-es mythes-en-us`
@@ -135,7 +135,7 @@ make -f Makefile.win32 ARCH=win64 clean all
 
 To enable URF (Apple Raster) print export (uses the bundled FreeType):
 ```bash
-make -f Makefile.win32 USE_URF=1 clean all
+make -f Makefile.win32 USE_PRINTER=1 clean all
 ```
 
 To compile with native spell checker (spellchecker/ like AmigaOS):
@@ -271,6 +271,7 @@ The editor can render the document to several page-description formats, chosen a
 - **PDF** — default raster-ready format, always available; used for local printing on Unix (piped to `lp`/`lpr`) and Windows (shell print verb on a temp PDF)
 - **PCL** — PCL 5/6 for legacy laser and inkjet printers
 - **URF (Apple Raster)** — required by AirPrint-compatible printers; needs FreeType (see URF section below)
+- **PWG Raster** — `image/pwg-raster`, accepted by many IPP/AirPrint printers; needs FreeType (`USE_PRINTER=1`). Export only (no round-trip), written when saving to a `.pwg` file
 
 ### Local printing
 
@@ -290,23 +291,23 @@ Optional IPP/IPPS client (`USE_IPP=1`) sends jobs directly to network printers. 
 
 | Flag | Effect | Default |
 | --- | --- | --- |
-| `USE_URF=1` | Enable URF (Apple Raster) export; requires FreeType | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: always on |
-| `USE_IPP=1` | Enable IPP/IPPS network printing; pulls in `http_client` | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: 0 |
+| `USE_PRINTER=1` | Enable URF + PWG raster export; requires FreeType | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: 1 |
+| `USE_IPP=1` | Enable IPP/IPPS network printing; pulls in `http_client`. **Implies `USE_PRINTER=1`** (AirPrint printers commonly require URF/PWG raster) | `Makefile.unix`: 0, `Makefile.unix.static`: 1, `Makefile.win32`: 0, `Makefile.amiga`: 0 |
 | `WITH_AMISSL=1` | AmigaOS only: TLS for IPPS via AmiSSL (requires `USE_IPP=1` or `USE_TRANSLATE=1`) | 0 |
 
 Examples:
 ```bash
 # Unix with URF + IPP
-make -f Makefile.unix USE_URF=1 USE_IPP=1
+make -f Makefile.unix USE_IPP=1
 
 # Windows with URF + IPP
-make -f Makefile.win32 USE_URF=1 USE_IPP=1 clean all
+make -f Makefile.win32 USE_IPP=1 clean all
 
 # AmigaOS with IPP over TLS (AirPrint to ipps:// printers)
 make -f Makefile.amiga USE_IPP=1 WITH_AMISSL=1 clean all
 ```
 
-The static Unix build (`Makefile.unix.static`) enables both `USE_URF` and `USE_IPP` by default
+The static Unix build (`Makefile.unix.static`) enables both `USE_PRINTER` and `USE_IPP` by default
 
 ### AmiSSL setup (AmigaOS, for IPPS)
 
@@ -596,13 +597,25 @@ Enable and configure the rule pack from Setup (F4) under the dictionary panel
 
 ## Rich Text and Legacy File Formats
 
-tinyedit can open and save `.rtf` and `.wp`/`.wp4` files with partial rich-text support:
+tinyedit can open and save `.rtf`, `.wp`/`.wp4`, `.docx` and `.odt` files with partial rich-text support. DOCX and ODT are read/written through a bundled streaming ZIP reader/writer (`core/zip_stream.c`) and a minimal pull-based XML parser (`core/xml_lite.c`), with no external dependencies:
 
 - **RTF 1.x** import/export (`.rtf`):
   - Preserves **bold**, *italic*, underline and paragraph alignment
   - Reads basic font and size information, but does not save font/size changes
   - Color information is dropped
   - Non-ASCII characters are written as `\u` escapes with a `?` fallback
+
+- **DOCX (Office Open XML / WordprocessingML)** import/export (`.docx`):
+  - Preserves bold, italic, underline and paragraph alignment
+  - Emits `<w:autoHyphenation/>` in `word/settings.xml` when hyphenation is enabled
+  - Text is stored UTF-8 in `word/document.xml`; tabs and preserved spaces are handled
+  - Font and size are not written
+
+- **ODT (OpenDocument Text v1.3)** import/export (`.odt`):
+  - Preserves bold, italic, underline and paragraph alignment
+  - Reads `fo:hyphenate="true"` from paragraph styles and emits it back when hyphenation is enabled
+  - Stores `mimetype`, `content.xml` and `styles.xml` in a deflate ZIP package
+  - Font and size are not written
 
 - **WordPerfect 4.1.12 - 4.2** import/export (`.wp`, `.wp4`):
   - Preserves bold, italic, underline and paragraph alignment
@@ -615,7 +628,7 @@ When a rich-text file is loaded, the editor switches to rich mode and the text-f
 - Unix/Windows: `Ctrl+Alt+B/I/U/L/E/R/J` for bold, italic, underline, align left, center, right, justify
 - AmigaOS: `Alt+Shift+B/I/U/L/E/R/J` for the same commands
 
-Plain-text and rich-text files can be mixed in tabs, but rich formatting is only preserved when saving to `.rtf` or `.wp`/`.wp4`
+Plain-text and rich-text files can be mixed in tabs, but rich formatting is only preserved when saving to `.rtf`, `.wp`/`.wp4`, `.docx` or `.odt`
 
 ## Screenshots
 

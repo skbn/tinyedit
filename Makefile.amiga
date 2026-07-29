@@ -32,7 +32,13 @@ USE_STARDICT ?= 0
 USE_TTS ?= 0
 WITH_AMISSL ?= 0
 USE_IPP ?= 0
-USE_URF ?= 0
+USE_PRINTER ?= 1
+
+# USE_IPP implies USE_PRINTER: AirPrint printers commonly require URF/PWG
+# raster formats, so IPP without raster export would only reach PDF/PCL printers.
+ifeq ($(USE_IPP),1)
+  USE_PRINTER := 1
+endif
 
 # AmiSSL SDK path for TLS support
 AMISSL_SDK ?= AmiSSL
@@ -165,10 +171,8 @@ UIDIR      := $(HERE)ui
 # tinyedit object files (matches Makefile.amiga structure, with _ft wrapper)
 CORE_OBJS  = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
              $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/portable.o $(OBJDIR)/mdns.o $(OBJDIR)/printer_cache.o $(OBJDIR)/ncursesw_amiga.o $(OBJDIR)/te_rastport.o \
-             \
-             \
-             
-COMP_OBJS  = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/fmt_pcl.o $(OBJDIR)/fmt_urf.o $(OBJDIR)/print.o $(OBJDIR)/print_amiga.o $(OBJDIR)/print_win32.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
+             $(OBJDIR)/zip_stream.o $(OBJDIR)/xml_lite.o
+COMP_OBJS  = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_docx.o $(OBJDIR)/fmt_odt.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/fmt_pcl.o $(OBJDIR)/fmt_urf.o $(OBJDIR)/fmt_pwg.o $(OBJDIR)/print.o $(OBJDIR)/print_amiga.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o
 UI_OBJS    = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_editor_helper.o \
              $(OBJDIR)/ui_popup.o $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
              $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o $(OBJDIR)/ui_assist.o $(OBJDIR)/ui_print.o \
@@ -465,10 +469,10 @@ $(OBJDIR)/pngwutil.o: $(PNGDIR)/pngwutil.c | $(OBJDIR)
 	$(CC) $(CFLAGS) $(PNGINC) $(ZLIBINC) -c $< -o $@
 
 # tinyedit core/components/ui object rules
-TEFLAGS = $(CFLAGS) -I$(HERE) -I$(COREDIR) -I$(COMPDIR) -I$(UIDIR) $(FTINC)
+TEFLAGS = $(CFLAGS) -I$(HERE) -I$(COREDIR) -I$(COMPDIR) -I$(UIDIR) $(FTINC) $(ZLIBINC)
 
-ifeq ($(USE_URF),1)
-  TEFLAGS += -DHAVE_URF
+ifeq ($(USE_PRINTER),1)
+  TEFLAGS += -DHAVE_PRINTER
 endif
 
 $(OBJDIR)/charset.o: $(COREDIR)/charset.c | $(OBJDIR)
@@ -484,6 +488,12 @@ $(OBJDIR)/search.o: $(COREDIR)/search.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 $(OBJDIR)/utf8.o: $(COREDIR)/utf8.c | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/zip_stream.o: $(COREDIR)/zip_stream.c $(COREDIR)/zip_stream.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/xml_lite.o: $(COREDIR)/xml_lite.c $(COREDIR)/xml_lite.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 $(OBJDIR)/portable.o: $(COREDIR)/portable.c $(COREDIR)/portable.h | $(OBJDIR)
@@ -526,6 +536,12 @@ $(OBJDIR)/fmt_rtf.o: $(COMPDIR)/fmt_rtf.c | $(OBJDIR)
 $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
+$(OBJDIR)/fmt_docx.o: $(COMPDIR)/fmt_docx.c $(COMPDIR)/fmt_docx.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h $(COREDIR)/zip_stream.h $(COREDIR)/xml_lite.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
+$(OBJDIR)/fmt_odt.o: $(COMPDIR)/fmt_odt.c $(COMPDIR)/fmt_odt.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h $(COREDIR)/zip_stream.h $(COREDIR)/xml_lite.h | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
 $(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
@@ -535,13 +551,13 @@ $(OBJDIR)/fmt_pcl.o: $(COMPDIR)/fmt_pcl.c | $(OBJDIR)
 $(OBJDIR)/fmt_urf.o: $(COMPDIR)/fmt_urf.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
+$(OBJDIR)/fmt_pwg.o: $(COMPDIR)/fmt_pwg.c | $(OBJDIR)
+	$(CC) $(TEFLAGS) -c $< -o $@
+
 $(OBJDIR)/print.o: $(COMPDIR)/print.c | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 $(OBJDIR)/print_amiga.o: $(COMPDIR)/print_amiga.c $(COMPDIR)/print_amiga.h | $(OBJDIR)
-	$(CC) $(TEFLAGS) -c $< -o $@
-
-$(OBJDIR)/print_win32.o: $(COMPDIR)/print_win32.c $(COMPDIR)/print_win32.h | $(OBJDIR)
 	$(CC) $(TEFLAGS) -c $< -o $@
 
 $(OBJDIR)/editor_helper.o: $(COMPDIR)/editor_helper.c | $(OBJDIR)

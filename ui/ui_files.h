@@ -28,7 +28,10 @@ int ui_files_is_rtf(const char *path);
 int ui_files_is_wp4(const char *path);
 int ui_files_is_pdf(const char *path);
 int ui_files_is_urf(const char *path);
+int ui_files_is_pwg(const char *path);
 int ui_files_is_pcl(const char *path);
+int ui_files_is_docx(const char *path);
+int ui_files_is_odt(const char *path);
 int ui_files_open_path(TeApp *app, const char *path);
 
 #endif /* UI_FILES_H */

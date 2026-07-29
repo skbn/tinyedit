@@ -275,6 +275,9 @@ int ui_justify_offsets(const wchar_t *seg, int seg_len, int cur_vw, int target_v
         }
     }
 
+    /* One-past-end slot: cursor after last char gets full accumulated shift */
+    offsets[seg_len] = shift;
+
     return 1;
 }
 
@@ -374,6 +377,16 @@ void ui_draw_wcs_attr_runs_ex(int y, int x, const wchar_t *l, const EdLine *ln, 
 
         if (runs[r].mask & EA_UNDERLINE)
             ncattr |= A_UNDERLINE;
+
+        /* Strike: Amiga/Win32 use A_STRIKE, Unix has no native attribute so use underline+reverse */
+        if (runs[r].mask & EA_STRIKE)
+        {
+#ifdef A_STRIKE
+            ncattr |= A_STRIKE;
+#else
+            ncattr |= A_UNDERLINE | A_REVERSE;
+#endif
+        }
 
         /* Paint each cell at its own visual column: variable-width glyphs and tabs would otherwise desync the run from the base layer */
         attron(ncattr);
@@ -1482,7 +1495,7 @@ int ftn_reply(TeApp *app)
     }
 
 #ifdef HAVE_HYPHEN
-    if (app->hyph_wrap_enabled && app->hyph_handle)
+    if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
     {
         hyph = ui_layout_hyphen;
         hyph_user = app;
@@ -2240,7 +2253,7 @@ void ui_editor_session_restore(TeApp *app)
         te_app_switch_tab(app, active_idx);
 }
 
-/* Toggle an inline attribute (EA_BOLD/EA_ITALIC/EA_UNDERLINE) over the selection or input style */
+/* Toggle an inline attribute (EA_BOLD/EA_ITALIC/EA_UNDERLINE/EA_STRIKE) over the selection or input style */
 int ui_rich_attr_toggle(TeApp *app, unsigned short bit)
 {
     Ed *ed = te_app_get_editor(app);
@@ -2423,7 +2436,7 @@ void ui_editor_rewrap_loaded(TeApp *app)
         return;
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-    if (app->hyph_wrap_enabled && app->hyph_handle)
+    if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
     {
         hyph = ui_layout_hyphen;
         hyph_user = app;
@@ -2450,7 +2463,7 @@ void ui_editor_rewrap_docwide(TeApp *app)
         return;
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-    if (app->hyph_wrap_enabled && app->hyph_handle)
+    if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
     {
         hyph = ui_layout_hyphen;
         hyph_user = app;

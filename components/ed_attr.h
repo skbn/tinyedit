@@ -16,6 +16,7 @@
 #define EA_BOLD 0x01
 #define EA_ITALIC 0x02
 #define EA_UNDERLINE 0x04
+#define EA_STRIKE 0x08
 
 /* Paragraph alignment values (EdLine.para_align) */
 #define EA_ALIGN_LEFT 0

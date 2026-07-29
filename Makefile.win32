@@ -36,7 +36,13 @@ USE_TRANSLATE ?= 0
 USE_STARDICT ?= 0
 USE_TTS ?= 0
 USE_IPP ?= 0
-USE_URF ?= 0
+USE_PRINTER ?= 0
+
+# USE_IPP implies USE_PRINTER: AirPrint printers commonly require URF/PWG
+# raster formats, so IPP without raster export would only reach PDF/PCL printers.
+ifeq ($(USE_IPP),1)
+  USE_PRINTER := 1
+endif
 
 # Compiler (native MSYS2 MinGW)
 CC = gcc
@@ -57,9 +63,9 @@ LFLAGS = -mwindows
 # Platform-specific defines
 CDEFS = -DPLATFORM_WIN32 -DNO_TYPEDEF_BOOL -D_WINDOWS -DUSE_FREETYPE
 
-# URF (Apple Raster) support. Requires FreeType.
-ifeq ($(USE_URF),1)
-  CDEFS += -DHAVE_URF
+# Printer raster support (URF + PWG). Requires FreeType.
+ifeq ($(USE_PRINTER),1)
+  CDEFS += -DHAVE_PRINTER
 endif
 
 # Architecture (default: win64 for 64-bit Windows)
@@ -90,8 +96,8 @@ SPELL_DIR = $(HERE)spellchecker
 CORE_OBJS = $(OBJDIR)/utf8.o $(OBJDIR)/charset.o \
             $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
             $(OBJDIR)/search.o $(OBJDIR)/portable.o $(OBJDIR)/mdns.o $(OBJDIR)/printer_cache.o $(OBJDIR)/ncursesw_win32.o \
-            $(OBJDIR)/te_rastport_win32.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/fmt_pcl.o $(OBJDIR)/fmt_urf.o $(OBJDIR)/print.o $(OBJDIR)/print_amiga.o $(OBJDIR)/print_win32.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
+            $(OBJDIR)/te_rastport_win32.o $(OBJDIR)/zip_stream.o $(OBJDIR)/xml_lite.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_docx.o $(OBJDIR)/fmt_odt.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/fmt_pcl.o $(OBJDIR)/fmt_urf.o $(OBJDIR)/fmt_pwg.o $(OBJDIR)/print.o $(OBJDIR)/print_win32.o $(OBJDIR)/editor_helper.o $(OBJDIR)/config.o
 UI_OBJS   = $(OBJDIR)/te_app.o \
             $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_editor.o \
@@ -405,6 +411,12 @@ endif
 $(OBJDIR)/utf8.o: $(COREDIR)/utf8.c $(COREDIR)/utf8.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/zip_stream.o: $(COREDIR)/zip_stream.c $(COREDIR)/zip_stream.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/xml_lite.o: $(COREDIR)/xml_lite.c $(COREDIR)/xml_lite.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 $(OBJDIR)/charset.o: $(COREDIR)/charset.c $(COREDIR)/charset.h $(COREDIR)/utf8.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
@@ -579,6 +591,12 @@ $(OBJDIR)/fmt_rtf.o: $(COMPDIR)/fmt_rtf.c $(COMPDIR)/fmt_rtf.h $(COMPDIR)/ed_att
 $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/fmt_docx.o: $(COMPDIR)/fmt_docx.c $(COMPDIR)/fmt_docx.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COREDIR)/zip_stream.h $(COREDIR)/xml_lite.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) $(FTINC) -c $< -o $@
+
+$(OBJDIR)/fmt_odt.o: $(COMPDIR)/fmt_odt.c $(COMPDIR)/fmt_odt.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h $(COREDIR)/zip_stream.h $(COREDIR)/xml_lite.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) $(FTINC) -c $< -o $@
+
 $(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c $(COMPDIR)/fmt_pdf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
@@ -588,10 +606,10 @@ $(OBJDIR)/fmt_pcl.o: $(COMPDIR)/fmt_pcl.c $(COMPDIR)/fmt_pcl.h $(COMPDIR)/ed_att
 $(OBJDIR)/fmt_urf.o: $(COMPDIR)/fmt_urf.c $(COMPDIR)/fmt_urf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) $(FTINC) -c $< -o $@
 
-$(OBJDIR)/print.o: $(COMPDIR)/print.c $(COMPDIR)/print.h $(COMPDIR)/fmt_pdf.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+$(OBJDIR)/fmt_pwg.o: $(COMPDIR)/fmt_pwg.c $(COMPDIR)/fmt_pwg.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) $(FTINC) -c $< -o $@
 
-$(OBJDIR)/print_amiga.o: $(COMPDIR)/print_amiga.c $(COMPDIR)/print_amiga.h | $(OBJDIR)
+$(OBJDIR)/print.o: $(COMPDIR)/print.c $(COMPDIR)/print.h $(COMPDIR)/fmt_pdf.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
 $(OBJDIR)/print_win32.o: $(COMPDIR)/print_win32.c $(COMPDIR)/print_win32.h | $(OBJDIR)

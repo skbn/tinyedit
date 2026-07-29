@@ -664,6 +664,8 @@ static int pcl_emit_attr(FILE *fp, unsigned short prev, unsigned short cur)
             return -1;
     }
 
+    /* Strike: PCL5 has no native strikethrough, silently ignored */
+
     return 0;
 }
 

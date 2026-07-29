@@ -946,6 +946,26 @@ static void render_cell(int row, int col, Cell *cell)
         SelectObject(hMemDC, hOldPen);
         DeleteObject(hPen);
     }
+
+    /* Draw strike line at mid-height */
+    if (attrs & A_STRIKE)
+    {
+        int sy = row * fh + fb / 2;
+        HPEN hPen;
+        HPEN hOldPen;
+
+        if (sy >= (row + 1) * fh)
+            sy = (row + 1) * fh - 1;
+
+        hPen = CreatePen(PS_SOLID, 1, s_rgb_map[s_cur_fg_idx]);
+        hOldPen = (HPEN)SelectObject(hMemDC, hPen);
+
+        MoveToEx(hMemDC, rect.left, sy, NULL);
+        LineTo(hMemDC, rect.right, sy);
+
+        SelectObject(hMemDC, hOldPen);
+        DeleteObject(hPen);
+    }
 }
 
 /* Force complete redraw (call after font change) */

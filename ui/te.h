@@ -137,8 +137,7 @@ typedef struct
     TeSpellCache spell_cache;        /* Cache for visible-word spell-check results */
 
 #ifdef HAVE_HYPHEN
-    void *hyph_handle;     /* HyphDict */
-    int hyph_wrap_enabled; /* Use hyphenation in hard-wrap mode */
+    void *hyph_handle; /* HyphDict */
 #endif
 
 #ifdef HAVE_MYTHES
@@ -309,6 +308,12 @@ TeApp *te_app_new(void);
 void te_app_free(TeApp *app);
 void te_init_colors(const TeConfig *cfg);
 TeTab *te_app_get_active_tab(TeApp *app);
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+/* Returns the active tab's hyphen-wrap toggle (0 if no tab/dict loaded) */
+int te_app_hyph_wrap_enabled(TeApp *app);
+#endif
+
 int te_app_add_tab(TeApp *app, TeTab *tab);
 int te_app_close_tab(TeApp *app, int index);
 void te_app_switch_tab(TeApp *app, int index);

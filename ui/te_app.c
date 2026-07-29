@@ -148,7 +148,6 @@ TeApp *te_app_new(void)
 
 #ifdef HAVE_HYPHEN
     app->hyph_handle = NULL;
-    app->hyph_wrap_enabled = 0; /* Will be set from config after loading */
 #endif
 
 #ifdef HAVE_MYTHES
@@ -267,6 +266,16 @@ TeTab *te_app_get_active_tab(TeApp *app)
     return app->tabs[app->active_tab];
 }
 
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+/* Returns the active tab's hyphen-wrap toggle (0 if no tab) */
+int te_app_hyph_wrap_enabled(TeApp *app)
+{
+    TeTab *tab = te_app_get_active_tab(app);
+
+    return tab ? tab->hyph_wrap_enabled : 0;
+}
+#endif
+
 /* Add tab to app */
 int te_app_add_tab(TeApp *app, TeTab *tab)
 {
@@ -299,6 +308,11 @@ int te_app_add_tab(TeApp *app, TeTab *tab)
 
     strncpy(tab->charset_out, app->cfg.charset_out, sizeof(tab->charset_out) - 1);
     tab->charset_out[sizeof(tab->charset_out) - 1] = '\0';
+
+#ifdef HAVE_HYPHEN
+    /* Inherit hyphen-wrap default from config */
+    tab->hyph_wrap_enabled = app->cfg.hyph_wrap_enabled;
+#endif
 
     app->tabs[app->tab_count] = tab;
     app->tab_count++;
@@ -681,10 +695,12 @@ void te_draw_titlebar(TeApp *app)
         if (app->spell_enabled && app->spell_active && app->spell_handle)
             snprintf(sp_buf, sizeof(sp_buf), "SP ");
 #endif
+
 #ifdef HAVE_HYPHEN
-        if (app->hard_wrap && app->hyph_wrap_enabled && app->hyph_handle)
+        if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
             snprintf(hy_buf, sizeof(hy_buf), "HY ");
 #endif
+
 #ifdef HAVE_TRANSLATE
         if (app->translate_active && app->translate_handle)
             snprintf(tr_buf, sizeof(tr_buf), "TR [%.7s]->[%.7s] ", app->cfg.translate_from_lang, app->cfg.translate_to_lang);
@@ -760,7 +776,7 @@ void te_draw_richbar(TeApp *app)
         break;
     }
 
-    snprintf(buf, sizeof(buf), " [B]old %s  [I]talic %s  [U]nderline %s  Align: %s ", (mask & EA_BOLD) ? "ON " : "off", (mask & EA_ITALIC) ? "ON " : "off", (mask & EA_UNDERLINE) ? "ON " : "off", align_name);
+    snprintf(buf, sizeof(buf), " [B]old %s  [I]talic %s  [U]nderline %s  [T]Strike %s  Align: %s ", (mask & EA_BOLD) ? "ON " : "off", (mask & EA_ITALIC) ? "ON " : "off", (mask & EA_UNDERLINE) ? "ON " : "off", (mask & EA_STRIKE) ? "ON " : "off", align_name);
 
     standend();
     attron(COLOR_PAIR(COL_STATUS));

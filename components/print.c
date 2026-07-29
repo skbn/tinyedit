@@ -24,8 +24,15 @@
 #include "layout.h"
 #include "fmt_pdf.h"
 #include "print.h"
+
+#if defined(PLATFORM_AMIGA)
 #include "print_amiga.h"
+#endif
+
+#if defined(PLATFORM_WIN32)
 #include "print_win32.h"
+#endif
+
 #include "../core/utf8.h"
 #include "../core/charset.h"
 
@@ -135,6 +142,20 @@ static int print_platform(const struct Ed *ed, const TeConfig *cfg, const char *
     int rc;
     int have_path = 0;
 
+    /* PWG raster mode: render via FreeType + GDI directly to printer DC */
+#ifdef HAVE_PRINTER
+    if (cfg && cfg->print_win32_mode == 1)
+    {
+        if (win32_print_raster_document(ed, cfg, file_path, hyph, hyph_user) == 0)
+            return 0;
+
+        print_seterr(err, errsz, "PWG raster printing failed");
+
+        return -1;
+    }
+#endif
+
+    /* RTF mode: use Rich Edit control for vector text printing */
     if (win32_print_rtf_document(ed, cfg, file_path) == 0)
         return 0;
 

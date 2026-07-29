@@ -232,12 +232,21 @@ Case-insensitive comparison
 These features can be toggled individually in Setup under "Editor Assistance"
 .Sh RICH TEXT AND LEGACY FORMATS
 .Nm te
-can load and save rich-text files in RTF 1.x and WordPerfect 4.1.12 - 4.2 formats
+can load and save rich-text files in RTF 1.x, WordPerfect 4.1.12 - 4.2, DOCX
+(Office Open XML / WordprocessingML) and ODT (OpenDocument Text v1.3) formats
 Files with the
-.Pa .rtf
+.Pa .rtf ,
+.Pa .wp / .wp4 ,
+.Pa .docx
 or
-.Pa .wp / .wp4
+.Pa .odt
 extension are routed through the corresponding importer/exporter
+DOCX and ODT are read and written through a bundled streaming ZIP
+reader/writer
+.Pq Pa core/zip_stream.c
+and a minimal pull-based XML parser
+.Pq Pa core/xml_lite.c ,
+with no external dependencies
 .Pp
 RTF files preserve bold, italic, underline and paragraph alignment
 Font and size are read from the file but are not written back, and color
@@ -245,6 +254,26 @@ information is dropped. Non-ASCII characters are emitted as
 \eu escapes with a
 .Sq ?
 fallback
+.Pp
+DOCX files preserve bold, italic, underline and paragraph alignment
+Text is stored UTF-8 in
+.Pa word/document.xml ;
+tabs and preserved spaces are handled
+.Li <w:autoHyphenation/>
+is emitted in
+.Pa word/settings.xml
+when hyphenation is enabled
+Font and size are not written
+.Pp
+ODT files preserve bold, italic, underline and paragraph alignment
+.Li fo:hyphenate="true"
+is read from paragraph styles and emitted back when hyphenation is enabled
+.Pa mimetype ,
+.Pa content.xml
+and
+.Pa styles.xml
+are stored in a deflate ZIP package
+Font and size are not written
 .Pp
 WordPerfect 4.1.12 - 4.2 files preserve bold, italic, underline and paragraph alignment
 Only 8-bit charsets (e.g. LATIN-1, CP850, CP1252) can be used for saving; UTF-8
@@ -338,7 +367,15 @@ PCL \(em PCL 5/6 for legacy laser and inkjet printers
 .It
 URF (Apple Raster) \(em required by AirPrint-compatible printers; requires
 FreeType (compile with
-.Sy USE_URF=1 )
+.Sy USE_PRINTER=1 )
+.It
+PWG Raster
+.Pq Sq image/pwg-raster
+\(em accepted by many IPP/AirPrint printers; requires FreeType
+.Pq Sy USE_PRINTER=1 .
+Export only (no round-trip), written when saving to a
+.Pa .pwg
+file
 .El
 .Ss Local Printing
 .Bl -bullet -compact
@@ -364,7 +401,16 @@ reads PrinterPrefs to identify the configured driver
 .Ss Network Printing (IPP / AirPrint)
 Optional IPP/IPPS client
 .Pq Sy USE_IPP=1
-sends jobs directly to network printers. Combined with mDNS/Bonjour
+sends jobs directly to network printers
+.Sy USE_IPP=1
+implies
+.Sy USE_PRINTER=1 ,
+since AirPrint printers commonly advertise
+.Sy image/urf
+or
+.Sy image/pwg-raster
+as their supported document formats
+Combined with mDNS/Bonjour
 discovery
 .Pq Pa core/mdns.c ,
 .Nm te

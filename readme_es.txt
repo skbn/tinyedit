@@ -16,7 +16,7 @@ Características principales:
 - Pegado con corchetes (Unix/Linux)
 - Texto a voz (TTS) vía espeak-ng en *nix, SAPI 5 en Windows, o narrator.device en AmigaOS (opcional, USE_TTS=1)
 - Corrector gramatical/estilístico experimental con packs de reglas derivados de los XML de LanguageTool (opcional, USE_GRAMMAR=1)
-- Impresión experimental integrada (PDF, PCL, URF; impresión de red IPP/AirPrint opcional; impresión nativa RichEdit en Windows. Persistencia de perfil por impresora)
+- Impresión experimental integrada (PDF, PCL, URF, PWG Raster; impresión de red IPP/AirPrint opcional; impresión nativa RichEdit en Windows. Persistencia de perfil por impresora)
 - Configurable vía archivo o menú
  
 Compilación
@@ -129,10 +129,15 @@ Charsets disponibles:
 - LATIN-2 (ISO-8859-2, Europeo central)
 
 Formatos de texto enriquecido y heredados
-tinyedit puede abrir y guardar archivos .rtf y .wp/.wp4 con soporte parcial de texto enriquecido
-Al cargar uno de esos archivos, el editor pasa a modo rico y los atajos de formato (Ctrl+Alt+B/I/U/L/E/R/J
+tinyedit puede abrir y guardar archivos .rtf, .wp/.wp4, .docx y .odt con soporte parcial de
+texto enriquecido. DOCX (Office Open XML) y ODT (OpenDocument Text v1.3) se leen/escriben
+mediante un lector/escritor de ZIP en streaming integrado (core/zip_stream.c) y un parser XML
+pull minimalista (core/xml_lite.c), sin dependencias externas. Al cargar uno de esos archivos,
+el editor pasa a modo rico y los atajos de formato (Ctrl+Alt+B/I/U/L/E/R/J
 en Unix/Windows, Alt+Shift+B/I/U/L/E/R/J en AmigaOS) quedan disponibles. RTF conserva negrita/cursiva/subrayado/alineación
-pero descarta el color. WP 4.1.12 - 4.2 requiere un charset de 8 bits para guardar y no almacena fuente
+pero descarta el color. DOCX y ODT conservan negrita/cursiva/subrayado/alineación y emiten el
+flag de partición (w:autoHyphenation / fo:hyphenate) cuando la partición está activa; no se
+guardan fuente ni tamaño. WP 4.1.12 - 4.2 requiere un charset de 8 bits para guardar y no almacena fuente
 ni tamaño. Para máxima compatibilidad con WordPerfect 4.1.12 - 4.2 se recomienda usar CP437 tanto
 al leer (View) como al guardar (Save), ya sea por archivo con F3 / Alt+C o como charset por defecto en Setup
 
@@ -146,7 +151,9 @@ Formatos de salida:
   calculan con FreeType a la resolución y tamaño de fuente de impresión configurados, para un layout
   de texto más preciso
 - PCL: PCL 5/6 para impresoras láser e inyección de tinta antiguas
-- URF (Apple Raster): requerido por impresoras compatibles con AirPrint; requiere FreeType (USE_URF=1)
+- URF (Apple Raster): requerido por impresoras compatibles con AirPrint; requiere FreeType (USE_PRINTER=1)
+- PWG Raster (image/pwg-raster): aceptado por muchas impresoras IPP/AirPrint; requiere FreeType
+  (USE_PRINTER=1). Solo exportación (sin ida y vuelta), se escribe al guardar en un archivo .pwg
 
 Impresión local:
 - Unix: envía el PDF generado a lp (fallback lpr); CUPS se encarga del resto. Se puede indicar una
@@ -159,10 +166,12 @@ Impresión local:
   para identificar el driver configurado
 
 Impresión de red (IPP / AirPrint):
-Cliente IPP/IPPS opcional (USE_IPP=1) que envía trabajos directamente a impresoras de red. Combinado con
-el descubrimiento mDNS/Bonjour, tinyedit puede encontrar impresoras AirPrint en la LAN, consultar sus
-capacidades (tamaños de media, dúplex, color, calidad, copias, orientación, número-por-hoja, sources,
-types, resoluciones) vía Get-Printer-Attributes, y enviar trabajos con Print-Job. TLS (ipps://) se
+Cliente IPP/IPPS opcional (USE_IPP=1) que envía trabajos directamente a impresoras de red.
+USE_IPP=1 implica USE_PRINTER=1, ya que las impresoras AirPrint suelen anunciar image/urf o
+image/pwg-raster como formatos de documento soportados. Combinado con el descubrimiento
+mDNS/Bonjour, tinyedit puede encontrar impresoras AirPrint en la LAN, consultar sus capacidades
+(tamaños de media, dúplex, color, calidad, copias, orientación, número-por-hoja, sources, types,
+resoluciones) vía Get-Printer-Attributes, y enviar trabajos con Print-Job. TLS (ipps://) se
 soporta vía el cliente HTTP de la plataforma; en AmigaOS requiere AmiSSL (WITH_AMISSL=1)
 
 Opciones de impresión:

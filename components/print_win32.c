@@ -17,6 +17,8 @@
 #include "print_win32.h"
 #include "editor.h"
 #include "fmt_rtf.h"
+#include "fmt_pwg.h"
+#include "layout.h"
 
 #ifdef PLATFORM_WIN32
 
@@ -25,7 +27,7 @@
 #include <shellapi.h>
 #include <richedit.h>
 
-#if defined(USE_FREETYPE) || defined(HAVE_URF)
+#if defined(USE_FREETYPE) || defined(HAVE_PRINTER)
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #endif
@@ -35,6 +37,11 @@
 #endif
 
 #define WIN32_PRINT_MARGIN_TWIPS 1440
+
+/* CUPS Raster v2 page header size (used by PWG raster printing) */
+#ifndef CUPS_RASTER_HEADER_SIZE
+#define CUPS_RASTER_HEADER_SIZE 1796
+#endif
 
 typedef struct
 {
@@ -137,6 +144,7 @@ static void w32_paper_to_ipp(WORD dmpaper, char *out, size_t outsz)
         break;
     default:
         snprintf(buf, sizeof(buf), "custom_dmpaper_%d", (int)dmpaper);
+
         k = buf;
         break;
     }
@@ -295,6 +303,7 @@ int win32_default_printer(char *out, size_t outsz)
         return -1;
 
     out[0] = '\0';
+
     count = (DWORD)(sizeof(wbuf) / sizeof(wbuf[0]));
 
     if (!GetDefaultPrinterW(wbuf, &count))
@@ -803,7 +812,7 @@ static int w32_rtf_cleanup(FILE *fp, unsigned char *rtf, HANDLE printer, DEVMODE
     return rc;
 }
 
-#if defined(USE_FREETYPE) || defined(HAVE_URF)
+#if defined(USE_FREETYPE) || defined(HAVE_PRINTER)
 static int w32_get_ttf_family(const char *path, char *out, size_t outsz)
 {
     FT_Library lib = NULL;
@@ -1071,6 +1080,437 @@ int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const cha
     return w32_rtf_cleanup(fp, rtf, printer, dm, hdc, module, rich, rc);
 }
 
+/* Read a 32-bit big-endian value from a buffer */
+static unsigned int pwg_read_u32_be(const unsigned char *p)
+{
+    return ((unsigned int)p[0] << 24) | ((unsigned int)p[1] << 16) | ((unsigned int)p[2] << 8) | (unsigned int)p[3];
+}
+
+/* Decode one RLE-compressed scanline (same algorithm as URF/PWG RLE). Writes decoded pixels into dst (width bytes expected) */
+static int pwg_decode_rle_line(const unsigned char *src, int src_len, unsigned char *dst, int width)
+{
+    int si = 0;
+    int di = 0;
+
+    /* Skip the leading 0 byte */
+    if (si < src_len && src[si] == 0)
+        si++;
+    else
+        return -1;
+
+    while (si < src_len && di < width)
+    {
+        unsigned char code = src[si++];
+
+        if (code == 0)
+        {
+            /* Literal single pixel */
+            if (si >= src_len)
+                return -1;
+
+            dst[di++] = src[si++];
+        }
+        else
+        {
+            /* Run of (code+1) pixels */
+            int run = (int)code + 1;
+
+            if (si >= src_len || di + run > width)
+                return -1;
+
+            memset(dst + di, src[si++], (size_t)run);
+
+            di += run;
+        }
+    }
+
+    if (di != width)
+        return -1;
+
+    return si;
+}
+
+/* Read an entire file into a malloc'd buffer; returns size or -1 */
+static unsigned char *w32_read_file_all(const char *path, size_t *out_size)
+{
+    FILE *fp = NULL;
+    long size;
+    unsigned char *buf = NULL;
+
+    fp = fopen(path, "rb");
+
+    if (!fp)
+        return NULL;
+
+    if (fseek(fp, 0, SEEK_END) != 0)
+    {
+        fclose(fp);
+        return NULL;
+    }
+
+    size = ftell(fp);
+
+    if (size <= 0)
+    {
+        fclose(fp);
+        return NULL;
+    }
+
+    if (fseek(fp, 0, SEEK_SET) != 0)
+    {
+        fclose(fp);
+        return NULL;
+    }
+
+    buf = (unsigned char *)malloc((size_t)size);
+
+    if (!buf)
+    {
+        fclose(fp);
+        return NULL;
+    }
+
+    if (fread(buf, 1, (size_t)size, fp) != (size_t)size)
+    {
+        free(buf);
+
+        fclose(fp);
+        return NULL;
+    }
+
+    fclose(fp);
+
+    *out_size = (size_t)size;
+
+    return buf;
+}
+
+/* Render PWG raster pages from file_buf onto hdc; returns 0 on success */
+static int win32_render_pwg_pages(HDC hdc, const unsigned char *file_buf, size_t file_size)
+{
+    size_t offset = 0;
+
+    struct
+    {
+        BITMAPINFOHEADER hdr;
+        RGBQUAD pal[256];
+    } bmi;
+
+    while (offset + CUPS_RASTER_HEADER_SIZE <= file_size)
+    {
+        unsigned int page_w, page_h, bytes_per_line;
+        unsigned char *page_buf = NULL;
+        size_t data_offset;
+        size_t src_pos;
+        int decode_ok;
+        unsigned int yy;
+        int print_w, print_h;
+        int i;
+
+        /* Read page header fields */
+        page_w = pwg_read_u32_be(file_buf + offset + 812);
+        page_h = pwg_read_u32_be(file_buf + offset + 816);
+        bytes_per_line = pwg_read_u32_be(file_buf + offset + 832);
+
+        /* Check for end-of-document (all-zero header) */
+        if (page_w == 0 && page_h == 0)
+            break;
+
+        if (page_w == 0 || page_h == 0 || bytes_per_line == 0)
+            break;
+
+        if (page_w > 16384 || page_h > 16384)
+            break;
+
+        data_offset = offset + CUPS_RASTER_HEADER_SIZE;
+
+        /* Allocate buffers */
+        page_buf = (unsigned char *)malloc((size_t)page_w * page_h);
+
+        if (!page_buf)
+        {
+            AbortDoc(hdc);
+
+            return -1;
+        }
+
+        /* Decode RLE lines */
+        src_pos = data_offset;
+        decode_ok = 1;
+
+        for (yy = 0; yy < page_h; yy++)
+        {
+            /* Find the end of this RLE line in the buffer. We need to decode it to know how many bytes it consumes. Estimate: each line is at most bytes_per_line * 2 + 1 bytes */
+            int remaining = (int)(file_size - src_pos);
+            int consumed;
+
+            if (remaining <= 0)
+            {
+                decode_ok = 0;
+                break;
+            }
+
+            consumed = pwg_decode_rle_line(file_buf + src_pos, remaining, page_buf + (size_t)yy * page_w, (int)page_w);
+
+            if (consumed < 0)
+            {
+                decode_ok = 0;
+                break;
+            }
+
+            src_pos += (size_t)consumed;
+        }
+
+        if (!decode_ok)
+        {
+            free(page_buf);
+
+            AbortDoc(hdc);
+
+            return -1;
+        }
+
+        offset = src_pos;
+
+        /* Render the page to the printer DC */
+        if (StartPage(hdc) <= 0)
+        {
+            free(page_buf);
+
+            AbortDoc(hdc);
+
+            return -1;
+        }
+
+        memset(&bmi, 0, sizeof(bmi));
+
+        bmi.hdr.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.hdr.biWidth = (LONG)page_w;
+        bmi.hdr.biHeight = -(LONG)page_h; /* top-down */
+        bmi.hdr.biPlanes = 1;
+        bmi.hdr.biBitCount = 8;
+        bmi.hdr.biCompression = BI_RGB;
+        bmi.hdr.biSizeImage = (DWORD)(page_w * page_h);
+
+        /* Fill grayscale palette: 0=black, 255=white */
+        for (i = 0; i < 256; i++)
+        {
+            bmi.pal[i].rgbRed = (BYTE)i;
+            bmi.pal[i].rgbGreen = (BYTE)i;
+            bmi.pal[i].rgbBlue = (BYTE)i;
+            bmi.pal[i].rgbReserved = 0;
+        }
+
+        /* Get printer DC printable area and stretch bitmap to fit */
+        print_w = GetDeviceCaps(hdc, HORZRES);
+        print_h = GetDeviceCaps(hdc, VERTRES);
+
+        if (print_w > 0 && print_h > 0)
+            StretchDIBits(hdc, 0, 0, print_w, print_h, 0, 0, page_w, page_h, page_buf, (BITMAPINFO *)&bmi, DIB_RGB_COLORS, SRCCOPY);
+        else
+            SetDIBitsToDevice(hdc, 0, 0, page_w, page_h, 0, 0, 0, page_h, page_buf, (BITMAPINFO *)&bmi, DIB_RGB_COLORS);
+
+        if (EndPage(hdc) <= 0)
+        {
+            free(page_buf);
+
+            AbortDoc(hdc);
+
+            return -1;
+        }
+
+        free(page_buf);
+    }
+
+    if (EndDoc(hdc) <= 0)
+        return -1;
+
+    return 0;
+}
+
+int win32_print_raster_document(const struct Ed *ed, const TeConfig *cfg, const char *job_name, LayoutHyphenFn hyph, void *hyph_user)
+{
+    wchar_t wtmpdir[MAX_PATH];
+    wchar_t wpath[MAX_PATH];
+    char path[MAX_PATH];
+    FILE *fp = NULL;
+    HANDLE printer = NULL;
+    DEVMODEW *dm = NULL;
+    HDC hdc = NULL;
+    wchar_t wprinter[512];
+    wchar_t wjob[TE_CFG_STR_MAX];
+    DWORD count;
+    LONG dm_size;
+    DOCINFOW doc;
+    unsigned char *file_buf = NULL;
+    size_t file_size = 0;
+    int rc = -1;
+    char err[256];
+    char warn[256];
+
+    if (!ed)
+        return -1;
+
+    /* Export to PWG raster temp file */
+    if (GetTempPathW(MAX_PATH, wtmpdir) == 0)
+        return -1;
+
+    _snwprintf(wpath, MAX_PATH, L"%ste_pwg.raster", wtmpdir);
+
+    WideCharToMultiByte(CP_UTF8, 0, wpath, -1, path, MAX_PATH, NULL, NULL);
+
+    fp = fopen(path, "wb");
+
+    if (!fp)
+        return -1;
+
+    err[0] = '\0';
+    warn[0] = '\0';
+
+    if (pwg_export_ex(ed, fp, cfg, hyph, hyph_user, err, sizeof(err), warn, sizeof(warn)) != 0)
+    {
+        fclose(fp);
+
+        remove(path);
+
+        return -1;
+    }
+
+    fclose(fp);
+
+    /* Read the raster file back */
+    file_buf = w32_read_file_all(path, &file_size);
+
+    if (!file_buf)
+    {
+        remove(path);
+        return -1;
+    }
+
+    /* Open printer and create DC with DEVMODE */
+    memset(wprinter, 0, sizeof(wprinter));
+
+    if (cfg && cfg->print_local_name[0])
+        w32_utf8_to_utf16(cfg->print_local_name, wprinter, (int)(sizeof(wprinter) / sizeof(wprinter[0])));
+    else
+    {
+        count = (DWORD)(sizeof(wprinter) / sizeof(wprinter[0]));
+
+        if (!GetDefaultPrinterW(wprinter, &count))
+        {
+            free(file_buf);
+
+            remove(path);
+
+            return -1;
+        }
+    }
+
+    if (!OpenPrinterW(wprinter, &printer, NULL))
+    {
+        free(file_buf);
+
+        remove(path);
+
+        return -1;
+    }
+
+    dm_size = DocumentPropertiesW(NULL, printer, wprinter, NULL, NULL, 0);
+
+    if (dm_size <= 0)
+    {
+        ClosePrinter(printer);
+
+        free(file_buf);
+
+        remove(path);
+
+        return -1;
+    }
+
+    dm = (DEVMODEW *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (SIZE_T)dm_size);
+
+    if (!dm || DocumentPropertiesW(NULL, printer, wprinter, dm, NULL, DM_OUT_BUFFER) < 0)
+    {
+        if (dm)
+            HeapFree(GetProcessHeap(), 0, dm);
+
+        ClosePrinter(printer);
+
+        free(file_buf);
+
+        remove(path);
+
+        return -1;
+    }
+
+    w32_apply_devmode(dm, cfg);
+
+    if (DocumentPropertiesW(NULL, printer, wprinter, dm, dm, DM_IN_BUFFER | DM_OUT_BUFFER) < 0)
+    {
+        HeapFree(GetProcessHeap(), 0, dm);
+
+        ClosePrinter(printer);
+
+        free(file_buf);
+
+        remove(path);
+        return -1;
+    }
+
+    hdc = CreateDCW(NULL, wprinter, NULL, dm);
+
+    if (!hdc)
+    {
+        HeapFree(GetProcessHeap(), 0, dm);
+
+        ClosePrinter(printer);
+
+        free(file_buf);
+
+        remove(path);
+        return -1;
+    }
+
+    /* Start the print job */
+    memset(&doc, 0, sizeof(doc));
+
+    doc.cbSize = sizeof(doc);
+
+    if (job_name && job_name[0])
+    {
+        w32_utf8_to_utf16(job_name, wjob, (int)(sizeof(wjob) / sizeof(wjob[0])));
+        doc.lpszDocName = wjob;
+    }
+
+    if (StartDocW(hdc, &doc) <= 0)
+    {
+        DeleteDC(hdc);
+
+        HeapFree(GetProcessHeap(), 0, dm);
+
+        ClosePrinter(printer);
+
+        free(file_buf);
+
+        remove(path);
+        return -1;
+    }
+
+    /* 5. Parse and render each page */
+    rc = win32_render_pwg_pages(hdc, file_buf, file_size);
+
+    DeleteDC(hdc);
+    HeapFree(GetProcessHeap(), 0, dm);
+
+    ClosePrinter(printer);
+
+    free(file_buf);
+    remove(path);
+
+    return rc;
+}
+
 int win32_print_file(const char *printer_name, const char *file_path)
 {
     wchar_t wfile[MAX_PATH];
@@ -1087,6 +1527,7 @@ int win32_print_file(const char *printer_name, const char *file_path)
         wchar_t wprinter[256];
 
         w32_utf8_to_utf16(printer_name, wprinter, (int)(sizeof(wprinter) / sizeof(wprinter[0])));
+
         _snwprintf(wparams, sizeof(wparams) / sizeof(wparams[0]), L"\"%s\"", wprinter);
 
         h = ShellExecuteW(NULL, L"printto", wfile, wparams, NULL, SW_HIDE);
@@ -1123,6 +1564,11 @@ int win32_get_printer_info(const char *printer_name, Win32PrinterInfo *info)
 }
 
 int win32_print_file(const char *printer_name, const char *file_path)
+{
+    return -1;
+}
+
+int win32_print_raster_document(const struct Ed *ed, const TeConfig *cfg, const char *job_name, LayoutHyphenFn hyph, void *hyph_user)
 {
     return -1;
 }

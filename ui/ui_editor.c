@@ -177,7 +177,7 @@ char *wrap_paste_text(TeApp *app, const char *utf8, int col)
 #ifdef HAVE_HYPHEN
     int use_hyphen = 0;
 
-    use_hyphen = app && app->hyph_wrap_enabled && app->hyph_handle;
+    use_hyphen = app && te_app_hyph_wrap_enabled(app) && app->hyph_handle;
 #endif
 
     if (col <= 0)
@@ -447,7 +447,7 @@ void ed_auto_rewrap_after_edit(TeApp *app)
         return;
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-    if (app->hyph_wrap_enabled && app->hyph_handle)
+    if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
     {
         hyph = ui_layout_hyphen;
         hyph_user = app;
@@ -478,7 +478,7 @@ void ed_auto_rewrap_after_edit_silent(TeApp *app)
         return;
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-    if (app->hyph_wrap_enabled && app->hyph_handle)
+    if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
     {
         hyph = ui_layout_hyphen;
         hyph_user = app;
@@ -952,8 +952,8 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     align_ind = line_align_indent(cur_align, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width - hyph_reserve);
     eff_ln_offset = ln_offset + align_ind;
 
-    /* Justify intermediate sub-rows and single-line paragraphs */
-    is_para_last = (seg_end == len) && (cur_brk == LB_PARA);
+    /* Justify intermediate sub-rows; hyphen-broken lines never justified */
+    is_para_last = (seg_end == len) && (cur_brk == LB_PARA || cur_brk == LB_HYPHEN);
 
     if (ed_segment_should_justify(cur_align, is_para_last, seg_start == 0 && seg_end == len) && seg_len > 0 && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
     {

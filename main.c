@@ -44,6 +44,8 @@ extern int amiga_add_ttf_fallback(const char *path, int size);
 #include "ui/ui_files.h"
 #include "components/fmt_rtf.h"
 #include "components/fmt_wp4.h"
+#include "components/fmt_docx.h"
+#include "components/fmt_odt.h"
 #include "ui/ui_editor_helper.h"
 #include "ui/ui_view.h"
 #include "core/charset.h"
@@ -109,6 +111,18 @@ static void ui_init_locale(void)
         }
     }
 #endif
+}
+
+/* Enable rich mode on app+active tab; hyph enables hyphen wrap on tab */
+static void enable_rich_mode(TeApp *app, TeTab *tab, int hyph)
+{
+    app->rich_mode = 1;
+
+    if (te_app_get_active_tab(app))
+        te_app_get_active_tab(app)->rich_mode = 1;
+
+    if (hyph && app->hyph_handle)
+        tab->hyph_wrap_enabled = 1;
 }
 
 int main(int argc, char **argv)
@@ -440,8 +454,6 @@ int main(int argc, char **argv)
 
 #ifdef HAVE_HYPHEN
     hyph_load_from_config(app);
-
-    app->hyph_wrap_enabled = cfg.hyph_wrap_enabled;
 #endif
 
 #ifdef HAVE_MYTHES
@@ -515,11 +527,13 @@ int main(int argc, char **argv)
                     char rerr[128];
                     char rwarn[128];
                     int rc;
+                    int hyph = 0;
 
                     if (fp)
                     {
                         ed_clear_undo_redo(tab->editor);
-                        rc = rtf_import(tab->editor, fp, rerr, sizeof(rerr), rwarn, sizeof(rwarn));
+
+                        rc = rtf_import(tab->editor, fp, rerr, sizeof(rerr), rwarn, sizeof(rwarn), &hyph);
 
                         /* Paragraph format: join the wraps, hard mode reflows them */
                         if (rc == 0)
@@ -530,12 +544,7 @@ int main(int argc, char **argv)
                         if (rc != 0)
                             te_status(app, "RTF error: %s", rerr);
                         else
-                        {
-                            app->rich_mode = 1;
-
-                            if (te_app_get_active_tab(app))
-                                te_app_get_active_tab(app)->rich_mode = 1;
-                        }
+                            enable_rich_mode(app, tab, hyph);
 
                         if (rc == 0 && rwarn[0])
                             te_status(app, "Loaded: %s (%s)", argv[1], rwarn);
@@ -543,10 +552,7 @@ int main(int argc, char **argv)
                     else
                     {
                         /* Enable rich mode for new files from the start */
-                        app->rich_mode = 1;
-
-                        if (te_app_get_active_tab(app))
-                            te_app_get_active_tab(app)->rich_mode = 1;
+                        enable_rich_mode(app, tab, 0);
 
                         te_status(app, "New file: %s", argv[1]);
                     }
@@ -557,24 +563,20 @@ int main(int argc, char **argv)
                     char werr[128];
                     char wwarn[128];
                     int rc;
+                    int hyph = 0;
 
                     if (fp)
                     {
                         ed_clear_undo_redo(tab->editor);
 
-                        rc = wp4_import(tab->editor, fp, app->charset_in, werr, sizeof(werr), wwarn, sizeof(wwarn));
+                        rc = wp4_import(tab->editor, fp, app->charset_in, werr, sizeof(werr), wwarn, sizeof(wwarn), &hyph);
 
                         fclose(fp);
 
                         if (rc != 0)
                             te_status(app, "WP error: %s", werr);
                         else
-                        {
-                            app->rich_mode = 1;
-
-                            if (te_app_get_active_tab(app))
-                                te_app_get_active_tab(app)->rich_mode = 1;
-                        }
+                            enable_rich_mode(app, tab, hyph);
 
                         if (rc == 0 && wwarn[0])
                             te_status(app, "Loaded: %s (%s)", argv[1], wwarn);
@@ -582,13 +584,50 @@ int main(int argc, char **argv)
                     else
                     {
                         /* New WP document: enable rich mode from the start */
-                        app->rich_mode = 1;
-
-                        if (te_app_get_active_tab(app))
-                            te_app_get_active_tab(app)->rich_mode = 1;
+                        enable_rich_mode(app, tab, 0);
 
                         te_status(app, "New file: %s", argv[1]);
                     }
+                }
+                else if (ui_files_is_docx(argv[1]))
+                {
+                    char derr[128];
+                    int rc;
+                    int hyph = 0;
+
+                    derr[0] = '\0';
+
+                    ed_clear_undo_redo(tab->editor);
+
+                    rc = docx_import(tab->editor, argv[1], derr, sizeof(derr), &hyph);
+
+                    if (rc == 0)
+                        ed_join_breaks(tab->editor);
+
+                    if (rc != 0)
+                        te_status(app, "DOCX error: %s", derr);
+                    else
+                        enable_rich_mode(app, tab, hyph);
+                }
+                else if (ui_files_is_odt(argv[1]))
+                {
+                    char oerr[128];
+                    int rc;
+                    int hyph = 0;
+
+                    oerr[0] = '\0';
+
+                    ed_clear_undo_redo(tab->editor);
+
+                    rc = odt_import(tab->editor, argv[1], oerr, sizeof(oerr), &hyph);
+
+                    if (rc == 0)
+                        ed_join_breaks(tab->editor);
+
+                    if (rc != 0)
+                        te_status(app, "ODT error: %s", oerr);
+                    else
+                        enable_rich_mode(app, tab, hyph);
                 }
                 else if (is_utf8)
                 {
@@ -635,6 +674,10 @@ int main(int argc, char **argv)
 
                 /* Hard mode: fit the document to the configured column */
                 ui_editor_rewrap_loaded(app);
+
+                /* Loading is not an editing action: clear modified + undo */
+                ed_set_modified(tab->editor, 0);
+                ed_clear_undo_redo(tab->editor);
 
                 if (detected > 0)
                     te_status(app, "Detected %d wrap-hyphens", detected);

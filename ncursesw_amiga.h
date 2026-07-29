@@ -253,6 +253,7 @@ extern int COLORS;
 #define A_ATTRIBUTES 0xffff0000UL
 #define A_ALTCHARSET 0x00400000UL
 #define A_INVIS 0x00800000UL
+#define A_STRIKE 0x00010000UL
 
 /* Attribute macros */
 #define COLOR_PAIR(n) (((unsigned long)(n)) << 24)

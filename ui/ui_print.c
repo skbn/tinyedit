@@ -26,10 +26,22 @@
 #ifdef HAVE_IPP
 #include "../components/fmt_pdf.h"
 #include "../components/fmt_pcl.h"
+
+#if defined(HAVE_PRINTER)
 #include "../components/fmt_urf.h"
+#include "../components/fmt_pwg.h"
+#endif
+
 #include "../components/ipp.h"
+
+#if defined(PLATFORM_AMIGA)
 #include "../components/print_amiga.h"
+#endif
+
+#if defined(PLATFORM_WIN32)
 #include "../components/print_win32.h"
+#endif
+
 #include "../core/mdns.h"
 #include "../core/printer_cache.h"
 #endif
@@ -975,8 +987,8 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
     const char *ident = NULL;
     const char *st = NULL;
     char title[128];
-    char labels[17][96];
-    const char *items[18];
+    char labels[18][96];
+    const char *items[19];
     int idx_fmt = -1;
     int idx_media = -1;
     int idx_sides = -1;
@@ -992,6 +1004,11 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
     int idx_margin_right = -1;
     int idx_margin_top = -1;
     int idx_margin_bottom = -1;
+
+#if defined(PLATFORM_WIN32) && defined(HAVE_PRINTER)
+    int idx_win32_mode = -1;
+#endif
+
     int idx_back = -1;
     int idx_save = -1;
     int n = 0;
@@ -1041,6 +1058,11 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
         idx_margin_right = -1;
         idx_margin_top = -1;
         idx_margin_bottom = -1;
+
+#if defined(PLATFORM_WIN32) && defined(HAVE_PRINTER)
+        idx_win32_mode = -1;
+#endif
+
         idx_back = -1;
         idx_save = -1;
         n = 0;
@@ -1236,6 +1258,15 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
         items[n] = labels[n];
         n++;
 
+#if defined(PLATFORM_WIN32) && defined(HAVE_PRINTER)
+        idx_win32_mode = n;
+
+        snprintf(labels[n], sizeof(labels[n]), "Print mode: %s", work.print_win32_mode == 1 ? "PWG raster" : "RTF (Rich Edit)");
+
+        items[n] = labels[n];
+        n++;
+#endif
+
         idx_back = n;
         items[n] = "Back";
         n++;
@@ -1328,6 +1359,35 @@ static int wiz_run_submenus(TeApp *app, TeConfig *cfg, const IppPrinterInfo *inf
         {
             changed = wiz_edit_margin("Bottom margin", work.print_margin_bottom_mm, &work.print_margin_bottom_mm, &dirty);
         }
+#if defined(PLATFORM_WIN32) && defined(HAVE_PRINTER)
+        else if (choice == idx_win32_mode)
+        {
+            const char *modes[2];
+            int n_modes = 0;
+            int sel;
+            char mtitle[64];
+
+            modes[n_modes++] = "RTF (Rich Edit)";
+            modes[n_modes++] = "PWG raster (FreeType + GDI)";
+
+            sel = work.print_win32_mode == 1 ? 1 : 0;
+
+            snprintf(mtitle, sizeof(mtitle), "Print mode (current: %s)", sel ? "PWG raster" : "RTF");
+
+            sel = ui_popup_list(mtitle, modes, n_modes, sel);
+
+            if (sel >= 0 && sel < n_modes)
+            {
+                if (work.print_win32_mode != sel)
+                {
+                    work.print_win32_mode = sel;
+                    dirty = 1;
+                }
+            }
+
+            changed = 0;
+        }
+#endif
 
         if (changed < 0)
             continue;
@@ -1987,6 +2047,7 @@ static void ui_print_ipp_job(TeApp *app, Ed *ed, TeConfig *cfg, const char *uri)
 
         if (ipp_get_printer_info(uri, &probe, probe_err, sizeof(probe_err)) == 0)
         {
+            /* Priority: PDF > PCL > URF > PWG > first available */
             for (i = 0; i < probe.n_formats; i++)
             {
                 if (strcmp(probe.formats[i], "application/pdf") == 0)
@@ -2010,6 +2071,36 @@ static void ui_print_ipp_job(TeApp *app, Ed *ed, TeConfig *cfg, const char *uri)
                 }
             }
 
+#if defined(HAVE_PRINTER)
+            if (!doc_fmt[0])
+            {
+                for (i = 0; i < probe.n_formats; i++)
+                {
+                    if (strcmp(probe.formats[i], "image/urf") == 0)
+                    {
+                        strncpy(doc_fmt, probe.formats[i], sizeof(doc_fmt) - 1);
+                        doc_fmt[sizeof(doc_fmt) - 1] = '\0';
+
+                        break;
+                    }
+                }
+            }
+
+            if (!doc_fmt[0])
+            {
+                for (i = 0; i < probe.n_formats; i++)
+                {
+                    if (strcmp(probe.formats[i], "image/pwg-raster") == 0)
+                    {
+                        strncpy(doc_fmt, probe.formats[i], sizeof(doc_fmt) - 1);
+                        doc_fmt[sizeof(doc_fmt) - 1] = '\0';
+
+                        break;
+                    }
+                }
+            }
+#endif
+
             if (!doc_fmt[0] && probe.n_formats > 0)
             {
                 strncpy(doc_fmt, probe.formats[0], sizeof(doc_fmt) - 1);
@@ -2024,9 +2115,20 @@ static void ui_print_ipp_job(TeApp *app, Ed *ed, TeConfig *cfg, const char *uri)
         }
     }
 
-    if (strcmp(doc_fmt, "application/pdf") != 0 && !fmt_is_pcl(doc_fmt) && strcmp(doc_fmt, "image/urf") != 0)
+    if (strcmp(doc_fmt, "application/pdf") != 0 && !fmt_is_pcl(doc_fmt)
+#if defined(HAVE_PRINTER)
+        && strcmp(doc_fmt, "image/urf") != 0 && strcmp(doc_fmt, "image/pwg-raster") != 0
+#endif
+    )
     {
-        te_status(app, "Cannot print: printer wants %s, tinyedit only generates application/pdf, PCL and URF", doc_fmt);
+        te_status(app, "Cannot print: printer wants %s, tinyedit only generates application/pdf, PCL%s",
+                  doc_fmt,
+#if defined(HAVE_PRINTER)
+                  ", URF and PWG"
+#else
+                  ""
+#endif
+        );
         return;
     }
 
@@ -2043,7 +2145,7 @@ static void ui_print_ipp_job(TeApp *app, Ed *ed, TeConfig *cfg, const char *uri)
     }
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-    if (app->hyph_wrap_enabled && app->hyph_handle)
+    if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
     {
         hy = ui_layout_hyphen;
         hy_user = app;
@@ -2052,8 +2154,12 @@ static void ui_print_ipp_job(TeApp *app, Ed *ed, TeConfig *cfg, const char *uri)
 
     if (strcmp(doc_fmt, "application/pdf") == 0)
         prc = pdf_export_ex(ed, mem, cfg, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
+#if defined(HAVE_PRINTER)
     else if (strcmp(doc_fmt, "image/urf") == 0)
         prc = urf_export_ex(ed, mem, cfg, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
+    else if (strcmp(doc_fmt, "image/pwg-raster") == 0)
+        prc = pwg_export_ex(ed, mem, cfg, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
+#endif
     else
         prc = pcl_export_ex(ed, mem, cfg, hy, hy_user, err, sizeof(err), warn, sizeof(warn));
 
@@ -2232,7 +2338,7 @@ void ui_editor_print(TeApp *app)
             warn[0] = '\0';
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-            if (app->hyph_wrap_enabled && app->hyph_handle)
+            if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
             {
                 hy = ui_layout_hyphen;
                 hy_user = app;

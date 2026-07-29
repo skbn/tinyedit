@@ -27,6 +27,9 @@ typedef struct
     int show_line_numbers;
     int syntax_lang;
     int rich_mode;
+
+    /* Per-tab hyphenation toggle (Alt+E), dict shared on TeApp */
+    int hyph_wrap_enabled;
 } TeTab;
 
 TeTab *te_tab_new(void);

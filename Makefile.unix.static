@@ -25,7 +25,13 @@ USE_STARDICT ?= 1
 USE_TTS ?= 1
 USE_GRAMMAR ?= 1
 USE_IPP ?= 1
-USE_URF ?= 1
+USE_PRINTER ?= 1
+
+# USE_IPP implies USE_PRINTER: AirPrint printers commonly require URF/PWG
+# raster formats, so IPP without raster export would only reach PDF/PCL printers.
+ifeq ($(USE_IPP),1)
+  USE_PRINTER := 1
+endif
 
 # Detect OS
 OS := $(shell uname -s)
@@ -44,9 +50,9 @@ ifneq ($(BSD_OS),)
   CDEFS += -DPLATFORM_BSD
 endif
 
-# URF (Apple Raster) support. Requires FreeType.
-ifeq ($(USE_URF),1)
-  CDEFS += -DHAVE_URF
+# Printer raster support (URF + PWG). Requires FreeType.
+ifeq ($(USE_PRINTER),1)
+  CDEFS += -DHAVE_PRINTER
   URF_CFLAGS := $(shell pkg-config --cflags freetype2 2>/dev/null)
   URF_LIB := $(shell pkg-config --libs freetype2 2>/dev/null)
   ifeq ($(URF_LIB),)
@@ -168,8 +174,8 @@ UIDIR = $(HERE)ui
 
 # Object files in objs/
 CORE_OBJS = $(OBJDIR)/charset.o $(OBJDIR)/clipboard.o $(OBJDIR)/keys.o \
-            $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/portable.o $(OBJDIR)/mdns.o $(OBJDIR)/printer_cache.o
-COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/fmt_pcl.o $(OBJDIR)/fmt_urf.o $(OBJDIR)/print.o $(OBJDIR)/print_amiga.o $(OBJDIR)/print_win32.o
+            $(OBJDIR)/search.o $(OBJDIR)/utf8.o $(OBJDIR)/portable.o $(OBJDIR)/mdns.o $(OBJDIR)/printer_cache.o $(OBJDIR)/zip_stream.o $(OBJDIR)/xml_lite.o
+COMP_OBJS = $(OBJDIR)/editor.o $(OBJDIR)/undo.o $(OBJDIR)/layout.o $(OBJDIR)/ed_attr.o $(OBJDIR)/config.o $(OBJDIR)/editor_helper.o $(OBJDIR)/fmt_rtf.o $(OBJDIR)/fmt_wp4.o $(OBJDIR)/fmt_docx.o $(OBJDIR)/fmt_odt.o $(OBJDIR)/fmt_pdf.o $(OBJDIR)/fmt_pcl.o $(OBJDIR)/fmt_urf.o $(OBJDIR)/fmt_pwg.o $(OBJDIR)/print.o
 UI_OBJS   = $(OBJDIR)/te_app.o $(OBJDIR)/ui_editor.o $(OBJDIR)/ui_view.o $(OBJDIR)/ui_keys.o $(OBJDIR)/ui_editor_helper.o $(OBJDIR)/ui_popup.o \
             $(OBJDIR)/ui_files.o $(OBJDIR)/ui_setup.o $(OBJDIR)/ui_glyph_picker.o \
             $(OBJDIR)/tabs.o $(OBJDIR)/wm.o $(OBJDIR)/ui_tabs.o $(OBJDIR)/ui_mouse.o $(OBJDIR)/ui_assist.o $(OBJDIR)/ui_print.o \
@@ -228,6 +234,12 @@ $(OBJDIR)/search.o: $(COREDIR)/search.c $(COREDIR)/search.h | $(OBJDIR)
 $(OBJDIR)/utf8.o: $(COREDIR)/utf8.c $(COREDIR)/utf8.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
+$(OBJDIR)/zip_stream.o: $(COREDIR)/zip_stream.c $(COREDIR)/zip_stream.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
+$(OBJDIR)/xml_lite.o: $(COREDIR)/xml_lite.c $(COREDIR)/xml_lite.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
+
 $(OBJDIR)/portable.o: $(COREDIR)/portable.c $(COREDIR)/portable.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $< -o $@
 
@@ -264,6 +276,12 @@ $(OBJDIR)/fmt_rtf.o: $(COMPDIR)/fmt_rtf.c $(COMPDIR)/fmt_rtf.h $(COMPDIR)/ed_att
 $(OBJDIR)/fmt_wp4.o: $(COMPDIR)/fmt_wp4.c $(COMPDIR)/fmt_wp4.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/fmt_wp4.c -o $@
 
+$(OBJDIR)/fmt_docx.o: $(COMPDIR)/fmt_docx.c $(COMPDIR)/fmt_docx.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COREDIR)/zip_stream.h $(COREDIR)/xml_lite.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_docx.c -o $@
+
+$(OBJDIR)/fmt_odt.o: $(COMPDIR)/fmt_odt.c $(COMPDIR)/fmt_odt.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h $(COREDIR)/zip_stream.h $(COREDIR)/xml_lite.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_odt.c -o $@
+
 $(OBJDIR)/fmt_pdf.o: $(COMPDIR)/fmt_pdf.c $(COMPDIR)/fmt_pdf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_pdf.c -o $@
 
@@ -273,14 +291,11 @@ $(OBJDIR)/fmt_pcl.o: $(COMPDIR)/fmt_pcl.c $(COMPDIR)/fmt_pcl.h $(COMPDIR)/ed_att
 $(OBJDIR)/fmt_urf.o: $(COMPDIR)/fmt_urf.c $(COMPDIR)/fmt_urf.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_urf.c -o $@
 
+$(OBJDIR)/fmt_pwg.o: $(COMPDIR)/fmt_pwg.c $(COMPDIR)/fmt_pwg.h $(COMPDIR)/ed_attr.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_pwg.c -o $@
+
 $(OBJDIR)/print.o: $(COMPDIR)/print.c $(COMPDIR)/print.h $(COMPDIR)/fmt_pdf.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print.c -o $@
-
-$(OBJDIR)/print_amiga.o: $(COMPDIR)/print_amiga.c $(COMPDIR)/print_amiga.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print_amiga.c -o $@
-
-$(OBJDIR)/print_win32.o: $(COMPDIR)/print_win32.c $(COMPDIR)/print_win32.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/print_win32.c -o $@
 
 # UI objects
 $(OBJDIR)/te_app.o: $(UIDIR)/te_app.c $(UIDIR)/te.h | $(OBJDIR)

@@ -161,6 +161,9 @@ typedef struct
     int print_margin_top_mm;
     int print_margin_bottom_mm;
 
+    /* Win32 print mode: 0=RTF via Rich Edit (default), 1=PWG raster via GDI */
+    int print_win32_mode;
+
     /* Amiga color palette mapping (COLORMAP): physical pen for each logical color */
     int color_map[16];
     int color_map_initialized; /* 1 if user configured COLORMAP explicitly */

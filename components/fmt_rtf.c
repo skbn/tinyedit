@@ -9,6 +9,8 @@
  * (at your option) any later version.
  */
 
+/* RTF 1.x reader/writer */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,6 +86,9 @@ struct rtf_ctx
     int uc_skip;  /* Pending fallback chars to swallow after \uN */
     int dropped_colors;
     long pending_high; /* Stashed UTF-16 high surrogate from \uN, 0 = none */
+
+    /* Set when \hyphauto1 (or bare \hyphauto) appears in the header */
+    int hyph_detected;
 
     char *err;
     size_t errsz;
@@ -197,6 +202,7 @@ static int rtf_put_cp_raw(struct rtf_ctx *c, unsigned long cp)
         return -1;
 
     memcpy(c->text + c->text_len, u8, (size_t)n);
+
     c->text_len += (size_t)n;
     c->col++;
 
@@ -234,6 +240,7 @@ static int rtf_put_align(struct rtf_ctx *c)
             return -1;
 
         memset(na + c->cap_aligns, 0, (size_t)(nc - c->cap_aligns));
+
         c->aligns = na;
         c->cap_aligns = nc;
     }
@@ -338,7 +345,7 @@ static int rtf_is_ignored(const char *w)
             "viewkind", "nouicompat", "fnil", "froman", "fswiss", "fmodern",
             "fscript", "fdecor", "ftech", "fbidi", "fcharset", "fprq",
             "lang", "langfe", "langnp", "noproof", "kerning", "expnd", "expndtw",
-            "outl", "shad", "widowctrl", "hyphauto", "sl", "slmult",
+            "outl", "shad", "widowctrl", "sl", "slmult",
             "sa", "sb", "li", "ri", "fi", "cb", "highlight", "nowidctlpar",
             "aspalpha", "aspnum", "faauto", "adjustright", "itap",
             "red", "green", "blue", NULL};
@@ -464,6 +471,7 @@ static int rtf_control(struct rtf_ctx *c)
     {
         num = num * 10 + (ch - '0');
         has_num = 1;
+
         ch = fgetc(c->fp);
     }
 
@@ -512,6 +520,23 @@ static int rtf_control(struct rtf_ctx *c)
         return rtf_style_edge(c);
     }
 
+    if (strcmp(word, "strike") == 0)
+    {
+        if (has_num && num == 0)
+            c->st.mask &= (unsigned short)~EA_STRIKE;
+        else
+            c->st.mask |= EA_STRIKE;
+
+        return rtf_style_edge(c);
+    }
+
+    if (strcmp(word, "strike0") == 0)
+    {
+        c->st.mask &= (unsigned short)~EA_STRIKE;
+
+        return rtf_style_edge(c);
+    }
+
     if (strcmp(word, "plain") == 0)
     {
         c->st.mask = 0;
@@ -524,6 +549,7 @@ static int rtf_control(struct rtf_ctx *c)
     if (strcmp(word, "f") == 0)
     {
         c->st.font_id = (short)num;
+
         return rtf_style_edge(c);
     }
 
@@ -577,6 +603,13 @@ static int rtf_control(struct rtf_ctx *c)
         return 0;
     }
 
+    /* \hyphauto or \hyphauto1 enables auto hyphenation; \hyphauto0 disables */
+    if (strcmp(word, "hyphauto") == 0)
+    {
+        c->hyph_detected = (!has_num || num != 0) ? 1 : 0;
+        return 0;
+    }
+
     if (strcmp(word, "uc") == 0)
     {
         c->st.uc = (int)num;
@@ -593,6 +626,7 @@ static int rtf_control(struct rtf_ctx *c)
         {
             c->pending_high = cp;
             c->uc_skip += c->st.uc;
+
             return 0;
         }
 
@@ -601,15 +635,19 @@ static int rtf_control(struct rtf_ctx *c)
             if (c->pending_high != 0)
             {
                 cp = 0x10000 + ((c->pending_high - 0xD800) << 10) + (cp - 0xDC00);
+
                 c->pending_high = 0;
+
                 r = rtf_put_cp_raw(c, (unsigned long)cp);
             }
 
             c->uc_skip += c->st.uc;
+
             return r;
         }
 
         r = rtf_put_cp_raw(c, (unsigned long)cp);
+
         c->uc_skip += c->st.uc;
 
         return r;
@@ -638,7 +676,7 @@ static int rtf_control(struct rtf_ctx *c)
     return 0;
 }
 
-int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, size_t warnsz)
+int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, size_t warnsz, int *hyph_out)
 {
     struct rtf_ctx c;
     int ch;
@@ -670,6 +708,7 @@ int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, siz
     if (ch != '{')
     {
         rtf_seterr(&c, 0, "not an RTF file", NULL);
+
         return -1;
     }
 
@@ -682,6 +721,7 @@ int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, siz
         if (ch == EOF)
         {
             rtf_seterr(&c, ftell(fp), "unexpected end of file", NULL);
+
             ok = 0;
         }
         else if (ch == '{')
@@ -689,6 +729,7 @@ int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, siz
             if (c.depth >= RTF_MAX_DEPTH)
             {
                 rtf_seterr(&c, ftell(fp), "groups nested too deep", NULL);
+
                 ok = 0;
             }
             else if (rtf_style_edge(&c) != 0)
@@ -767,6 +808,9 @@ int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, siz
         if (c.dropped_colors && warn && warnsz > 0)
             snprintf(warn, warnsz, "color information was dropped (not supported yet)");
 
+        if (hyph_out)
+            *hyph_out = c.hyph_detected;
+
         rc = 0;
     }
 
@@ -809,7 +853,7 @@ static int rtf_write_cp(FILE *fp, unsigned int cp)
     return fprintf(fp, "\\u%d?", (int)(0xDC00 + (cp & 0x3FF)) - 65536) < 0 ? -1 : 0;
 }
 
-int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, int font_size_half_pt)
+int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, int font_size_half_pt, int hyph)
 {
     static const char *aw[] = {"\\ql", "\\qc", "\\qr", "\\qj"};
     struct rtf_state cur;
@@ -831,6 +875,13 @@ int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, i
             return -1;
     }
 
+    /* Emit \hyphauto1 after font table, before any paragraph */
+    if (hyph)
+    {
+        if (fputs("\\hyphauto1\n", fp) == EOF)
+            return -1;
+    }
+
     if (font_size_half_pt > 0)
     {
         if (fprintf(fp, "\\f0\\fs%d\n", font_size_half_pt) < 0)
@@ -845,6 +896,7 @@ int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, i
         int r = 0;
 
         memset(&cur, 0, sizeof(cur));
+
         cur.font_id = -1;
 
         /* Only set paragraph defaults at the start of a paragraph, mid paragraph continuations keep the current setup */
@@ -865,6 +917,7 @@ int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, i
             struct rtf_state want;
 
             memset(&want, 0, sizeof(want));
+
             want.font_id = -1;
 
             /* Advance to the run covering this column, if any */
@@ -882,24 +935,40 @@ int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, i
             if (want.mask != cur.mask || want.font_id != cur.font_id || want.size != cur.size)
             {
                 if ((want.mask & EA_BOLD) != (cur.mask & EA_BOLD))
+                {
                     if (fputs(want.mask & EA_BOLD ? "\\b" : "\\b0", fp) == EOF)
                         return -1;
+                }
 
                 if ((want.mask & EA_ITALIC) != (cur.mask & EA_ITALIC))
+                {
                     if (fputs(want.mask & EA_ITALIC ? "\\i" : "\\i0", fp) == EOF)
                         return -1;
+                }
 
                 if ((want.mask & EA_UNDERLINE) != (cur.mask & EA_UNDERLINE))
+                {
                     if (fputs(want.mask & EA_UNDERLINE ? "\\ul" : "\\ulnone", fp) == EOF)
                         return -1;
+                }
+
+                if ((want.mask & EA_STRIKE) != (cur.mask & EA_STRIKE))
+                {
+                    if (fputs(want.mask & EA_STRIKE ? "\\strike" : "\\strike0", fp) == EOF)
+                        return -1;
+                }
 
                 if (want.font_id != cur.font_id && want.font_id >= 0)
+                {
                     if (fprintf(fp, "\\f%d", want.font_id) < 0)
                         return -1;
+                }
 
                 if (want.size != cur.size && want.size > 0)
+                {
                     if (fprintf(fp, "\\fs%d", want.size * 2) < 0)
                         return -1;
+                }
 
                 if (fputc(' ', fp) == EOF)
                     return -1;
@@ -927,6 +996,12 @@ int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, i
         if (cur.mask & EA_UNDERLINE)
         {
             if (fputs("\\ulnone", fp) == EOF)
+                return -1;
+        }
+
+        if (cur.mask & EA_STRIKE)
+        {
+            if (fputs("\\strike0", fp) == EOF)
                 return -1;
         }
 
@@ -964,7 +1039,7 @@ int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, i
     return fputs("}\n", fp) == EOF ? -1 : 0;
 }
 
-int rtf_export(const struct Ed *ed, FILE *fp)
+int rtf_export(const struct Ed *ed, FILE *fp, int hyph)
 {
-    return rtf_export_with_font(ed, fp, NULL, 0);
+    return rtf_export_with_font(ed, fp, NULL, 0, hyph);
 }

@@ -26,8 +26,9 @@ LATIN-2, UTF-8)
 - Spell checker, hyphenation, thesaurus (optional native implementations)
 - Translator panel (online backends + offline StarDict-compatible dictionaries)
 - Grammar checker (experimental, UTF-8 text only)
-- Partial rich-text support for .rtf and .wp/.wp4 files
-- Experimental built-in printing (PDF, PCL, URF; optional IPP/IPPS/AirPrint
+- Partial rich-text support for .rtf, .wp/.wp4, .docx (Office Open XML) and .odt
+(OpenDocument Text) files
+- Experimental built-in printing (PDF, PCL, URF, PWG Raster; optional IPP/IPPS/AirPrint
 via AmiSSL. Per-printer profile persistence)
 - Clipboard support
 - Unicode glyph picker
@@ -64,8 +65,16 @@ Grammar checker (experimental) uses bundled .rul rule packs and only works
 with UTF-8 text. Additional rule packs can be generated from LanguageTool XML
 files using tools/lt2rul.py
 
-RTF and WordPerfect 4.1.12 - 4.2 files can be loaded and saved with partial formatting
-support (bold/italic/underline/alignment). WP 4.1.12 - 4.2 saving requires an 8-bit charset
+RTF, WordPerfect 4.1.12 - 4.2, DOCX (Office Open XML) and ODT (OpenDocument Text
+v1.3) files can be loaded and saved with partial formatting support
+(bold/italic/underline/alignment)
+
+DOCX and ODT are read/written through a bundled streaming ZIP reader/writer
+(core/zip_stream.c) and a minimal pull-based XML parser (core/xml_lite.c), with
+no external dependencies. DOCX and ODT also emit the hyphenation flag
+(w:autoHyphenation / fo:hyphenate) when hyphenation is enabled
+
+WP 4.1.12 - 4.2 saving requires an 8-bit charset
 For best compatibility it is recommended to set the charset to CP437 both for reading
 (View) and saving (Save), either per-file with F3 / Alt+C or as the default charset in Setup
 
@@ -80,12 +89,16 @@ Output formats:
 - PCL: PCL 5/6 for legacy laser and inkjet printers
 - URF (Apple Raster): required by AirPrint-compatible printers. Uses the bundled
   FreeType (always enabled on AmigaOS)
+- PWG Raster (image/pwg-raster): accepted by many IPP/AirPrint printers. Uses the
+  bundled FreeType. Export only (no round-trip), written when saving to a .pwg file
 
 Local printing on AmigaOS writes charset-converted text directly to PRT:
 (printer.device); reads PrinterPrefs to identify the configured driver
 
 Network printing (IPP / AirPrint):
-Optional IPP/IPPS client (USE_IPP=1) sends jobs directly to network printers
+Optional IPP/IPPS client sends jobs directly to network printers since AirPrint
+printers commonly advertise image/urf or image/pwg-raster as their supported document formats
+
 Combined with mDNS/Bonjour discovery, tinyedit can find AirPrint printers on the
 LAN, query their capabilities via Get-Printer-Attributes, and submit jobs with
 Print-Job. TLS (ipps://) on AmigaOS requires AmiSSL (WITH_AMISSL=1)

@@ -29,12 +29,15 @@
 #include "ui_files.h"
 #include "../components/fmt_rtf.h"
 #include "../components/fmt_wp4.h"
+#include "../components/fmt_docx.h"
+#include "../components/fmt_odt.h"
 #include "../components/fmt_pdf.h"
 #include "../components/fmt_pcl.h"
-#if defined(HAVE_URF)
+#if defined(HAVE_PRINTER)
 #include "../components/fmt_urf.h"
+#include "../components/fmt_pwg.h"
 #endif
-#if defined(USE_FREETYPE) || defined(HAVE_URF)
+#if defined(USE_FREETYPE) || defined(HAVE_PRINTER)
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #endif
@@ -147,6 +150,7 @@ static const char *HELP_LINES[] =
         "    Alt+Shift+B      Bold",
         "    Alt+Shift+I      Italic",
         "    Alt+Shift+U      Underline",
+        "    Alt+Shift+T      Strike",
         "    Alt+Shift+L      Align left",
         "    Alt+Shift+E      Align center",
         "    Alt+Shift+R      Align right",
@@ -155,6 +159,7 @@ static const char *HELP_LINES[] =
         "    Ctrl+Alt+B       Bold",
         "    Ctrl+Alt+I       Italic",
         "    Ctrl+Alt+U       Underline",
+        "    Ctrl+Alt+T       Strike",
         "    Ctrl+Alt+L       Align left",
         "    Ctrl+Alt+E       Align center",
         "    Ctrl+Alt+R       Align right",
@@ -316,7 +321,7 @@ int do_save(TeApp *app)
 
             font_name[0] = '\0';
 
-#if defined(USE_FREETYPE) || defined(HAVE_URF)
+#if defined(USE_FREETYPE) || defined(HAVE_PRINTER)
             if (font_path && font_path[0])
             {
                 FT_Library lib = NULL;
@@ -345,7 +350,7 @@ int do_save(TeApp *app)
             else if (cfg->ttf_size > 0)
                 font_size_hp = cfg->ttf_size * 2;
 
-            rc = rtf_export_with_font(te_app_get_editor(app), fp, font_name[0] ? font_name : NULL, font_size_hp);
+            rc = rtf_export_with_font(te_app_get_editor(app), fp, font_name[0] ? font_name : NULL, font_size_hp, te_app_hyph_wrap_enabled(app));
 
             fclose(fp);
         }
@@ -383,7 +388,7 @@ int do_save(TeApp *app)
 
         if (fp)
         {
-            rc = wp4_export(te_app_get_editor(app), fp, app->charset_out, werr, sizeof(werr), wwarn, sizeof(wwarn));
+            rc = wp4_export(te_app_get_editor(app), fp, app->charset_out, te_app_hyph_wrap_enabled(app), wp4_variant_for_path(te_app_get_filename(app)), werr, sizeof(werr), wwarn, sizeof(wwarn));
             fclose(fp);
         }
 
@@ -400,6 +405,52 @@ int do_save(TeApp *app)
 
         if (wwarn[0])
             te_status(app, "Saved: %s (%s)", te_app_get_filename(app), wwarn);
+    }
+    else if (ui_files_is_docx(te_app_get_filename(app)))
+    {
+        char derr[128];
+        int rc = -1;
+
+        derr[0] = '\0';
+
+#ifdef HAVE_HYPHEN
+        app->cfg.hyph_wrap_enabled = te_app_hyph_wrap_enabled(app);
+#endif
+        rc = docx_export(te_app_get_editor(app), te_app_get_filename(app), &app->cfg, app->cfg.hyph_wrap_enabled, derr, sizeof(derr));
+
+        if (rc != 0)
+        {
+            te_status(app, "DOCX error: %s", derr[0] ? derr : "cannot write");
+            return -1;
+        }
+
+        app->rich_mode = 1;
+
+        if (te_app_get_active_tab(app))
+            te_app_get_active_tab(app)->rich_mode = 1;
+    }
+    else if (ui_files_is_odt(te_app_get_filename(app)))
+    {
+        char oerr[128];
+        int rc = -1;
+
+        oerr[0] = '\0';
+
+#ifdef HAVE_HYPHEN
+        app->cfg.hyph_wrap_enabled = te_app_hyph_wrap_enabled(app);
+#endif
+        rc = odt_export(te_app_get_editor(app), te_app_get_filename(app), &app->cfg, oerr, sizeof(oerr));
+
+        if (rc != 0)
+        {
+            te_status(app, "ODT error: %s", oerr[0] ? oerr : "cannot write");
+            return -1;
+        }
+
+        app->rich_mode = 1;
+
+        if (te_app_get_active_tab(app))
+            te_app_get_active_tab(app)->rich_mode = 1;
     }
     else if (ui_files_is_pdf(te_app_get_filename(app)))
     {
@@ -434,7 +485,7 @@ int do_save(TeApp *app)
 
             /* Honour the editor's current hyphen mode: on = use it, off = don't force */
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-            if (app->hyph_wrap_enabled && app->hyph_handle)
+            if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
             {
                 hy = ui_layout_hyphen;
                 hy_user = app;
@@ -454,7 +505,7 @@ int do_save(TeApp *app)
         if (pwarn[0])
             te_status(app, "Saved: %s (%s)", te_app_get_filename(app), pwarn);
     }
-#if defined(HAVE_URF)
+#if defined(HAVE_PRINTER)
     else if (ui_files_is_urf(te_app_get_filename(app)))
     {
         /* URF (Apple Raster) export: rasterizes via FreeType, no round-trip */
@@ -487,7 +538,7 @@ int do_save(TeApp *app)
             void *hy_user = NULL;
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-            if (app->hyph_wrap_enabled && app->hyph_handle)
+            if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
             {
                 hy = ui_layout_hyphen;
                 hy_user = app;
@@ -502,6 +553,59 @@ int do_save(TeApp *app)
         if (rc != 0)
         {
             te_status(app, "URF error: %s", uerr[0] ? uerr : "cannot write");
+            return -1;
+        }
+
+        if (uwarn[0])
+            te_status(app, "Saved: %s (%s)", te_app_get_filename(app), uwarn);
+    }
+    else if (ui_files_is_pwg(te_app_get_filename(app)))
+    {
+        /* PWG Raster export: rasterizes via FreeType, no round-trip */
+        FILE *fp = NULL;
+        char uerr[128];
+        char uwarn[128];
+        int rc = -1;
+
+        uerr[0] = '\0';
+        uwarn[0] = '\0';
+
+        /* Use defaults from fmt_pwg, not printer-specific settings */
+        export_cfg = app->cfg;
+
+        export_cfg.print_media[0] = '\0';
+        export_cfg.print_orientation = 0;
+        export_cfg.print_resolution_x = 0;
+        export_cfg.print_resolution_y = 0;
+        export_cfg.print_resolution_units = 0;
+        export_cfg.print_margin_left_mm = -1;
+        export_cfg.print_margin_right_mm = -1;
+        export_cfg.print_margin_top_mm = -1;
+        export_cfg.print_margin_bottom_mm = -1;
+
+        fp = fopen(te_app_get_filename(app), "wb");
+
+        if (fp)
+        {
+            LayoutHyphenFn hy = NULL;
+            void *hy_user = NULL;
+
+#if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
+            if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
+            {
+                hy = ui_layout_hyphen;
+                hy_user = app;
+            }
+#endif
+
+            rc = pwg_export_ex(te_app_get_editor(app), fp, &export_cfg, hy, hy_user, uerr, sizeof(uerr), uwarn, sizeof(uwarn));
+
+            fclose(fp);
+        }
+
+        if (rc != 0)
+        {
+            te_status(app, "PWG error: %s", uerr[0] ? uerr : "cannot write");
             return -1;
         }
 
@@ -541,7 +645,7 @@ int do_save(TeApp *app)
             void *hy_user = NULL;
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-            if (app->hyph_wrap_enabled && app->hyph_handle)
+            if (te_app_hyph_wrap_enabled(app) && app->hyph_handle)
             {
                 hy = ui_layout_hyphen;
                 hy_user = app;
@@ -1044,6 +1148,16 @@ int handle_function_keys(TeApp *app, int ch, int is_key)
         }
 
 #ifdef PLATFORM_AMIGA
+        if (is_key && ch == KEY_SHIFT('T'))
+#else
+        if (is_key && ch == KEY_ALT_CTRL('T'))
+#endif
+        {
+            ui_rich_attr_toggle(app, EA_STRIKE);
+            return 1;
+        }
+
+#ifdef PLATFORM_AMIGA
         if (is_key && ch == KEY_SHIFT('L'))
 #else
         if (is_key && ch == KEY_ALT_CTRL('L'))
@@ -1232,26 +1346,25 @@ int handle_control_keys(TeApp *app, int ch, int is_key)
 #endif
 
 #if defined(HAVE_HUNSPELL) && defined(HAVE_HYPHEN)
-    /* Alt+E : toggle hyphen wrap */
+    /* Alt+E : toggle hyphen wrap on the active tab */
     if (ch == KEY_ALT('E'))
     {
+        TeTab *tab = te_app_get_active_tab(app);
+
         if (!app->hyph_handle)
         {
             te_status(app, "No hyphenation dictionary loaded (configure HYPH_DICT_*)");
             return 1;
         }
 
-        /*if (app->hard_wrap)
-        {*/
-        app->hyph_wrap_enabled = !app->hyph_wrap_enabled;
-        te_status(app, "Hyphen wrap %s", app->hyph_wrap_enabled ? "ON" : "OFF");
+        if (!tab)
+            return 1;
+
+        tab->hyph_wrap_enabled = !tab->hyph_wrap_enabled;
+
+        te_status(app, "Hyphen wrap %s (this tab)", tab->hyph_wrap_enabled ? "ON" : "OFF");
 
         ed_auto_rewrap_after_edit(app);
-        /*}
-        else
-        {
-            te_status(app, "Hyphen wrap requires hard-wrap mode");
-        }*/
 
         return 1;
     }
@@ -2012,11 +2125,24 @@ int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int width, int
                 ed_auto_rewrap_after_edit(app);
             else if (app->hard_wrap)
             {
-                /* Clear stale LB_HYPHEN so the hyphen glyph doesn't render until the paragraph is re-wrapped on word separator */
                 Ed *ed = te_app_get_editor(app);
+                int ww;
 
+                /* Clear stale LB_HYPHEN so the hyphen glyph doesn't render until re-wrapped */
                 if (ed->lines[ed->row]->brk == LB_HYPHEN)
                     ed->lines[ed->row]->brk = LB_WORD;
+
+                /* Reflow paragraph if line overflows so justified/hyph views stay in sync */
+                ww = editor_eff_wrap(app);
+
+                if (ww > 0)
+                {
+                    const wchar_t *lw = ed_line_wcs(ed, ed->row);
+                    int llen = ed_line_len(ed, ed->row);
+
+                    if (lw && wcs_vwidth_ex(lw, llen, 0, app->cfg.tab_width > 0 ? app->cfg.tab_width : 4) > ww)
+                        ed_auto_rewrap_after_edit(app);
+                }
             }
 
             return 1;

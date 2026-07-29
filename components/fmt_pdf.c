@@ -24,7 +24,7 @@
 #include "../core/charset.h"
 
 /* FreeType is available when URF is enabled (Unix) or bundled (Amiga/Win32) */
-#if defined(HAVE_URF) || defined(USE_FREETYPE)
+#if defined(HAVE_PRINTER) || defined(USE_FREETYPE)
 #define PDF_HAVE_FREETYPE 1
 #endif
 
@@ -42,6 +42,8 @@
 #define PDF_LEADING_MUL 1.2    /* Line height = size * 1.2 */
 #define PDF_UNDERLINE_OFF -1.5 /* Points below baseline */
 #define PDF_UNDERLINE_TH 0.6   /* Line thickness */
+#define PDF_STRIKE_OFF 3.0     /* Points above baseline (mid-height) */
+#define PDF_STRIKE_TH 0.6      /* Line thickness */
 
 /* Font resource names inside the content stream, matching object ids 3..6 */
 #define PDF_FN_REGULAR "F0"
@@ -603,6 +605,7 @@ static int ttf_face_load(struct ttf_face *f, const char *path)
     if (fread(buf, 1, (size_t)fsz, fp) != (size_t)fsz)
     {
         free(buf);
+
         fclose(fp);
         return -1;
     }
@@ -991,6 +994,7 @@ static int pdf_font_ctx_try_ttf(pdf_font_ctx *fc, const TeConfig *cfg)
             if (e != 0)
             {
                 FT_Done_Face(fp2->ft_face);
+
                 fp2->ft_face = NULL;
                 continue;
             }
@@ -2362,19 +2366,28 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
     int i;
     double x_pen;
     double x_ul_start;
+    double x_st_start;
     int in_ul;
+    int in_st;
     int in_bt;
     struct pdf_underline_run *uls = NULL;
+    struct pdf_underline_run *sts = NULL;
     int n_uls;
+    int n_sts;
     int cap_uls;
+    int cap_sts;
     int rc;
 
     x_pen = x;
     x_ul_start = 0.0;
+    x_st_start = 0.0;
     in_ul = 0;
+    in_st = 0;
     in_bt = 0;
     n_uls = 0;
+    n_sts = 0;
     cap_uls = 0;
+    cap_sts = 0;
     rc = 0;
 
     if (end > p->len)
@@ -2465,6 +2478,44 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
                 {
                     x_ul_start = x_pen;
                     in_ul = 1;
+                }
+            }
+
+            if (rc != 0)
+                break;
+
+            /* Strike toggle: close pending segment or open a new one */
+            if (((want_mask & EA_STRIKE) != 0) != in_st)
+            {
+                if (in_st)
+                {
+                    if (n_sts >= cap_sts)
+                    {
+                        int nc;
+                        struct pdf_underline_run *nu;
+
+                        nc = cap_sts ? cap_sts * 2 : 8;
+                        nu = (struct pdf_underline_run *)realloc(sts, (size_t)nc * sizeof(*sts));
+
+                        if (!nu)
+                        {
+                            rc = -1;
+                            break;
+                        }
+
+                        sts = nu;
+                        cap_sts = nc;
+                    }
+
+                    sts[n_sts].x0 = x_st_start;
+                    sts[n_sts].x1 = x_pen;
+                    n_sts++;
+                    in_st = 0;
+                }
+                else
+                {
+                    x_st_start = x_pen;
+                    in_st = 1;
                 }
             }
 
@@ -2790,6 +2841,36 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
         }
     }
 
+    /* Close pending strike segment */
+    if (rc == 0 && in_st)
+    {
+        if (n_sts >= cap_sts)
+        {
+            int nc;
+            struct pdf_underline_run *nu = NULL;
+
+            nc = cap_sts ? cap_sts * 2 : 8;
+            nu = (struct pdf_underline_run *)realloc(sts, (size_t)nc * sizeof(*sts));
+
+            if (!nu)
+            {
+                rc = -1;
+            }
+            else
+            {
+                sts = nu;
+                cap_sts = nc;
+            }
+        }
+
+        if (rc == 0)
+        {
+            sts[n_sts].x0 = x_st_start;
+            sts[n_sts].x1 = x_pen;
+            n_sts++;
+        }
+    }
+
     if (rc == 0)
     {
         if (pdfb_puts(s, "ET\n") != 0)
@@ -2813,10 +2894,27 @@ static int pdf_emit_para_range(pdf_buf *s, const pdf_para *p, const pdf_font_ctx
         }
     }
 
+    /* Draw strike runs */
+    if (rc == 0 && n_sts > 0)
+    {
+        int u;
+        double y_st = y_baseline + PDF_STRIKE_OFF;
+
+        for (u = 0; u < n_sts; u++)
+        {
+            if (pdfb_printf(s, "%.2f %.2f %.2f %.2f re f\n", sts[u].x0, y_st, sts[u].x1 - sts[u].x0, PDF_STRIKE_TH) != 0)
+            {
+                rc = -1;
+                break;
+            }
+        }
+    }
+
     if (rc != 0 && in_bt)
         pdfb_puts(s, "ET\n");
 
     free(uls);
+    free(sts);
 
     return rc;
 }

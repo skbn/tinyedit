@@ -242,6 +242,7 @@ static int compute_dirty_row(int r)
             ch = (ULONG)cc->ch;
 
             if (ch == TE_CELL_WIDE_TRAILING ||
+                (cc->attrs & A_DIM) ||            /* Italic bitmap shear: full row */
                 (ch >= 0x2190 && ch <= 0x21FF) || /* Arrows */
                 (ch >= 0x2500 && ch <= 0x259F) || /* Box / Block */
                 (ch >= 0x25A0 && ch <= 0x25FF) || /* Geometric */
@@ -587,6 +588,18 @@ static void render_cell(int row, int col, chtype ch, int attrs)
             RectFill(ami_rp, x, uy, x + cell_w - 1, uy);
         }
     }
+
+    /* Draw strike line at mid-height */
+    if (attrs & A_STRIKE)
+    {
+        int sy = y + fb / 2;
+
+        if (sy >= y && sy < y + fh)
+        {
+            SetAPen(ami_rp, saved);
+            RectFill(ami_rp, x, sy, x + cell_w - 1, sy);
+        }
+    }
 }
 
 static void shadow_invalidate() { s_shadow_dirty = 1; }
@@ -669,7 +682,7 @@ static void render_all()
                 p = (int)PAIR_NUMBER(cc->attrs);
 
                 /* Compare color pair and style attrs; different style = new run */
-                if (p != run_pair || ((cc->attrs ^ run_attrs) & (A_REVERSE | A_UNDERLINE | A_BOLD | A_DIM)))
+                if (p != run_pair || ((cc->attrs ^ run_attrs) & (A_REVERSE | A_UNDERLINE | A_BOLD | A_DIM | A_STRIKE)))
                     break;
 
                 /* TRAILING cell: skip run_buf but advance c for area/RectFill */
@@ -864,6 +877,18 @@ static void render_all()
                 {
                     SetAPen(ami_rp, saved);
                     RectFill(ami_rp, x, uy, rx, uy);
+                }
+            }
+
+            /* Draw strike line at mid-height for the run */
+            if (run_attrs & A_STRIKE)
+            {
+                int sy = y + fb / 2;
+
+                if (sy >= y && sy < y + fh)
+                {
+                    SetAPen(ami_rp, saved);
+                    RectFill(ami_rp, x, sy, rx, sy);
                 }
             }
         }

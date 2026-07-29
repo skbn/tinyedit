@@ -15,6 +15,7 @@
 #include <stddef.h>
 
 #include "config.h"
+#include "layout.h"
 
 struct Ed;
 
@@ -93,6 +94,9 @@ extern "C"
     int win32_print_file(const char *printer_name, const char *file_path);
 
     int win32_print_rtf_document(const struct Ed *ed, const TeConfig *cfg, const char *job_name);
+
+    /* Print via PWG raster: export to raster, decode pages, render bitmaps to printer DC via GDI */
+    int win32_print_raster_document(const struct Ed *ed, const TeConfig *cfg, const char *job_name, LayoutHyphenFn hyph, void *hyph_user);
 
 #ifdef __cplusplus
 }

@@ -477,6 +477,8 @@ void te_cfg_defaults(TeConfig *cfg)
     cfg->print_margin_top_mm = -1;
     cfg->print_margin_bottom_mm = -1;
 
+    cfg->print_win32_mode = 0; /* 0=RTF, 1=PWG raster */
+
     for (i = 0; i < TE_CFG_COLOR_MAX; i++)
     {
         cfg->color_fg[i] = 7;
@@ -1416,6 +1418,13 @@ int te_cfg_load(TeConfig *cfg, const char *path)
                 cfg->print_margin_bottom_mm = bottom;
             }
         }
+        else if (strcasecmp(word, "PRINT_WIN32_MODE") == 0)
+        {
+            int mode = 0;
+
+            if (sscanf(rest, "%d", &mode) == 1 && (mode == 0 || mode == 1))
+                cfg->print_win32_mode = mode;
+        }
     }
 
     fclose(f);
@@ -1571,7 +1580,8 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "PRINT_MEDIA_SOURCE") == 0 ||
                 strcasecmp(word, "PRINT_MEDIA_TYPE") == 0 ||
                 strcasecmp(word, "PRINT_RESOLUTION") == 0 ||
-                strcasecmp(word, "PRINT_MARGINS") == 0
+                strcasecmp(word, "PRINT_MARGINS") == 0 ||
+                strcasecmp(word, "PRINT_WIN32_MODE") == 0
 #ifdef HAVE_HUNSPELL
                 || strcasecmp(word, "SPELL_ENABLED") == 0 || strcasecmp(word, "SPELL_DICT_PATH") == 0 || strcasecmp(word, "SPELL_DICT_NAME") == 0 || strcasecmp(word, "SPELL_CUSTOM_DICT") == 0
 #ifdef HAVE_HYPHEN
@@ -1835,6 +1845,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
 
     if (cfg->print_margin_left_mm >= 0 && cfg->print_margin_right_mm >= 0 && cfg->print_margin_top_mm >= 0 && cfg->print_margin_bottom_mm >= 0)
         fprintf(out, "PRINT_MARGINS %d %d %d %d\n", cfg->print_margin_left_mm, cfg->print_margin_right_mm, cfg->print_margin_top_mm, cfg->print_margin_bottom_mm);
+
+    if (cfg->print_win32_mode == 1)
+        fprintf(out, "PRINT_WIN32_MODE 1\n");
 
     fclose(out);
 

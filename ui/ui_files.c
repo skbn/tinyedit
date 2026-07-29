@@ -17,6 +17,8 @@
 #include "ui_files.h"
 #include "../components/fmt_rtf.h"
 #include "../components/fmt_wp4.h"
+#include "../components/fmt_docx.h"
+#include "../components/fmt_odt.h"
 #include "ui_editor_helper.h"
 #include "../core/keys.h"
 #include "../core/portable.h"
@@ -45,6 +47,12 @@ typedef struct
     char *name;
     int is_dir;
 } FileEnt;
+
+/* Path-based rich importer signature (DOCX, ODT) */
+typedef int (*path_import_fn)(Ed *, const char *, char *, size_t, int *);
+
+/* FILE*-based rich importer signature (RTF, WP4). charset is NULL for RTF. */
+typedef int (*file_import_fn)(Ed *, FILE *, const char *, char *, size_t, char *, size_t, int *);
 
 /* Free name strings and the array itself */
 static void free_entries(FileEnt *ents, int n)
@@ -1476,6 +1484,45 @@ int ui_files_is_urf(const char *path)
     return n > 4 && strcasecmp(path + n - 4, ".urf") == 0;
 }
 
+/* PWG Raster is export-only: we save by extension but never open it back */
+int ui_files_is_pwg(const char *path)
+{
+    size_t n;
+
+    if (!path)
+        return 0;
+
+    n = strlen(path);
+
+    return n > 4 && strcasecmp(path + n - 4, ".pwg") == 0;
+}
+
+/* Case-insensitive .docx extension check */
+int ui_files_is_docx(const char *path)
+{
+    size_t n;
+
+    if (!path)
+        return 0;
+
+    n = strlen(path);
+
+    return n > 5 && strcasecmp(path + n - 5, ".docx") == 0;
+}
+
+/* Case-insensitive .odt extension check */
+int ui_files_is_odt(const char *path)
+{
+    size_t n;
+
+    if (!path)
+        return 0;
+
+    n = strlen(path);
+
+    return n > 4 && strcasecmp(path + n - 4, ".odt") == 0;
+}
+
 /* PCL 5 is export-only: we save by extension but never open it back */
 int ui_files_is_pcl(const char *path)
 {
@@ -1487,6 +1534,103 @@ int ui_files_is_pcl(const char *path)
     n = strlen(path);
 
     return n > 4 && strcasecmp(path + n - 4, ".pcl") == 0;
+}
+
+/* Common post-processing for rich-format imports (RTF, WP4, DOCX, ODT) */
+static int finish_rich_load(TeApp *app, const char *path, int hyph, const char *warn)
+{
+    TeTab *tab = te_app_get_active_tab(app);
+
+    app->rich_mode = 1;
+
+    if (tab)
+    {
+        tab->rich_mode = 1;
+
+        if (hyph && app->hyph_handle)
+            tab->hyph_wrap_enabled = 1;
+    }
+
+    /* Hard mode: fit the joined paragraphs to the configured column */
+    ui_editor_rewrap_loaded(app);
+
+    /* Loading is not an editing action: clear modified + undo */
+    ed_set_modified(te_app_get_editor(app), 0);
+    ed_clear_undo_redo(te_app_get_editor(app));
+
+    te_app_set_filename(app, path);
+    ui_editor_recent_add(path);
+
+    if (warn && warn[0])
+        te_status(app, "Loaded: %s (%s)", path, warn);
+    else
+        te_status(app, "Loaded: %s", path);
+
+    return 0;
+}
+
+static int load_path_import(TeApp *app, const char *path, const char *label, path_import_fn import_fn)
+{
+    char err[128];
+    int rc;
+    int hyph = 0;
+
+    ed_clear_undo_redo(te_app_get_editor(app));
+
+    rc = import_fn(te_app_get_editor(app), path, err, sizeof(err), &hyph);
+
+    if (rc == 0)
+        ed_join_breaks(te_app_get_editor(app));
+
+    if (rc != 0)
+    {
+        te_status(app, "%s error: %s", label, err);
+
+        return -1;
+    }
+
+    return finish_rich_load(app, path, hyph, NULL);
+}
+
+/* RTF doesn't take charset; wrap it to match the common signature */
+static int rtf_import_wrap(Ed *ed, FILE *fp, const char *charset, char *err, size_t errsz, char *warn, size_t warnsz, int *hyph)
+{
+    return rtf_import(ed, fp, err, errsz, warn, warnsz, hyph);
+}
+
+static int load_file_import(TeApp *app, const char *path, const char *label, int join, const char *charset, file_import_fn import_fn)
+{
+    char err[128];
+    char warn[128];
+    FILE *fp = NULL;
+    int rc;
+    int hyph = 0;
+
+    fp = fopen(path, "rb");
+
+    if (!fp)
+    {
+        te_status(app, "Cannot open: %s", path);
+        return -1;
+    }
+
+    ed_clear_undo_redo(te_app_get_editor(app));
+
+    rc = import_fn(te_app_get_editor(app), fp, charset, err, sizeof(err), warn, sizeof(warn), &hyph);
+
+    if (rc == 0 && join)
+        ed_join_breaks(te_app_get_editor(app));
+
+    fclose(fp);
+
+    if (rc != 0)
+    {
+        te_status(app, "%s error: %s", label, err);
+
+        return -1;
+    }
+
+    return finish_rich_load(app, path, hyph, warn);
 }
 
 int ui_files_open_path(TeApp *app, const char *path)
@@ -1509,6 +1653,10 @@ int ui_files_open_path(TeApp *app, const char *path)
         /* Hard mode: fit the document to the configured column */
         ui_editor_rewrap_loaded(app);
 
+        /* Loading is not an editing action: clear modified + undo */
+        ed_set_modified(te_app_get_editor(app), 0);
+        ed_clear_undo_redo(te_app_get_editor(app));
+
         if (detected > 0)
             te_status(app, "Recovered: %s (%d wrap-hyphens)", path, detected);
         else
@@ -1522,99 +1670,19 @@ int ui_files_open_path(TeApp *app, const char *path)
 
     /* RTF files go through the RTF importer, not the text loaders */
     if (ui_files_is_rtf(path))
-    {
-        char err[128];
-        char warn[128];
-        int rc;
-
-        fp = fopen(path, "rb");
-
-        if (!fp)
-        {
-            te_status(app, "Cannot open: %s", path);
-            return -1;
-        }
-
-        ed_clear_undo_redo(te_app_get_editor(app));
-
-        rc = rtf_import(te_app_get_editor(app), fp, err, sizeof(err), warn, sizeof(warn));
-
-        /* WP is a paragraph format: join the wraps, hard mode reflows them */
-        if (rc == 0)
-            ed_join_breaks(te_app_get_editor(app));
-
-        fclose(fp);
-
-        if (rc != 0)
-        {
-            te_status(app, "RTF error: %s", err);
-            return -1;
-        }
-
-        app->rich_mode = 1;
-
-        if (te_app_get_active_tab(app))
-            te_app_get_active_tab(app)->rich_mode = 1;
-
-        /* Hard mode: fit the joined paragraphs to the configured column */
-        ui_editor_rewrap_loaded(app);
-
-        te_app_set_filename(app, path);
-        ui_editor_recent_add(path);
-
-        if (warn[0])
-            te_status(app, "Loaded: %s (%s)", path, warn);
-        else
-            te_status(app, "Loaded: %s", path);
-
-        return 0;
-    }
+        return load_file_import(app, path, "RTF", 1, NULL, rtf_import_wrap);
 
     /* WP 4.2 files go through the WP importer */
     if (ui_files_is_wp4(path))
-    {
-        char err[128];
-        char warn[128];
-        int rc;
+        return load_file_import(app, path, "WP", 0, app->charset_in, wp4_import);
 
-        fp = fopen(path, "rb");
+    /* DOCX files go through the DOCX importer */
+    if (ui_files_is_docx(path))
+        return load_path_import(app, path, "DOCX", docx_import);
 
-        if (!fp)
-        {
-            te_status(app, "Cannot open: %s", path);
-            return -1;
-        }
-
-        ed_clear_undo_redo(te_app_get_editor(app));
-
-        rc = wp4_import(te_app_get_editor(app), fp, app->charset_in, err, sizeof(err), warn, sizeof(warn));
-
-        fclose(fp);
-
-        if (rc != 0)
-        {
-            te_status(app, "WP error: %s", err);
-            return -1;
-        }
-
-        app->rich_mode = 1;
-
-        if (te_app_get_active_tab(app))
-            te_app_get_active_tab(app)->rich_mode = 1;
-
-        /* Hard mode: fit the joined paragraphs to the configured column */
-        ui_editor_rewrap_loaded(app);
-
-        te_app_set_filename(app, path);
-        ui_editor_recent_add(path);
-
-        if (warn[0])
-            te_status(app, "Loaded: %s (%s)", path, warn);
-        else
-            te_status(app, "Loaded: %s", path);
-
-        return 0;
-    }
+    /* ODT files go through the ODT importer */
+    if (ui_files_is_odt(path))
+        return load_path_import(app, path, "ODT", odt_import);
 
     /* Read file */
     fp = fopen(path, "rb");
@@ -1668,6 +1736,10 @@ int ui_files_open_path(TeApp *app, const char *path)
         /* Hard mode: fit the document to the configured column */
         ui_editor_rewrap_loaded(app);
 
+        /* Loading is not an editing action: clear modified + undo */
+        ed_set_modified(te_app_get_editor(app), 0);
+        ed_clear_undo_redo(te_app_get_editor(app));
+
         if (detected > 0)
             te_status(app, "Loaded: %s (%d wrap-hyphens)", path, detected);
         else
@@ -1702,6 +1774,10 @@ int ui_files_open_path(TeApp *app, const char *path)
 
     /* Hard mode: fit the document to the configured column */
     ui_editor_rewrap_loaded(app);
+
+    /* Loading is not an editing action: clear modified + undo */
+    ed_set_modified(te_app_get_editor(app), 0);
+    ed_clear_undo_redo(te_app_get_editor(app));
 
     if (detected > 0)
         te_status(app, "Loaded: %s (%d wrap-hyphens)", path, detected);
