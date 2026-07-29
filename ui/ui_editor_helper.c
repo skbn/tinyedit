@@ -275,7 +275,7 @@ int ui_justify_offsets(const wchar_t *seg, int seg_len, int cur_vw, int target_v
         }
     }
 
-    /* One-past-end slot: cursor after last char gets full accumulated shift */
+    /* Cursor placed after the last char sees the final accumulated shift */
     offsets[seg_len] = shift;
 
     return 1;
@@ -587,25 +587,36 @@ int wcs_vwidth_ex(const wchar_t *s, int n, int start_col, int tab_width)
     return v;
 }
 
-/* Left margin for editor body with line numbers */
+/* Left margin for editor body: line numbers + rich-mode margin_left */
 int editor_body_offset(TeApp *app, int line_count)
 {
-    int margin = 1;
+    int margin = 0;
+    TeTab *tab = NULL;
 
-    if (!app || !te_app_get_show_line_numbers(app))
+    if (!app)
         return 0;
 
-    if (line_count <= 0)
-        line_count = 1;
-
-    while (line_count >= 10)
+    if (te_app_get_show_line_numbers(app))
     {
-        line_count /= 10;
-        margin++;
+        int n = line_count > 0 ? line_count : 1;
+
+        margin = 1;
+
+        while (n >= 10)
+        {
+            n /= 10;
+            margin++;
+        }
+
+        /* One space after the number */
+        margin += 1;
     }
 
-    /* One space after the number */
-    margin += 1;
+    /* Add the document's left margin when the tab is in rich mode. That way the ruler, painter, cursor and mouse hit-test all agree */
+    tab = te_app_get_active_tab(app);
+
+    if (tab && tab->rich_mode && tab->editor && tab->editor->margin_left > 0)
+        margin += tab->editor->margin_left;
 
     return margin;
 }
@@ -1858,7 +1869,7 @@ int do_search_in_files(TeApp *app)
             return 1;
         }
 
-        ed_set_word_move_mode(new_tab->editor, app->cfg.word_move_mode);
+        te_tab_apply_config(new_tab, app->cfg.word_move_mode, app->cfg.default_ruler_mm, app->cfg.cols_per_inch);
         te_app_add_tab(app, new_tab);
         te_app_switch_tab(app, app->tab_count - 1);
 
@@ -2229,7 +2240,7 @@ void ui_editor_session_restore(TeApp *app)
 
             tab->show_line_numbers = app->cfg.show_line_numbers;
 
-            ed_set_word_move_mode(tab->editor, app->cfg.word_move_mode);
+            te_tab_apply_config(tab, app->cfg.word_move_mode, app->cfg.default_ruler_mm, app->cfg.cols_per_inch);
             te_app_add_tab(app, tab);
             te_app_switch_tab(app, app->tab_count - 1);
         }

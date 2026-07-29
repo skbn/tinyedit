@@ -17,6 +17,10 @@
 
 #define TE_CFG_STR_MAX 256
 
+/* Editor cols to twips: 12 CPI, 1440 twips/inch = 120 twips/col */
+#define TE_COLS_PER_INCH 12
+#define TE_TWIPS_PER_COL 120
+
 /* Color pairs */
 #define COL_NORMAL 1
 #define COL_STATUS 2
@@ -230,6 +234,11 @@ typedef struct
     /* Word movement style: 0=standard (alnum+underscore), 1=vim-like (non-space blocks) */
     int word_move_mode;
 
+    /* Rich-mode defaults (applied to new documents and new tabs) */
+    int default_page_size; /* index into page_size_names table (0=Letter, 9=A4, ...) */
+    int default_ruler_mm;  /* 0=columns, 1=millimetres */
+    int cols_per_inch;     /* monospace CPI for column<->twips conversion (default 12) */
+
 } TeConfig;
 
 /* Fill cfg with safe built-in defaults */
@@ -240,5 +249,8 @@ int te_cfg_load(TeConfig *cfg, const char *path);
 
 /* Save config to path (0=ok, -1=error) */
 int te_cfg_save(const TeConfig *cfg, const char *path);
+
+/* Calculate CPI from a TTF font's monospace advance; 0=ok, -1=load/zero advance */
+int te_cfg_calc_cpi_from_ttf(const char *font_path, int font_size_pt, int *out_cpi);
 
 #endif /* TINYEDIT_CONFIG_H */

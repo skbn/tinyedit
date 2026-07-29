@@ -74,6 +74,14 @@ typedef struct
 
     /* Hyphenation detected in settings.xml during import */
     int hyph_detected;
+
+    /* Page geometry in twips captured from <w:pgMar> and <w:pgSz>, 0 = not seen */
+    int pg_margin_left;
+    int pg_margin_right;
+    int pg_margin_top;
+    int pg_margin_bottom;
+    int pg_width;
+    int pg_height;
 } DocxReadCtx;
 
 /* Buffered XML writer with escaping for ZIP entries */
@@ -405,6 +413,42 @@ static int docx_read_cb(void *user, const XlEvent *ev)
             rc->hyph_detected = 1;
             return 0;
         }
+
+        /* Page margins live inside <w:sectPr> */
+        if (strcmp(ev->tag, "w:pgMar") == 0)
+        {
+            int i;
+
+            for (i = 0; i < ev->n_attrs; i++)
+            {
+                if (strcmp(ev->attrs[i].name, "w:left") == 0)
+                    rc->pg_margin_left = atoi(ev->attrs[i].value);
+                else if (strcmp(ev->attrs[i].name, "w:right") == 0)
+                    rc->pg_margin_right = atoi(ev->attrs[i].value);
+                else if (strcmp(ev->attrs[i].name, "w:top") == 0)
+                    rc->pg_margin_top = atoi(ev->attrs[i].value);
+                else if (strcmp(ev->attrs[i].name, "w:bottom") == 0)
+                    rc->pg_margin_bottom = atoi(ev->attrs[i].value);
+            }
+
+            return 0;
+        }
+
+        /* Page size */
+        if (strcmp(ev->tag, "w:pgSz") == 0)
+        {
+            int i;
+
+            for (i = 0; i < ev->n_attrs; i++)
+            {
+                if (strcmp(ev->attrs[i].name, "w:w") == 0)
+                    rc->pg_width = atoi(ev->attrs[i].value);
+                else if (strcmp(ev->attrs[i].name, "w:h") == 0)
+                    rc->pg_height = atoi(ev->attrs[i].value);
+            }
+
+            return 0;
+        }
     }
 
     if (ev->type == XL_END)
@@ -543,6 +587,30 @@ int docx_import(struct Ed *ed, const char *path, char *err, size_t errsz, int *h
     /* Set hyph_out if autoHyphenation was detected */
     if (rc == 0 && hyph_out && ctx.hyph_detected)
         *hyph_out = 1;
+
+    /* Convert twips to editor columns using the document's twips_per_col */
+    if (rc == 0 && ctx.pg_margin_left > 0)
+        ed->margin_left = (ctx.pg_margin_left + ed->twips_per_col / 2) / ed->twips_per_col;
+
+    if (rc == 0 && ctx.pg_margin_right > 0)
+    {
+        int page_w = (ctx.pg_width > 0) ? ctx.pg_width : 12240;
+        int text_tw = page_w - ctx.pg_margin_left - ctx.pg_margin_right;
+
+        if (text_tw > 0)
+            ed->margin_right = ed->margin_left + (text_tw + ed->twips_per_col / 2) / ed->twips_per_col;
+    }
+
+    /* Preserve page geometry and horizontal margins in twips for lossless round-trip export regardless of font CPI */
+    if (rc == 0)
+    {
+        ed->page_w_tw = ctx.pg_width;
+        ed->page_h_tw = ctx.pg_height;
+        ed->margin_top_tw = ctx.pg_margin_top;
+        ed->margin_bottom_tw = ctx.pg_margin_bottom;
+        ed->margin_left_tw = ctx.pg_margin_left;
+        ed->margin_right_tw = ctx.pg_margin_right;
+    }
 
     return rc == 0 ? 0 : -1;
 }
@@ -1074,6 +1142,53 @@ int docx_export(const struct Ed *ed, const char *path, const TeConfig *cfg, int 
         }
 
         i = next;
+    }
+
+    /* Emit sectPr with page size/margins; captured import values or Letter defaults */
+    if (ed->margin_left > 0 || ed->margin_right > 0)
+    {
+        char sect_buf[256];
+        int left_tw, right_tw;
+        int page_w = (ed->page_w_tw > 0) ? ed->page_w_tw : 12240;
+        int page_h = (ed->page_h_tw > 0) ? ed->page_h_tw : 15840;
+        int marg_t = (ed->margin_top_tw > 0) ? ed->margin_top_tw : 1440;
+        int marg_b = (ed->margin_bottom_tw > 0) ? ed->margin_bottom_tw : 1440;
+
+        /* Prefer exact twips captured on import; fall back to column-derived */
+        if (ed->margin_left_tw > 0)
+            left_tw = ed->margin_left_tw;
+        else
+            left_tw = ed->margin_left * ed->twips_per_col;
+
+        if (ed->margin_right_tw > 0)
+        {
+            right_tw = ed->margin_right_tw;
+        }
+        else
+        {
+            right_tw = 1440;
+
+            if (ed->margin_right > ed->margin_left)
+            {
+                int span_cols = ed->margin_right - ed->margin_left;
+                int text_tw = span_cols * ed->twips_per_col;
+
+                right_tw = page_w - left_tw - text_tw;
+
+                if (right_tw < 0)
+                    right_tw = 0;
+            }
+        }
+
+        snprintf(sect_buf, sizeof(sect_buf), "<w:sectPr><w:pgSz w:w=\"%d\" w:h=\"%d\"/><w:pgMar w:top=\"%d\" w:right=\"%d\" w:bottom=\"%d\" w:left=\"%d\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/></w:sectPr>", page_w, page_h, marg_t, right_tw, marg_b, left_tw);
+
+        if (docx_write_str(&wc, sect_buf) != 0)
+        {
+            docx_seterr(err, errsz, "write failed on sectPr");
+            zip_close_write(zw);
+            fclose(fp);
+            return -1;
+        }
     }
 
     if (docx_write_str(&wc, DOCX_DOC_EPILOG) != 0 || docx_write_flush(&wc) != 0 || zip_end_entry(zw) != 0)

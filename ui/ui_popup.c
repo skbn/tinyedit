@@ -1379,3 +1379,321 @@ int ui_popup_search_results_popup(TeApp *app, const wchar_t *search, int *rows, 
 
     return choice;
 }
+
+/* Draw the tab header strip: names side-by-side, active one highlighted */
+static void popup_tab_draw_header(int y, int x, int w, PopupTab *tabs, int n_tabs, int active)
+{
+    int i;
+    int col = x + 2;
+    int room = w - 4;
+
+    attron(COLOR_PAIR(COL_POPUP));
+
+    for (i = 0; i < w - 4; i++)
+        mvaddch(y, x + 2 + i, ' ');
+
+    for (i = 0; i < n_tabs && room > 2; i++)
+    {
+        const char *name = tabs[i].name ? tabs[i].name : "";
+        int name_len = (int)strlen(name);
+        int cell = name_len + 2;
+
+        if (cell > room)
+            cell = room;
+
+        if (i == active)
+            attron(COLOR_PAIR(COL_POPUP_SEL));
+
+        mvaddch(y, col, '[');
+        mvaddnstr(y, col + 1, name, cell - 2);
+        mvaddch(y, col + cell - 1, ']');
+
+        if (i == active)
+            attroff(COLOR_PAIR(COL_POPUP_SEL));
+
+        col += cell + 1;
+        room -= cell + 1;
+    }
+
+    attroff(COLOR_PAIR(COL_POPUP));
+}
+
+/* Draw the fields of the active tab, highlighting the current row */
+static void popup_tab_draw_fields(int y, int x, int w, PopupTab *tab, int cur_field)
+{
+    int i;
+
+    if (!tab)
+        return;
+
+    for (i = 0; i < tab->n_fields; i++)
+    {
+        PopupField *f = &tab->fields[i];
+        char line[128];
+        int j;
+
+        if (i == cur_field && f->type != POPUP_FIELD_LABEL)
+            attron(COLOR_PAIR(COL_POPUP_SEL));
+        else
+            attron(COLOR_PAIR(COL_POPUP));
+
+        for (j = 0; j < w - 4; j++)
+            mvaddch(y + i, x + 2 + j, ' ');
+
+        if (f->type == POPUP_FIELD_INT)
+            snprintf(line, sizeof(line), "  %-20s %d", f->label ? f->label : "", f->int_val);
+        else if (f->type == POPUP_FIELD_BOOL)
+            snprintf(line, sizeof(line), "  %-20s %s", f->label ? f->label : "", f->int_val ? "ON" : "OFF");
+        else if (f->type == POPUP_FIELD_CHOICE)
+        {
+            const char *val = (f->n_choices > 0 && f->int_val >= 0 && f->int_val < f->n_choices) ? f->choices[f->int_val] : "-";
+
+            snprintf(line, sizeof(line), "  %-20s < %s >", f->label ? f->label : "", val);
+        }
+        else
+            snprintf(line, sizeof(line), "  %s", f->label ? f->label : "");
+
+        mvaddnstr(y + i, x + 2, line, w - 4);
+
+        if (i == cur_field && f->type != POPUP_FIELD_LABEL)
+            attroff(COLOR_PAIR(COL_POPUP_SEL));
+        else
+            attroff(COLOR_PAIR(COL_POPUP));
+    }
+}
+
+/* Prompt the user for an int value replacing the current field content */
+static void popup_tab_edit_int(PopupField *f)
+{
+    wchar_t wbuf[16];
+    int val;
+    int rc;
+
+    if (!f || f->type != POPUP_FIELD_INT)
+        return;
+
+    swprintf(wbuf, sizeof(wbuf) / sizeof(wbuf[0]), L"%d", f->int_val);
+
+    rc = ui_popup_input_wcs(f->label ? f->label : "Value", "New value:", wbuf, (int)(sizeof(wbuf) / sizeof(wbuf[0])));
+
+    if (rc < 0)
+        return;
+
+    val = 0;
+
+    {
+        int i;
+        int digits = 0;
+        int negative = 0;
+        int start = 0;
+
+        if (wbuf[0] == L'-')
+        {
+            negative = 1;
+            start = 1;
+        }
+
+        for (i = start; wbuf[i]; i++)
+        {
+            if (wbuf[i] < L'0' || wbuf[i] > L'9')
+                return;
+
+            val = val * 10 + (int)(wbuf[i] - L'0');
+            digits++;
+        }
+
+        if (!digits)
+            return;
+
+        if (negative)
+            val = -val;
+    }
+
+    if (val < f->int_min)
+        val = f->int_min;
+
+    if (val > f->int_max)
+        val = f->int_max;
+
+    f->int_val = val;
+}
+
+int ui_popup_tabbed(const char *title, PopupTab *tabs, int n_tabs, int initial_tab)
+{
+    int y;
+    int x;
+    int h;
+    int w;
+    int want_h;
+    int want_w;
+    int i;
+    int active_tab;
+    int cur_field = 0;
+    wint_t wch;
+    int rc;
+
+    if (!tabs || n_tabs <= 0)
+        return -1;
+
+    /* Layout height: border+title+tab_header+separator+fields(n)+footer+border = n+6 */
+    want_h = 10;
+
+    for (i = 0; i < n_tabs; i++)
+    {
+        int th = tabs[i].n_fields + 6;
+
+        if (th > want_h)
+            want_h = th;
+    }
+
+    if (want_h > LINES - 2)
+        want_h = LINES - 2;
+
+    /* Width must fit the footer hint plus borders/padding */
+    want_w = 48;
+
+    if (want_w > COLS)
+        want_w = COLS;
+
+    popup_hide_cursor();
+
+    ui_popup_center(want_h, want_w, &y, &x, &h, &w);
+
+    active_tab = (initial_tab >= 0 && initial_tab < n_tabs) ? initial_tab : 0;
+    cur_field = 0;
+
+    /* Land on the first non-LABEL field so Enter acts sensibly */
+    while (cur_field < tabs[active_tab].n_fields && tabs[active_tab].fields[cur_field].type == POPUP_FIELD_LABEL)
+        cur_field++;
+
+    for (;;)
+    {
+        int content_y;
+
+        standend();
+
+        ui_draw_popup_frame(y, x, h, w, title ? title : "Options");
+
+        content_y = y + 2;
+
+        popup_tab_draw_header(y + 2, x, w, tabs, n_tabs, active_tab);
+        popup_tab_draw_fields(content_y + 2, x, w, &tabs[active_tab], cur_field);
+
+        /* Status bar with hint */
+        attron(COLOR_PAIR(COL_STATUS));
+
+        for (i = 0; i < w - 4; i++)
+            mvaddch(y + h - 2, x + 2 + i, ' ');
+
+        mvaddnstr(y + h - 2, x + 2, "Tab=next  Arrows=move  Enter=edit  Esc=close", w - 4);
+
+        attroff(COLOR_PAIR(COL_STATUS));
+
+        refresh();
+
+        rc = wrapper_read_key(&wch);
+
+        if (rc == ERR)
+            continue;
+
+        if (wch == 27)
+        {
+            standend();
+
+            popup_restore_cursor();
+
+            return -1;
+        }
+
+        /* Tab moves to next tab, Shift-Tab (BTAB) to previous */
+        if (wch == L'\t' || (rc == KEY_CODE_YES && wch == KEY_STAB))
+        {
+            active_tab = (active_tab + 1) % n_tabs;
+            cur_field = 0;
+
+            while (cur_field < tabs[active_tab].n_fields && tabs[active_tab].fields[cur_field].type == POPUP_FIELD_LABEL)
+                cur_field++;
+
+            continue;
+        }
+
+        if (rc == KEY_CODE_YES && wch == KEY_BTAB)
+        {
+            active_tab = (active_tab - 1 + n_tabs) % n_tabs;
+            cur_field = 0;
+
+            while (cur_field < tabs[active_tab].n_fields && tabs[active_tab].fields[cur_field].type == POPUP_FIELD_LABEL)
+                cur_field++;
+
+            continue;
+        }
+
+        if (rc == KEY_CODE_YES && wch == KEY_UP)
+        {
+            int nf = tabs[active_tab].n_fields;
+
+            do
+            {
+                cur_field = (cur_field - 1 + nf) % nf;
+            } while (nf > 0 && tabs[active_tab].fields[cur_field].type == POPUP_FIELD_LABEL);
+
+            continue;
+        }
+
+        if (rc == KEY_CODE_YES && wch == KEY_DOWN)
+        {
+            int nf = tabs[active_tab].n_fields;
+
+            do
+            {
+                cur_field = (cur_field + 1) % nf;
+            } while (nf > 0 && tabs[active_tab].fields[cur_field].type == POPUP_FIELD_LABEL);
+
+            continue;
+        }
+
+        if (wch == L'\n' || wch == L'\r' || (rc == KEY_CODE_YES && wch == KEY_ENTER))
+        {
+            PopupField *f = NULL;
+
+            if (cur_field < 0 || cur_field >= tabs[active_tab].n_fields)
+                continue;
+
+            f = &tabs[active_tab].fields[cur_field];
+
+            if (f->type == POPUP_FIELD_INT)
+                popup_tab_edit_int(f);
+            else if (f->type == POPUP_FIELD_BOOL)
+                f->int_val = !f->int_val;
+            else if (f->type == POPUP_FIELD_CHOICE && f->n_choices > 0)
+                f->int_val = (f->int_val + 1) % f->n_choices;
+        }
+
+        /* Left/Right cycle CHOICE fields backwards/forwards */
+        if (rc == KEY_CODE_YES && wch == KEY_LEFT)
+        {
+            PopupField *f = NULL;
+
+            if (cur_field < 0 || cur_field >= tabs[active_tab].n_fields)
+                continue;
+
+            f = &tabs[active_tab].fields[cur_field];
+
+            if (f->type == POPUP_FIELD_CHOICE && f->n_choices > 0)
+                f->int_val = (f->int_val - 1 + f->n_choices) % f->n_choices;
+        }
+
+        if (rc == KEY_CODE_YES && wch == KEY_RIGHT)
+        {
+            PopupField *f = NULL;
+
+            if (cur_field < 0 || cur_field >= tabs[active_tab].n_fields)
+                continue;
+
+            f = &tabs[active_tab].fields[cur_field];
+
+            if (f->type == POPUP_FIELD_CHOICE && f->n_choices > 0)
+                f->int_val = (f->int_val + 1) % f->n_choices;
+        }
+    }
+}

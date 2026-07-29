@@ -175,6 +175,32 @@ typedef struct
     int rich_mode; /* rich-text mode: bold/italic/underline/alignment keys active */
 } TeApp;
 
+typedef struct
+{
+    const char *label;
+    int type;
+    int int_val;
+    int int_min;
+    int int_max;
+
+    /* CHOICE: array of option labels, int_val is the current index (0..n_choices-1) */
+    const char *const *choices;
+    int n_choices;
+} PopupField;
+
+typedef struct
+{
+    const char *name;
+    PopupField *fields;
+    int n_fields;
+} PopupTab;
+
+/* Tabbed popup field: INT=digits, BOOL=ON/OFF, CHOICE=cycle L/R/Enter, LABEL=ro */
+#define POPUP_FIELD_INT 0
+#define POPUP_FIELD_BOOL 1
+#define POPUP_FIELD_LABEL 2
+#define POPUP_FIELD_CHOICE 3
+
 /* CTRL(x) */
 #ifndef CTRL
 #define CTRL(ch) ((ch) - 64)
@@ -331,6 +357,9 @@ void ui_popup_info(const char *title, const char *msg);
 int ui_popup_confirm(const char *title, const char *msg);
 int ui_popup_list(const char *title, const char **items, int count, int initial);
 int ui_popup_input_wcs(const char *title, const char *prompt, wchar_t *wbuf, int wcap);
+
+/* Tabbed dialog: Tab/BTAB walk tabs, arrows walk fields, Enter edits/toggles/commits; 0=commit, -1=cancel */
+int ui_popup_tabbed(const char *title, PopupTab *tabs, int n_tabs, int initial_tab);
 int ui_popup_charset(const char *title, const char *cur, char *out, int outsz);
 int ui_popup_charset_pair(const char *view_in, const char *save_in, char *view_out, int view_outsz, char *save_out, int save_outsz);
 int ui_popup_replace(const wchar_t *search_in, const wchar_t *replace_in, wchar_t *search_out, int search_outsz, wchar_t *replace_out, int replace_outsz, int *case_sensitive, int *whole_word);
@@ -350,6 +379,8 @@ void te_status(TeApp *app, const char *fmt, ...);
 void te_draw_statusbar(TeApp *app);
 void te_draw_titlebar(TeApp *app);
 void te_draw_richbar(TeApp *app);
+void te_draw_ruler(TeApp *app);
+void ui_edit_layout(TeApp *app);
 void ui_box(int y, int x, int h, int w);
 void te_hline(int y, int x, int len);
 const char *te_wcs2u8(const wchar_t *wcs);

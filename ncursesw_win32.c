@@ -514,51 +514,167 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     is_control_key = 1;
                     break;
                 case VK_F1:
-                    key = KEY_F(1);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(1);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(1);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(1);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(25);
+                    else
+                        key = KEY_F(1);
+
                     is_control_key = 1;
                     break;
                 case VK_F2:
-                    key = KEY_F(2);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(2);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(2);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(2);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(26);
+                    else
+                        key = KEY_F(2);
+
                     is_control_key = 1;
                     break;
                 case VK_F3:
-                    key = KEY_F(3);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(3);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(3);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(3);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(27);
+                    else
+                        key = KEY_F(3);
+
                     is_control_key = 1;
                     break;
                 case VK_F4:
-                    key = KEY_F(4);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(4);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(4);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(4);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(28);
+                    else
+                        key = KEY_F(4);
+
                     is_control_key = 1;
                     break;
                 case VK_F5:
-                    key = KEY_F(5);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(5);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(5);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(5);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(29);
+                    else
+                        key = KEY_F(5);
+
                     is_control_key = 1;
                     break;
                 case VK_F6:
-                    key = KEY_F(6);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(6);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(6);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(6);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(30);
+                    else
+                        key = KEY_F(6);
+
                     is_control_key = 1;
                     break;
                 case VK_F7:
-                    key = KEY_F(7);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(7);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(7);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(7);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(31);
+                    else
+                        key = KEY_F(7);
+
                     is_control_key = 1;
                     break;
                 case VK_F8:
-                    key = KEY_F(8);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(8);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(8);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(8);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(32);
+                    else
+                        key = KEY_F(8);
+
                     is_control_key = 1;
                     break;
                 case VK_F9:
-                    key = KEY_F(9);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(9);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(9);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(9);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(33);
+                    else
+                        key = KEY_F(9);
+
                     is_control_key = 1;
                     break;
                 case VK_F10:
-                    key = KEY_F(10);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(10);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(10);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(10);
+                    else if (GetKeyState(VK_CONTROL) & 0x8000)
+                        key = KEY_F(34);
+                    else
+                        key = KEY_F(10);
+
                     is_control_key = 1;
                     break;
                 case VK_F11:
-                    key = KEY_F(11);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(11);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(11);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(11);
+                    else
+                        key = KEY_F(11);
+
                     is_control_key = 1;
                     break;
                 case VK_F12:
-                    key = KEY_F(12);
+                    if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_CONTROL) & 0x8000))
+                        key = KEY_SHIFT_CTRL_F(12);
+                    else if ((GetKeyState(VK_SHIFT) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000))
+                        key = KEY_SHIFT_ALT_F(12);
+                    else if (GetKeyState(VK_MENU) & 0x8000)
+                        key = KEY_ALT_F(12);
+                    else
+                        key = KEY_F(12);
+
                     is_control_key = 1;
                     break;
                 case VK_ESCAPE:

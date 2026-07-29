@@ -218,11 +218,13 @@ void wm_focus_by_index(TeWindowManager *wm, int index)
 }
 
 /* Recalculate layout for LEFT layout (tabs left, editor right) */
-void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int show_tabs, int spell_panel_mode, int rich_mode)
+void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int show_tabs, int spell_panel_mode, int rich_mode, int ruler_visible)
 {
     int tab_w;
     int panel_h;
     int rich_bar_h;
+    int ruler_h;
+    int header_h;
     int i;
 
     if (!wm)
@@ -230,6 +232,8 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
 
     tab_w = show_tabs ? 20 : 0;
     rich_bar_h = rich_mode ? 1 : 0;
+    ruler_h = (rich_mode && ruler_visible) ? 1 : 0;
+    header_h = rich_bar_h + ruler_h;
 
     if (spell_panel_mode == 2)
         panel_h = DICT_PANEL_HEIGHT;
@@ -255,9 +259,9 @@ void wm_recalc_layout_left(TeWindowManager *wm, int screen_w, int screen_h, int 
         else if (win->type == WIN_EDITOR)
         {
             win->x = tab_w;
-            win->y = 1 + rich_bar_h;
+            win->y = 1 + header_h;
             win->w = screen_w - tab_w;
-            win->h = screen_h - 1 - panel_h - rich_bar_h;
+            win->h = screen_h - 1 - panel_h - header_h;
         }
         else if (win->type == WIN_TRANSLATE)
         {

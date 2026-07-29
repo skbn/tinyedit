@@ -147,6 +147,7 @@ static const char *HELP_LINES[] =
         "",
         "  Rich text (WP4/RTF mode):",
 #ifdef PLATFORM_AMIGA
+        "    Alt+Shift+F1     Layout (margins, ruler)",
         "    Alt+Shift+B      Bold",
         "    Alt+Shift+I      Italic",
         "    Alt+Shift+U      Underline",
@@ -156,6 +157,8 @@ static const char *HELP_LINES[] =
         "    Alt+Shift+R      Align right",
         "    Alt+Shift+J      Justify",
 #else
+        "    Ctrl+Alt+G       Layout (margins, ruler)",
+        "    Alt+Shift+F1     Layout (margins, ruler)",
         "    Ctrl+Alt+B       Bold",
         "    Ctrl+Alt+I       Italic",
         "    Ctrl+Alt+U       Underline",
@@ -846,6 +849,13 @@ int handle_function_keys(TeApp *app, int ch, int is_key)
         return 1;
     }
 
+    /* Ctrl+Alt+G layout dialog and Shift+Alt+F1 */
+    if (ch == KEY_ALT_CTRL('G') || (is_key && ch == KEY_SHIFT_ALT_F(1)))
+    {
+        ui_edit_layout(app);
+        return 1;
+    }
+
     /* F2 / Ctrl+S : save */
     if ((is_key && ch == KEY_F(2)) || (!is_key && ch == CTRL('S')))
     {
@@ -1418,7 +1428,7 @@ int handle_control_keys(TeApp *app, int ch, int is_key)
 
             if (new_tab)
             {
-                ed_set_word_move_mode(new_tab->editor, app->cfg.word_move_mode);
+                te_tab_apply_config(new_tab, app->cfg.word_move_mode, app->cfg.default_ruler_mm, app->cfg.cols_per_inch);
                 te_app_add_tab(app, new_tab);
                 te_app_switch_tab(app, 0);
             }
@@ -1461,7 +1471,7 @@ int handle_control_keys(TeApp *app, int ch, int is_key)
         if (!new_tab)
             return 1;
 
-        ed_set_word_move_mode(new_tab->editor, app->cfg.word_move_mode);
+        te_tab_apply_config(new_tab, app->cfg.word_move_mode, app->cfg.default_ruler_mm, app->cfg.cols_per_inch);
         te_app_add_tab(app, new_tab);
         te_app_switch_tab(app, app->tab_count - 1);
 
@@ -1492,7 +1502,7 @@ int handle_control_keys(TeApp *app, int ch, int is_key)
         if (!new_tab)
             return 1;
 
-        ed_set_word_move_mode(new_tab->editor, app->cfg.word_move_mode);
+        te_tab_apply_config(new_tab, app->cfg.word_move_mode, app->cfg.default_ruler_mm, app->cfg.cols_per_inch);
         te_app_add_tab(app, new_tab);
         te_app_switch_tab(app, app->tab_count - 1);
 
@@ -2128,19 +2138,20 @@ int handle_editing_keys(TeApp *app, int ch, wint_t wch, int soft, int width, int
                 Ed *ed = te_app_get_editor(app);
                 int ww;
 
-                /* Clear stale LB_HYPHEN so the hyphen glyph doesn't render until re-wrapped */
+                /* Clear stale LB_HYPHEN so hyphen glyph does not render before rewrap */
                 if (ed->lines[ed->row]->brk == LB_HYPHEN)
                     ed->lines[ed->row]->brk = LB_WORD;
 
-                /* Reflow paragraph if line overflows so justified/hyph views stay in sync */
+                /* Rewrap immediately if the line now overflows so justified or hyphenated view stays in sync with the cursor position */
                 ww = editor_eff_wrap(app);
 
                 if (ww > 0)
                 {
                     const wchar_t *lw = ed_line_wcs(ed, ed->row);
                     int llen = ed_line_len(ed, ed->row);
+                    int tw = app->cfg.tab_width > 0 ? app->cfg.tab_width : 4;
 
-                    if (lw && wcs_vwidth_ex(lw, llen, 0, app->cfg.tab_width > 0 ? app->cfg.tab_width : 4) > ww)
+                    if (lw && wcs_vwidth_ex(lw, llen, 0, tw) > ww)
                         ed_auto_rewrap_after_edit(app);
                 }
             }

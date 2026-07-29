@@ -295,7 +295,7 @@ $(OBJDIR)/fmt_pwg.o: $(COMPDIR)/fmt_pwg.c $(COMPDIR)/fmt_pwg.h $(COMPDIR)/ed_att
 	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/fmt_pwg.c -o $@
 
 $(OBJDIR)/print.o: $(COMPDIR)/print.c $(COMPDIR)/print.h $(COMPDIR)/fmt_pdf.h $(COMPDIR)/editor.h $(COMPDIR)/config.h | $(OBJDIR)
-	$(CC) $(CFLAGS) $(CDEFS) -c $(COMPDIR)/print.c -o $@
+	$(CC) $(CFLAGS) $(CDEFS) $(URF_CFLAGS) -c $(COMPDIR)/print.c -o $@
 
 # UI objects
 $(OBJDIR)/te_app.o: $(UIDIR)/te_app.c $(UIDIR)/te.h | $(OBJDIR)

@@ -38,6 +38,8 @@ TeTab *te_tab_new(void)
     tab->charset_in[0] = '\0';
     tab->charset_out[0] = '\0';
     tab->rich_mode = 0;
+    tab->ruler_visible = 1;
+    tab->ruler_mm = 0;
 
     return tab;
 }
@@ -92,4 +94,21 @@ void te_tab_clear_search(TeTab *tab)
     }
 
     tab->modified = 0;
+}
+
+/* Apply config defaults to a freshly-created tab: word move, ruler units, CPI */
+void te_tab_apply_config(TeTab *tab, int word_move_mode, int ruler_mm, int cols_per_inch)
+{
+    if (!tab || !tab->editor)
+        return;
+
+    ed_set_word_move_mode(tab->editor, word_move_mode);
+
+    tab->ruler_mm = ruler_mm;
+
+    /* 1440 twips / CPI = twips per column */
+    if (cols_per_inch > 0)
+        tab->editor->twips_per_col = 1440 / cols_per_inch;
+    else
+        tab->editor->twips_per_col = 120;
 }

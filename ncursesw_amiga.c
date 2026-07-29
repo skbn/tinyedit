@@ -2895,6 +2895,118 @@ static int xlat_rawkey(UWORD code, UWORD qual, APTR iaddr)
             return KEY_ALT_RIGHT;
     }
 
+    /* Shift+Ctrl+F(n) -> KEY_SHIFT_CTRL_F(n) (check before Ctrl-only) */
+    if ((qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) && (qual & IEQUALIFIER_CONTROL))
+    {
+        switch (code)
+        {
+        case 0x50:
+            return KEY_SHIFT_CTRL_F(1);
+        case 0x51:
+            return KEY_SHIFT_CTRL_F(2);
+        case 0x52:
+            return KEY_SHIFT_CTRL_F(3);
+        case 0x53:
+            return KEY_SHIFT_CTRL_F(4);
+        case 0x54:
+            return KEY_SHIFT_CTRL_F(5);
+        case 0x55:
+            return KEY_SHIFT_CTRL_F(6);
+        case 0x56:
+            return KEY_SHIFT_CTRL_F(7);
+        case 0x57:
+            return KEY_SHIFT_CTRL_F(8);
+        case 0x58:
+            return KEY_SHIFT_CTRL_F(9);
+        case 0x59:
+            return KEY_SHIFT_CTRL_F(10);
+        }
+    }
+
+    /* Shift+Alt+F(n) -> KEY_SHIFT_ALT_F(n) (check before Alt-only) */
+    if ((qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) && (qual & (IEQUALIFIER_LALT | IEQUALIFIER_RALT)))
+    {
+        switch (code)
+        {
+        case 0x50:
+            return KEY_SHIFT_ALT_F(1);
+        case 0x51:
+            return KEY_SHIFT_ALT_F(2);
+        case 0x52:
+            return KEY_SHIFT_ALT_F(3);
+        case 0x53:
+            return KEY_SHIFT_ALT_F(4);
+        case 0x54:
+            return KEY_SHIFT_ALT_F(5);
+        case 0x55:
+            return KEY_SHIFT_ALT_F(6);
+        case 0x56:
+            return KEY_SHIFT_ALT_F(7);
+        case 0x57:
+            return KEY_SHIFT_ALT_F(8);
+        case 0x58:
+            return KEY_SHIFT_ALT_F(9);
+        case 0x59:
+            return KEY_SHIFT_ALT_F(10);
+        }
+    }
+
+    /* Ctrl+F(n) folded to KEY_F(24+n) so callers can bind cross-platform */
+    if (qual & IEQUALIFIER_CONTROL)
+    {
+        switch (code)
+        {
+        case 0x50:
+            return KEY_F(25); /* Ctrl+F1 */
+        case 0x51:
+            return KEY_F(26); /* Ctrl+F2 */
+        case 0x52:
+            return KEY_F(27); /* Ctrl+F3 */
+        case 0x53:
+            return KEY_F(28); /* Ctrl+F4 */
+        case 0x54:
+            return KEY_F(29); /* Ctrl+F5 */
+        case 0x55:
+            return KEY_F(30); /* Ctrl+F6 */
+        case 0x56:
+            return KEY_F(31); /* Ctrl+F7 */
+        case 0x57:
+            return KEY_F(32); /* Ctrl+F8 */
+        case 0x58:
+            return KEY_F(33); /* Ctrl+F9 */
+        case 0x59:
+            return KEY_F(34); /* Ctrl+F10 */
+        }
+    }
+
+    /* Alt+F(n) folded to KEY_ALT_F(n) so callers can bind cross-platform */
+    if (qual & (IEQUALIFIER_LALT | IEQUALIFIER_RALT))
+    {
+        switch (code)
+        {
+        case 0x50:
+            return KEY_ALT_F(1);
+        case 0x51:
+            return KEY_ALT_F(2);
+        case 0x52:
+            return KEY_ALT_F(3);
+        case 0x53:
+            return KEY_ALT_F(4);
+        case 0x54:
+            return KEY_ALT_F(5);
+        case 0x55:
+            return KEY_ALT_F(6);
+        case 0x56:
+            return KEY_ALT_F(7);
+        case 0x57:
+            return KEY_ALT_F(8);
+        case 0x58:
+            return KEY_ALT_F(9);
+        case 0x59:
+            return KEY_ALT_F(10);
+        }
+    }
+
     /* Special keys - return ncurses KEY_* values, not raw Amiga codes */
     switch (code)
     {

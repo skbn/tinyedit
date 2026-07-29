@@ -25,6 +25,11 @@
 #include "fmt_pdf.h"
 #include "print.h"
 
+#if defined(USE_FREETYPE) || defined(HAVE_PRINTER)
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#endif
+
 #if defined(PLATFORM_AMIGA)
 #include "print_amiga.h"
 #endif
@@ -337,4 +342,77 @@ int te_print_document_ex(const struct Ed *ed, const TeConfig *cfg, const char *c
         return -1;
 
     return print_platform(ed, cfg, charset, file_path, hyph, hyph_user, err, errsz, warn, warnsz);
+}
+
+/* Calculate CPI from TTF monospace advance via FreeType; CPI = 1440 / twips_per_col */
+int te_cfg_calc_cpi_from_ttf(const char *font_path, int font_size_pt, int *out_cpi)
+{
+#if defined(USE_FREETYPE) || defined(HAVE_PRINTER)
+    FT_Library lib = NULL;
+    FT_Face face = NULL;
+    long adv_26dot6;
+    long adv_twips;
+    int cpi;
+
+    if (!font_path || !font_path[0] || !out_cpi)
+        return -1;
+
+    if (font_size_pt <= 0)
+        font_size_pt = 14;
+
+    if (FT_Init_FreeType(&lib) != 0)
+        return -1;
+
+    if (FT_New_Face(lib, font_path, 0, &face) != 0)
+    {
+        FT_Done_FreeType(lib);
+        return -1;
+    }
+
+    /* Set char size in 26.6 fixed point (pt * 64). DPI=72 so 1pt = 1px */
+    if (FT_Set_Char_Size(face, 0, font_size_pt * 64, 0, 72) != 0)
+    {
+        FT_Done_Face(face);
+        FT_Done_FreeType(lib);
+        return -1;
+    }
+
+    /* max_advance is 1/64 px at 72 DPI; twips = adv_26dot6 * 20 / 64 */
+    adv_26dot6 = (long)face->size->metrics.max_advance;
+
+    if (adv_26dot6 <= 0)
+    {
+        FT_Done_Face(face);
+        FT_Done_FreeType(lib);
+        return -1;
+    }
+
+    adv_twips = adv_26dot6 * 20L / 64L;
+
+    if (adv_twips <= 0)
+    {
+        FT_Done_Face(face);
+        FT_Done_FreeType(lib);
+        return -1;
+    }
+
+    cpi = (int)(1440L / adv_twips);
+
+    if (cpi <= 0)
+        cpi = 1;
+
+    *out_cpi = cpi;
+
+    FT_Done_Face(face);
+    FT_Done_FreeType(lib);
+
+    return 0;
+
+#else
+
+    if (out_cpi)
+        *out_cpi = 12;
+
+    return 0;
+#endif
 }

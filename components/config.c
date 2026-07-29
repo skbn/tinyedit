@@ -319,6 +319,11 @@ void te_cfg_defaults(TeConfig *cfg)
     /* Word movement: 0=standard, 1=vim-like (non-space blocks) */
     cfg->word_move_mode = 0;
 
+    /* Rich-mode defaults: Letter, columns, 12 CPI (DejaVu Sans Mono 10pt) */
+    cfg->default_page_size = 0; /* Letter */
+    cfg->default_ruler_mm = 0;  /* columns */
+    cfg->cols_per_inch = 12;    /* 12 CPI = 120 twips/col */
+
     /* Initialize color_map as identity mapping (pen 0=black, 1=red, etc) */
     for (i = 0; i < 16; i++)
         cfg->color_map[i] = i;
@@ -937,6 +942,28 @@ int te_cfg_load(TeConfig *cfg, const char *path)
         else if (strcasecmp(word, "WORD_MOVE_MODE") == 0)
         {
             cfg->word_move_mode = atoi(rest);
+        }
+        else if (strcasecmp(word, "DEFAULT_PAGE_SIZE") == 0)
+        {
+            int v = atoi(rest);
+
+            if (v < 0)
+                v = 0;
+
+            cfg->default_page_size = v;
+        }
+        else if (strcasecmp(word, "DEFAULT_RULER_MM") == 0)
+        {
+            cfg->default_ruler_mm = parse_yesno(rest);
+        }
+        else if (strcasecmp(word, "COLS_PER_INCH") == 0)
+        {
+            int v = atoi(rest);
+
+            if (v < 1)
+                v = 12;
+
+            cfg->cols_per_inch = v;
         }
         else if (strcasecmp(word, "COLORMAP") == 0)
         {
@@ -1562,6 +1589,9 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
                 strcasecmp(word, "ASSIST_AUTO_CAP") == 0 ||
                 strcasecmp(word, "ASSIST_REPEAT_CHECK") == 0 ||
                 strcasecmp(word, "WORD_MOVE_MODE") == 0 ||
+                strcasecmp(word, "DEFAULT_PAGE_SIZE") == 0 ||
+                strcasecmp(word, "DEFAULT_RULER_MM") == 0 ||
+                strcasecmp(word, "COLS_PER_INCH") == 0 ||
                 strcasecmp(word, "COLOR") == 0 ||
                 strcasecmp(word, "COLORMAP") == 0 ||
                 strcasecmp(word, "PRINT_DESTINATION") == 0 ||
@@ -1683,6 +1713,11 @@ int te_cfg_save(const TeConfig *cfg, const char *path)
     fprintf(out, "ASSIST_AUTO_CAP %s\n", cfg->assist_auto_cap ? "YES" : "NO");
     fprintf(out, "ASSIST_REPEAT_CHECK %s\n", cfg->assist_repeat_check ? "YES" : "NO");
     fprintf(out, "WORD_MOVE_MODE %d\n", cfg->word_move_mode);
+
+    /* Rich-mode defaults */
+    fprintf(out, "DEFAULT_PAGE_SIZE %d\n", cfg->default_page_size);
+    fprintf(out, "DEFAULT_RULER_MM %s\n", cfg->default_ruler_mm ? "YES" : "NO");
+    fprintf(out, "COLS_PER_INCH %d\n", cfg->cols_per_inch);
 
     /* Color pairs */
     fprintf(out, "COLOR NORMAL %s %s\n", color_name(cfg->color_fg[COL_NORMAL]), color_name(cfg->color_bg[COL_NORMAL]));

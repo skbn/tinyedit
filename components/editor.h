@@ -161,6 +161,23 @@ struct Ed
 
     /* Input attribute mask applied to newly inserted characters */
     unsigned short input_mask;
+
+    /* Rich mode margins in editor columns; 0 = "no margin set" */
+    int margin_left;
+    int margin_right;
+
+    /* Page geometry in twips; 0 = not set, captured on import for round-trip */
+    int page_w_tw;
+    int page_h_tw;
+    int margin_top_tw;
+    int margin_bottom_tw;
+
+    /* Horizontal margins in twips; 0 = derive from columns, import captures exact values */
+    int margin_left_tw;
+    int margin_right_tw;
+
+    /* Twips per column; 1440/CPI, default 120, stored per-doc for stable round-trips */
+    int twips_per_col;
 };
 
 #define INIT_ALLOC 1024

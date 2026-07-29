@@ -380,41 +380,102 @@ int editor_eff_wrap(TeApp *app)
     int cfgw = app->wrap_col;
     int ln_offset = 0;
     int limit;
-
-    if (cfgw <= 0)
-        return 0; /* AUTOWRAP disabled */
+    TeTab *tab = NULL;
+    Ed *ed = NULL;
 
     if (COLS <= 10)
         return 0; /* Too narrow: scroll instead */
 
-    if (te_app_get_show_line_numbers(app))
+    tab = te_app_get_active_tab(app);
+
+    if (tab)
+        ed = tab->editor;
+
+    /* editor_body_offset already includes margin_left, so subtracting it gives the raw text room, not the raw screen width */
+    if (ed)
     {
         EdInfo info;
 
-        ed_get_info(te_app_get_editor(app), &info);
+        ed_get_info(ed, &info);
+
         ln_offset = editor_body_offset(app, info.line_count);
     }
 
-    limit = COLS - ln_offset - 1; /* one column margin */
+    limit = COLS - ln_offset - 1; /* One column margin */
 
     if (limit < 20)
         limit = 20;
 
+    /* Rich mode: margin_right defines the wrap column directly; margin_left is already baked into ln_offset, so the visible width is right-left */
+    if (tab && tab->rich_mode && ed && ed->margin_right > 0 && ed->margin_right > ed->margin_left)
+    {
+        int span = ed->margin_right - ed->margin_left;
+
+        if (span > limit)
+            return limit;
+
+        return span;
+    }
+
+    /* Rich mode without margins set: default to 65 or the screen limit */
+    if (tab && tab->rich_mode)
+    {
+        int def = 65;
+
+        if (def > limit)
+            def = limit;
+
+        return def;
+    }
+
+    /* Plain mode: honour the config wrap_col as before */
+    if (cfgw <= 0)
+        return 0; /* AUTOWRAP disabled */
+
     if (cfgw > limit)
-        return limit; /* Screen narrower than configured */
+        return limit;
 
     return cfgw;
 }
 
-/* Text width for soft-wrap and alignment. Clamp to wrap_col when set */
+/* Text width: plain mode clamps to wrap_col, rich mode uses margins */
 int editor_text_width(TeApp *app, int body_width)
 {
     int cfgw;
     int limit;
+    TeTab *tab = NULL;
+    Ed *ed = NULL;
+    int def = 65;
 
     if (body_width <= 0)
         return body_width;
 
+    tab = te_app_get_active_tab(app);
+
+    if (tab)
+        ed = tab->editor;
+
+    /* Rich mode never uses wrap_col; margins alone drive the wrap width */
+    if (tab && tab->rich_mode && ed)
+    {
+        if (ed->margin_right > 0 && ed->margin_right > ed->margin_left)
+        {
+            int span = ed->margin_right - ed->margin_left;
+
+            if (span > body_width)
+                return body_width;
+
+            return span;
+        }
+
+        /* No margins set: pick a reasonable page width and cap to body */
+        if (def > body_width)
+            def = body_width;
+
+        return def;
+    }
+
+    /* Plain mode: honour the config wrap_col like before */
     cfgw = app->wrap_col;
 
     if (cfgw <= 0)
@@ -952,8 +1013,8 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
     align_ind = line_align_indent(cur_align, seg_len > 0 ? wcs_vwidth_ex(&l[seg_start], seg_len, 0, s_tab_width) : 0, width - hyph_reserve);
     eff_ln_offset = ln_offset + align_ind;
 
-    /* Justify intermediate sub-rows; hyphen-broken lines never justified */
-    is_para_last = (seg_end == len) && (cur_brk == LB_PARA || cur_brk == LB_HYPHEN);
+    /* Justify intermediate sub-rows and single-line paragraphs */
+    is_para_last = (seg_end == len) && (cur_brk == LB_PARA);
 
     if (ed_segment_should_justify(cur_align, is_para_last, seg_start == 0 && seg_end == len) && seg_len > 0 && seg_len < (int)(sizeof(just_offsets) / sizeof(just_offsets[0])))
     {
@@ -1185,12 +1246,12 @@ static void paint_segment(PaintCtx *pc, int li, const wchar_t *l, int len, int s
         attroff(COLOR_PAIR(COL_CURRENT_LINE));
     }
 
-    /* Draw column ruler */
-    if (app->cfg.ruler_col > 0)
+    /* Column ruler: visible over text, suppressed in rich mode (WordStar ruler shows margins) */
+    if (app->cfg.ruler_col > 0 && !app->rich_mode)
     {
         int rx = offset_x + ln_offset + app->cfg.ruler_col;
 
-        if (rx >= x_text_end && rx < offset_x + ln_offset + body_width)
+        if (rx >= offset_x + ln_offset && rx < offset_x + ln_offset + body_width)
         {
             attron(COLOR_PAIR(COL_GUIDE));
             mvaddch(offset_y + sr, rx, '|');
@@ -1307,6 +1368,7 @@ void ui_editor_draw_body(TeApp *app)
     int match_row;
     int match_col;
     TeTab *tab = te_app_get_active_tab(app);
+
     SyntaxLang lang = SYNTAX_LANG_NONE;
     SyntaxState syntax_state = SYNTAX_STATE_NORMAL;
     SyntaxClass *shared_classes = NULL;
@@ -2045,15 +2107,23 @@ static char *collect_rapid_paste(wint_t first_wch)
 /* Helper function to redraw editor */
 static void redraw_editor(TeApp *app)
 {
+    TeTab *tab = NULL;
+    int rv;
+
     erase();
     standend();
 
     /* Recalculate layout */
-    wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode, app->rich_mode);
+    tab = te_app_get_active_tab(app);
+
+    rv = tab ? tab->ruler_visible : 0;
+
+    wm_recalc_layout_left(app->wm, COLS, LINES, app->show_tabs, app->spell_panel_mode, app->rich_mode, rv);
 
     te_draw_titlebar(app);
 
     te_draw_richbar(app);
+    te_draw_ruler(app);
 
     ui_tabs_draw_panel(app);
 

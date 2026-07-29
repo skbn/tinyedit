@@ -30,11 +30,20 @@ typedef struct
 
     /* Per-tab hyphenation toggle (Alt+E), dict shared on TeApp */
     int hyph_wrap_enabled;
+
+    /* Per-tab visibility of the WordStar ruler in rich mode */
+    int ruler_visible;
+
+    /* Ruler units: 0 = columns (default), 1 = millimetres */
+    int ruler_mm;
 } TeTab;
 
 TeTab *te_tab_new(void);
 TeTab *te_tab_new_with_content(const char *filename, const char *content);
 void te_tab_free(TeTab *tab);
 void te_tab_clear_search(TeTab *tab);
+
+/* Apply config defaults (word move, ruler units, CPI) to a fresh tab */
+void te_tab_apply_config(TeTab *tab, int word_move_mode, int ruler_mm, int cols_per_inch);
 
 #endif

@@ -471,6 +471,10 @@ int te_app_get_show_line_numbers(TeApp *app)
     if (!tab)
         return 0;
 
+    /* Line numbers are suppressed in rich mode — the WordStar ruler and margins define the layout, not a line-number gutter */
+    if (tab->rich_mode)
+        return 0;
+
     return tab->show_line_numbers;
 }
 
@@ -789,6 +793,352 @@ void te_draw_richbar(TeApp *app)
     mvaddnstr(1, 0, buf, COLS);
 
     attroff(COLOR_PAIR(COL_STATUS));
+}
+
+/* WordStar ruler below richbar; ticks every 5/10 cols, marks margins */
+void te_draw_ruler(TeApp *app)
+{
+    TeTab *tab = NULL;
+    Ed *ed = NULL;
+    EdInfo info;
+    int y;
+    int x;
+    int ln_offset = 0;
+    int body_cols;
+    int ml;
+    int mr;
+    int screen_x;
+    char ch;
+    int tpc;
+    int tw;
+    int prev_tw;
+    int cm;
+    int prev_cm;
+    int half_cm;
+    int prev_half_cm;
+
+    if (!app)
+        return;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab || !tab->rich_mode || !tab->ruler_visible || !tab->editor)
+        return;
+
+    ed = tab->editor;
+
+    /* Ruler sits right below the richbar which is on row 1 */
+    y = 2;
+
+    ed_get_info(ed, &info);
+
+    /* Line-number width only, do not include margin_left here or the ticks would follow the margin instead of showing where it lands */
+    if (te_app_get_show_line_numbers(app))
+    {
+        int n = info.line_count > 0 ? info.line_count : 1;
+        int mg = 1;
+
+        while (n >= 10)
+        {
+            n /= 10;
+            mg++;
+        }
+
+        ln_offset = mg + 1;
+    }
+
+    body_cols = COLS - ln_offset;
+
+    if (body_cols < 1)
+        return;
+
+    ml = ed->margin_left;
+    mr = ed->margin_right;
+
+    if (ml < 0)
+        ml = 0;
+
+    if (ml >= body_cols)
+        ml = body_cols - 1;
+
+    if (mr < 0)
+        mr = 0;
+
+    if (mr >= body_cols)
+        mr = body_cols - 1;
+
+    standend();
+    attron(COLOR_PAIR(COL_STATUS));
+
+    move(y, 0);
+
+    for (x = 0; x < COLS; x++)
+        addch(' ');
+
+    /* Column markers; ticks count from 0 at [ so mm/cm reflect distance from left margin */
+    for (x = 0; x < body_cols; x++)
+    {
+        screen_x = ln_offset + x;
+
+        if (tab->ruler_mm)
+        {
+            /* mm mode: 1 cm = 567 twips, 5 mm = 283 twips; mark cm with digit, 5mm with ':' */
+            tpc = ed->twips_per_col;
+            tw = x * tpc;
+            prev_tw = (x - 1) * tpc;
+            cm = tw / 567;
+            prev_cm = prev_tw / 567;
+            half_cm = tw / 283;
+            prev_half_cm = prev_tw / 283;
+
+            if (x > 0 && cm != prev_cm)
+                ch = (char)('0' + (cm % 10));
+            else if (x > 0 && half_cm != prev_half_cm)
+                ch = ':';
+            else
+                ch = '.';
+        }
+        else
+        {
+            if (x > 0 && (x % 10) == 0)
+                ch = (char)('0' + ((x / 10) % 10));
+            else if (x > 0 && (x % 5) == 0)
+                ch = ':';
+            else
+                ch = '.';
+        }
+
+        mvaddch(y, screen_x, (chtype)ch);
+    }
+
+    /* Overlay margin markers; rich mode: [ at body col 0, ] at (mr-ml) */
+    if (mr > ml)
+    {
+        if (tab->rich_mode)
+        {
+            mvaddch(y, ln_offset + 0, (chtype)'[');
+            mvaddch(y, ln_offset + (mr - ml), (chtype)']');
+        }
+        else
+        {
+            mvaddch(y, ln_offset + ml, (chtype)'[');
+            mvaddch(y, ln_offset + mr, (chtype)']');
+        }
+    }
+
+    attroff(COLOR_PAIR(COL_STATUS));
+}
+
+/* Layout dialog with tabbed popup: margins on tab 1, ruler on tab 2 */
+void ui_edit_layout(TeApp *app)
+{
+    static const char *const page_size_names[] =
+        {
+            "Letter", "Legal", "Tabloid", "Statement", "Executive",
+            "Folio", "Quarto", "10x14", "A3", "A4",
+            "A5", "A6", "B4 (ISO)", "B5 (ISO)", "B6 (ISO)",
+            "C5 Env", "DL Env", "Monarch Env", "Comm10 Env"};
+
+    static const int page_size_w[] =
+        {
+            12240, 12240, 15840, 7920, 10440,
+            12240, 11520, 14400, 16838, 11906,
+            8391, 5953, 14173, 9978, 7087,
+            9184, 6236, 5580, 5940};
+
+    static const int page_size_h[] =
+        {
+            15840, 20160, 24480, 12240, 15120,
+            18720, 14400, 20160, 23811, 16838,
+            11906, 8391, 20013, 14173, 9978,
+            12983, 12472, 10800, 13680};
+
+    static const char *const orient_names[] = {"Portrait", "Landscape"};
+    static const char *const ruler_unit_names[] = {"Columns", "Millimetres"};
+
+    TeTab *tab = NULL;
+    Ed *ed = NULL;
+    PopupField margin_fields[6];
+    PopupField ruler_fields[2];
+    PopupTab tabs[2];
+    int rc;
+    int size_idx = 0;
+    int orient_idx = 0;
+    int i;
+    int init_left_mm, init_right_mm;
+    int new_size;
+    int new_orient;
+    int lmm;
+    int rmm;
+
+    if (!app)
+        return;
+
+    tab = te_app_get_active_tab(app);
+
+    if (!tab || !tab->editor)
+        return;
+
+    if (!tab->rich_mode)
+    {
+        te_status(app, "Layout: only available in rich mode");
+        return;
+    }
+
+    ed = tab->editor;
+
+    /* Determine current page size index from captured geometry, or from the configured default page size for new documents */
+    if (ed->page_w_tw > 0 && ed->page_h_tw > 0)
+    {
+        int pw = ed->page_w_tw;
+        int ph = ed->page_h_tw;
+
+        for (i = 0; i < 19; i++)
+        {
+            if (page_size_w[i] == pw && page_size_h[i] == ph)
+            {
+                size_idx = i;
+                orient_idx = 0;
+                break;
+            }
+            if (page_size_w[i] == ph && page_size_h[i] == pw)
+            {
+                size_idx = i;
+                orient_idx = 1;
+                break;
+            }
+        }
+    }
+    else
+    {
+        size_idx = app->cfg.default_page_size;
+        orient_idx = 0;
+    }
+
+    margin_fields[0].label = "Page size";
+    margin_fields[0].type = POPUP_FIELD_CHOICE;
+    margin_fields[0].int_val = size_idx;
+    margin_fields[0].int_min = 0;
+    margin_fields[0].int_max = 18;
+    margin_fields[0].choices = page_size_names;
+    margin_fields[0].n_choices = 19;
+
+    margin_fields[1].label = "Orientation";
+    margin_fields[1].type = POPUP_FIELD_CHOICE;
+    margin_fields[1].int_val = orient_idx;
+    margin_fields[1].int_min = 0;
+    margin_fields[1].int_max = 1;
+    margin_fields[1].choices = orient_names;
+    margin_fields[1].n_choices = 2;
+
+    margin_fields[2].label = "Left margin (cols)";
+    margin_fields[2].type = POPUP_FIELD_INT;
+    margin_fields[2].int_val = ed->margin_left;
+    margin_fields[2].int_min = 0;
+    margin_fields[2].int_max = 999;
+    margin_fields[2].choices = NULL;
+    margin_fields[2].n_choices = 0;
+
+    margin_fields[3].label = "Right margin (cols)";
+    margin_fields[3].type = POPUP_FIELD_INT;
+    margin_fields[3].int_val = ed->margin_right;
+    margin_fields[3].int_min = 0;
+    margin_fields[3].int_max = 999;
+    margin_fields[3].choices = NULL;
+    margin_fields[3].n_choices = 0;
+
+    /* mm fields: convert from cols using twips_per_col. mm = cols * tpc * 254 / 14400 (rounded) */
+    init_left_mm = (int)((long)ed->margin_left * ed->twips_per_col * 254L + 7200L) / 14400;
+    init_right_mm = (int)((long)ed->margin_right * ed->twips_per_col * 254L + 7200L) / 14400;
+
+    margin_fields[4].label = "Left margin (mm)";
+    margin_fields[4].type = POPUP_FIELD_INT;
+    margin_fields[4].int_val = init_left_mm;
+    margin_fields[4].int_min = 0;
+    margin_fields[4].int_max = 999;
+    margin_fields[4].choices = NULL;
+    margin_fields[4].n_choices = 0;
+
+    margin_fields[5].label = "Right margin (mm)";
+    margin_fields[5].type = POPUP_FIELD_INT;
+    margin_fields[5].int_val = init_right_mm;
+    margin_fields[5].int_min = 0;
+    margin_fields[5].int_max = 999;
+    margin_fields[5].choices = NULL;
+    margin_fields[5].n_choices = 0;
+
+    ruler_fields[0].label = "Visible";
+    ruler_fields[0].type = POPUP_FIELD_BOOL;
+    ruler_fields[0].int_val = tab->ruler_visible;
+    ruler_fields[0].int_min = 0;
+    ruler_fields[0].int_max = 1;
+    ruler_fields[0].choices = NULL;
+    ruler_fields[0].n_choices = 0;
+
+    ruler_fields[1].label = "Units";
+    ruler_fields[1].type = POPUP_FIELD_CHOICE;
+    ruler_fields[1].int_val = tab->ruler_mm;
+    ruler_fields[1].int_min = 0;
+    ruler_fields[1].int_max = 1;
+    ruler_fields[1].choices = ruler_unit_names;
+    ruler_fields[1].n_choices = 2;
+
+    tabs[0].name = "Margins";
+    tabs[0].fields = margin_fields;
+    tabs[0].n_fields = 6;
+
+    tabs[1].name = "Ruler";
+    tabs[1].fields = ruler_fields;
+    tabs[1].n_fields = 2;
+
+    rc = ui_popup_tabbed("Rich mode layout", tabs, 2, 0);
+
+    /* Commit: page size and orientation */
+    new_size = margin_fields[0].int_val;
+    new_orient = margin_fields[1].int_val;
+
+    if (new_orient == 0)
+    {
+        ed->page_w_tw = page_size_w[new_size];
+        ed->page_h_tw = page_size_h[new_size];
+    }
+    else
+    {
+        ed->page_w_tw = page_size_h[new_size];
+        ed->page_h_tw = page_size_w[new_size];
+    }
+
+    /* If mm values changed, prefer mm; otherwise use cols */
+    if (margin_fields[4].int_val != init_left_mm || margin_fields[5].int_val != init_right_mm)
+    {
+        /* User edited mm: convert to cols (twips = mm * 14400 / 254) */
+        int lt = (int)((long)margin_fields[4].int_val * 14400L / 254L);
+        int rt = (int)((long)margin_fields[5].int_val * 14400L / 254L);
+
+        ed->margin_left = lt / ed->twips_per_col;
+        ed->margin_right = rt / ed->twips_per_col;
+    }
+    else
+    {
+        ed->margin_left = margin_fields[2].int_val;
+        ed->margin_right = margin_fields[3].int_val;
+    }
+
+    tab->ruler_visible = ruler_fields[0].int_val;
+    tab->ruler_mm = ruler_fields[1].int_val;
+
+    /* Invalidate captured twips so export derives from columns */
+    ed->margin_left_tw = 0;
+    ed->margin_right_tw = 0;
+
+    /* Reflow hard-wrap paragraphs to the new margin span */
+    if (app->hard_wrap)
+        ed_auto_rewrap_after_edit(app);
+
+    lmm = (int)((long)ed->margin_left * ed->twips_per_col * 254L + 7200L) / 14400;
+    rmm = (int)((long)ed->margin_right * ed->twips_per_col * 254L + 7200L) / 14400;
+
+    te_status(app, "Layout: %s %s  L=%dcol/%dmm R=%dcol/%dmm  ruler=%s %s", page_size_names[margin_fields[0].int_val], orient_names[margin_fields[1].int_val], ed->margin_left, lmm, ed->margin_right, rmm, tab->ruler_visible ? "ON" : "OFF", tab->ruler_mm ? "mm" : "cols");
 }
 
 /* Draw status bar with hints and charset info */

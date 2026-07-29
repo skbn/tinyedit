@@ -162,6 +162,16 @@ int main(int argc, char **argv)
     /* Load config (creates default file if missing) */
     te_cfg_load(&cfg, cfg_path);
 
+    /* Recalculate cols_per_inch from TTF advance so CPI matches the configured font */
+    if (cfg.ttf_enabled && cfg.ttf_font[0])
+    {
+        int auto_cpi = 0;
+        int sz = cfg.ttf_size > 0 ? cfg.ttf_size : 14;
+
+        if (te_cfg_calc_cpi_from_ttf(cfg.ttf_font, sz, &auto_cpi) == 0 && auto_cpi > 0)
+            cfg.cols_per_inch = auto_cpi;
+    }
+
 #ifdef PLATFORM_AMIGA
     /* Amiga setup (before initscr): background color, font, cursor */
     amiga_set_default_bg_color(cfg.default_bg_color);
@@ -499,7 +509,7 @@ int main(int argc, char **argv)
 
             tab->show_line_numbers = cfg.show_line_numbers;
 
-            ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
+            te_tab_apply_config(tab, cfg.word_move_mode, cfg.default_ruler_mm, cfg.cols_per_inch);
 
             te_app_add_tab(app, tab);
             te_app_switch_tab(app, 0);
@@ -702,7 +712,7 @@ int main(int argc, char **argv)
             {
                 tab->show_line_numbers = cfg.show_line_numbers;
 
-                ed_set_word_move_mode(tab->editor, cfg.word_move_mode);
+                te_tab_apply_config(tab, cfg.word_move_mode, cfg.default_ruler_mm, cfg.cols_per_inch);
 
                 te_app_add_tab(app, tab);
                 te_app_switch_tab(app, 0);

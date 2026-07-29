@@ -25,6 +25,8 @@
 /* WP 4.2 default margin settings (from WP 4.2 format documentation and Amiga WP 4.2 files) */
 #define WP4_DEFAULT_LEFT_MARGIN 10
 #define WP4_DEFAULT_RIGHT_MARGIN 75
+#define WP4_DEFAULT_TOP_MARGIN 5
+#define WP4_DEFAULT_BOTTOM_MARGIN 50
 #define WP4_CENTER_COL ((WP4_DEFAULT_LEFT_MARGIN + WP4_DEFAULT_RIGHT_MARGIN) / 2)
 
 /* One recorded styled run, document-wide */
@@ -583,6 +585,93 @@ int wp4_import(struct Ed *ed, FILE *fp, const char *charset, char *err, size_t e
             c.hyph_detected = 1;
             break;
 
+        case 0xC0: /* Margin reset: <C0><oldL><oldR><newL><newR><C0> (WP 4.2 spec, 6 bytes) */
+        {
+            int oldL = fgetc(fp);
+            int oldR = fgetc(fp);
+            int newL = fgetc(fp);
+            int newR = fgetc(fp);
+            int close = fgetc(fp);
+
+            if (oldL == EOF || oldR == EOF || newL == EOF || newR == EOF || close == EOF)
+            {
+                wp4_seterr(&c, AT(), "truncated margin reset gate", -1);
+
+                ok = 0;
+                break;
+            }
+
+            if (close != 0xC0)
+            {
+                wp4_seterr(&c, AT(), "unterminated margin reset gate", -1);
+
+                ok = 0;
+                break;
+            }
+
+            ed->margin_left = newL;
+            ed->margin_right = newR;
+            ed->margin_left_tw = newL * ed->twips_per_col;
+
+            break;
+        }
+
+        case 0xCE: /* Set top margin: <CE><old><new><CE>, values in half-lines (6 lpi) */
+        {
+            int oldT = fgetc(fp);
+            int newT = fgetc(fp);
+            int close = fgetc(fp);
+
+            if (oldT == EOF || newT == EOF || close == EOF)
+            {
+                wp4_seterr(&c, AT(), "truncated top margin gate", -1);
+
+                ok = 0;
+                break;
+            }
+
+            if (close != 0xCE)
+            {
+                wp4_seterr(&c, AT(), "unterminated top margin gate", -1);
+
+                ok = 0;
+                break;
+            }
+
+            ed->margin_top_tw = newT * 120; /* half-line at 6 lpi = 120 twips */
+
+            break;
+        }
+
+        case 0xD0: /* Set form length: <D0><oldFL><oldTL><newFL><newTL><D0>, form length in 6-lpi lines */
+        {
+            int oldFL = fgetc(fp);
+            int oldTL = fgetc(fp);
+            int newFL = fgetc(fp);
+            int newTL = fgetc(fp);
+            int close = fgetc(fp);
+
+            if (oldFL == EOF || oldTL == EOF || newFL == EOF || newTL == EOF || close == EOF)
+            {
+                wp4_seterr(&c, AT(), "truncated form length gate", -1);
+
+                ok = 0;
+                break;
+            }
+
+            if (close != 0xD0)
+            {
+                wp4_seterr(&c, AT(), "unterminated form length gate", -1);
+
+                ok = 0;
+                break;
+            }
+
+            ed->page_h_tw = newFL * 240; /* 6-lpi line = 1/6 inch = 240 twips */
+
+            break;
+        }
+
         default:
             /* Single-byte layout/function code with no data: ignore */
             if (ch >= 0x80 && ch <= 0xBF)
@@ -727,6 +816,13 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, int hyph, int
     int align;
     int hyph_emitted = 0; /* Amiga variant: 0x9F emitted lazily before first hyphenated block */
 
+    /* Effective margins: use editor values if set, otherwise WP 4.2 defaults */
+    int lm = (ed->margin_left > 0) ? ed->margin_left : WP4_DEFAULT_LEFT_MARGIN;
+    int rm = (ed->margin_right > lm) ? ed->margin_right : WP4_DEFAULT_RIGHT_MARGIN;
+    int center_col = (lm + rm) / 2;
+    int tm_half; /* Top margin in half-lines (6 lpi), for 0xCE */
+    int bm_half; /* Bottom margin in half-lines (6 lpi), for 0xD0 text-lines */
+
     if (err && errsz > 0)
         err[0] = '\0';
 
@@ -756,6 +852,43 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, int hyph, int
     if (hyph && variant == WP4_VARIANT_DOS42)
     {
         if (fputc(0x9F, fp) == EOF)
+            return -1;
+    }
+
+    /* 0xC0 margin reset: <C0><oldL><oldR><newL><newR><C0>; top via 0xCE, page height via 0xD0 */
+    tm_half = (ed->margin_top_tw > 0) ? (ed->margin_top_tw / 120) : WP4_DEFAULT_TOP_MARGIN;
+    bm_half = (ed->margin_bottom_tw > 0) ? (ed->margin_bottom_tw / 120) : (WP4_DEFAULT_BOTTOM_MARGIN * 2);
+
+    if (fputc(0xC0, fp) == EOF ||
+        fputc(0, fp) == EOF ||
+        fputc(0, fp) == EOF ||
+        fputc((unsigned char)lm, fp) == EOF ||
+        fputc((unsigned char)rm, fp) == EOF ||
+        fputc(0xC0, fp) == EOF)
+        return -1;
+
+    /* 0xCE top margin: <CE><old><new><CE>, values in half-lines (6 lpi = 120 twips each) */
+    if (fputc(0xCE, fp) == EOF ||
+        fputc(0, fp) == EOF ||
+        fputc((unsigned char)tm_half, fp) == EOF ||
+        fputc(0xCE, fp) == EOF)
+        return -1;
+
+    /* 0xD0 form length: <D0><oldFL><oldTL><newFL><newTL><D0> in 6-lpi lines (240 twips); only if page_h_tw set */
+    if (ed->page_h_tw > 0)
+    {
+        int fl = ed->page_h_tw / 240;
+        int tl_half = fl * 2 - tm_half - bm_half;
+
+        if (tl_half < 0)
+            tl_half = 0;
+
+        if (fputc(0xD0, fp) == EOF ||
+            fputc(0, fp) == EOF ||
+            fputc(0, fp) == EOF ||
+            fputc((unsigned char)fl, fp) == EOF ||
+            fputc((unsigned char)tl_half, fp) == EOF ||
+            fputc(0xD0, fp) == EOF)
             return -1;
     }
 
@@ -792,32 +925,32 @@ int wp4_export(const struct Ed *ed, FILE *fp, const char *charset, int hyph, int
 
         if (align == EA_ALIGN_CENTER && ln->len > 0)
         {
-            int scol = WP4_DEFAULT_LEFT_MARGIN;
+            int scol = lm;
 
             /* WP 4.1.12 Amiga uses the real starting column, not the fixed left margin */
             if (variant == WP4_VARIANT_AMIGA41)
-                scol = WP4_DEFAULT_RIGHT_MARGIN - ln->len;
+                scol = rm - ln->len;
 
-            if (scol < WP4_DEFAULT_LEFT_MARGIN)
-                scol = WP4_DEFAULT_LEFT_MARGIN;
+            if (scol < lm)
+                scol = lm;
 
-            /* <C3><type><center col><start col><C3> - type=0, center col=42, start col */
-            if (fputc(0xC3, fp) == EOF || fputc(0x00, fp) == EOF || fputc(WP4_CENTER_COL, fp) == EOF || fputc((unsigned char)scol, fp) == EOF || fputc(0xC3, fp) == EOF)
+            /* <C3><type><center col><start col><C3> - type=0, center col, start col */
+            if (fputc(0xC3, fp) == EOF || fputc(0x00, fp) == EOF || fputc((unsigned char)center_col, fp) == EOF || fputc((unsigned char)scol, fp) == EOF || fputc(0xC3, fp) == EOF)
                 return -1;
         }
         else if (align == EA_ALIGN_RIGHT && ln->len > 0)
         {
-            int scol = WP4_DEFAULT_LEFT_MARGIN;
+            int scol = lm;
 
             /* WP 4.1.12 Amiga: scol = right_margin - text_length, the column where flush-right text begins */
             if (variant == WP4_VARIANT_AMIGA41)
-                scol = WP4_DEFAULT_RIGHT_MARGIN - ln->len;
+                scol = rm - ln->len;
 
-            if (scol < WP4_DEFAULT_LEFT_MARGIN)
-                scol = WP4_DEFAULT_LEFT_MARGIN;
+            if (scol < lm)
+                scol = lm;
 
-            /* <C4><align char><align col><start col><C4> - 0x0A hard new line, align col=75, start col */
-            if (fputc(0xC4, fp) == EOF || fputc(0x0A, fp) == EOF || fputc(WP4_DEFAULT_RIGHT_MARGIN, fp) == EOF || fputc((unsigned char)scol, fp) == EOF || fputc(0xC4, fp) == EOF)
+            /* <C4><align char><align col><start col><C4> - 0x0A hard new line, align col, start col */
+            if (fputc(0xC4, fp) == EOF || fputc(0x0A, fp) == EOF || fputc((unsigned char)rm, fp) == EOF || fputc((unsigned char)scol, fp) == EOF || fputc(0xC4, fp) == EOF)
                 return -1;
         }
 

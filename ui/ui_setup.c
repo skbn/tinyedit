@@ -120,21 +120,26 @@ static void setup_font_start_dir(char *out, int out_sz)
 #endif
 
 #ifdef HAVE_TTF_TAB
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
+#define ST_TTF_TAB_NAME "TTF"
+#else
+#define ST_TTF_TAB_NAME "Print"
+#endif
 #ifdef HAVE_SPELL_TAB
 #ifdef HAVE_TRANSLATE
 #define ST_TAB_COUNT 5
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF", "Spell", "X-late"};
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", ST_TTF_TAB_NAME, "Spell", "X-late"};
 #else
 #define ST_TAB_COUNT 4
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF", "Spell"};
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", ST_TTF_TAB_NAME, "Spell"};
 #endif
 #else /* !HAVE_SPELL_TAB */
 #ifdef HAVE_TRANSLATE
 #define ST_TAB_COUNT 4
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF", "X-late"};
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", ST_TTF_TAB_NAME, "X-late"};
 #else
 #define ST_TAB_COUNT 3
-static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", "TTF"};
+static const char *st_tab_names[ST_TAB_COUNT] = {"Editor", "Colour/Font", ST_TTF_TAB_NAME};
 #endif
 #endif /* HAVE_SPELL_TAB */
 #else  /* !HAVE_TTF_TAB */
@@ -230,6 +235,11 @@ static const SetupField st_fields[] =
         {0, "Auto-cap", FT_BOOL, F_OFF(assist_auto_cap), 0},
         {0, "Repeated words", FT_BOOL, F_OFF(assist_repeat_check), 0},
 
+        /* Rich-mode defaults */
+        {0, "Default page size", FT_CYCLE, F_OFF(default_page_size), 0},
+        {0, "Default ruler units", FT_CYCLE, F_OFF(default_ruler_mm), 0},
+        {0, "Cols per inch (CPI)", FT_INT, F_OFF(cols_per_inch), 0},
+
         /* Persistence */
         {0, "Auto-save", FT_BOOL, F_OFF(autosave), 0},
         {0, "Auto-save interval (s)", FT_INT, F_OFF(autosave_interval), 0},
@@ -249,11 +259,13 @@ static const SetupField st_fields[] =
         {1, "Font", FT_STR, F_OFF(font), TE_CFG_STR_MAX},
 #endif
 #ifdef HAVE_TTF_TAB
+#if defined(PLATFORM_AMIGA) || defined(PLATFORM_WIN32)
         {1, "TTF Enabled", FT_BOOL, F_OFF(ttf_enabled), 0},
         {1, "TTF Font", FT_STR, F_OFF(ttf_font), TE_CFG_STR_MAX},
         {1, "TTF Size", FT_INT, F_OFF(ttf_size), 0},
         {1, "TTF Antialias", FT_CYCLE, F_OFF(ttf_antialias), 0},
         {1, "TTF Encoding", FT_CYCLE, F_OFF(ttf_use_utf8), 0},
+#endif
         {1, "Print Font Size", FT_INT, F_OFF(print_font_size), 0},
         {1, "Print Font", FT_STR, F_OFF(print_font_path), TE_CFG_STR_MAX},
 #endif
@@ -448,6 +460,28 @@ static void st_format_value(const TeConfig *w, const SetupField *fld, char *buf,
                 label = "Standard";
             else
                 label = "Vim-like";
+        }
+        else if (strcmp(fld->label, "Default page size") == 0)
+        {
+            /* Index into the page_size_names table (19 entries) */
+            static const char *const ps_names[] =
+                {
+                    "Letter", "Legal", "Tabloid", "Statement", "Executive",
+                    "Folio", "Quarto", "10x14", "A3", "A4",
+                    "A5", "A6", "B4 (ISO)", "B5 (ISO)", "B6 (ISO)",
+                    "C5 Env", "DL Env", "Monarch Env", "Comm10 Env"};
+
+            if (v >= 0 && v < 19)
+                label = ps_names[v];
+            else
+                label = "Letter";
+        }
+        else if (strcmp(fld->label, "Default ruler units") == 0)
+        {
+            if (v == 0)
+                label = "Columns";
+            else
+                label = "Millimetres";
         }
         else
         {
@@ -974,6 +1008,12 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
         else if (strcmp(fld->label, "Word move mode") == 0)
             /* Word move mode: 0=Standard, 1=Vim-like (toggle between 2 options) */
             *v = (*v == 0) ? 1 : 0;
+        else if (strcmp(fld->label, "Default page size") == 0)
+            /* 19 page sizes: cycle 0..18 */
+            *v = (*v + 1) % 19;
+        else if (strcmp(fld->label, "Default ruler units") == 0)
+            /* 0=Columns, 1=Millimetres */
+            *v = (*v == 0) ? 1 : 0;
         else
             /* TTF antialias: 0=AUTO, 1=OFF, 2=ON (cycle through 3 options) */
             *v = (*v + 1) % 3;
@@ -1306,7 +1346,8 @@ static void st_edit_field(TeApp *app, TeConfig *w, const SetupField *fld)
             if (tab)
             {
                 tab->show_line_numbers = w->show_line_numbers;
-                ed_set_word_move_mode(tab->editor, w->word_move_mode);
+
+                te_tab_apply_config(tab, app->cfg.word_move_mode, app->cfg.default_ruler_mm, app->cfg.cols_per_inch);
 
                 te_app_add_tab(app, tab);
                 te_app_switch_tab(app, app->tab_count - 1);
@@ -1657,6 +1698,21 @@ int ui_setup_run(TeApp *app, TeConfig *cfg, const char *cfg_path)
 
             old_cfg = *cfg;
             *cfg = work;
+
+            /* Recalculate cols_per_inch from TTF advance when font/size changes */
+            if (cfg->ttf_enabled && cfg->ttf_font[0])
+            {
+                int auto_cpi = 0;
+                int sz = cfg->ttf_size > 0 ? cfg->ttf_size : 14;
+
+                if (te_cfg_calc_cpi_from_ttf(cfg->ttf_font, sz, &auto_cpi) == 0 && auto_cpi > 0)
+                {
+                    cfg->cols_per_inch = auto_cpi;
+
+                    /* Re-save so the calculated CPI persists */
+                    te_cfg_save(cfg, cfg_path);
+                }
+            }
 
             view_set_tab_width(cfg->tab_width > 0 ? cfg->tab_width : 4);
             ed_set_tab_width(view_tab_width());

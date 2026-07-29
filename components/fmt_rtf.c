@@ -18,6 +18,7 @@
 #include "editor.h"
 #include "ed_attr.h"
 #include "fmt_rtf.h"
+#include "config.h"
 #include "../core/utf8.h"
 
 #define RTF_MAX_DEPTH 64
@@ -89,6 +90,14 @@ struct rtf_ctx
 
     /* Set when \hyphauto1 (or bare \hyphauto) appears in the header */
     int hyph_detected;
+
+    /* Page geometry in twips read from the RTF header, 0 = not seen */
+    int margl_twips;
+    int margr_twips;
+    int margt_twips;
+    int margb_twips;
+    int paperw_twips;
+    int paperh_twips;
 
     char *err;
     size_t errsz;
@@ -610,6 +619,43 @@ static int rtf_control(struct rtf_ctx *c)
         return 0;
     }
 
+    /* Page left/right margins in twips (1440 twips = 1 inch) */
+    if (strcmp(word, "margl") == 0 && has_num)
+    {
+        c->margl_twips = (int)num;
+        return 0;
+    }
+
+    if (strcmp(word, "margr") == 0 && has_num)
+    {
+        c->margr_twips = (int)num;
+        return 0;
+    }
+
+    if (strcmp(word, "margt") == 0 && has_num)
+    {
+        c->margt_twips = (int)num;
+        return 0;
+    }
+
+    if (strcmp(word, "margb") == 0 && has_num)
+    {
+        c->margb_twips = (int)num;
+        return 0;
+    }
+
+    if (strcmp(word, "paperw") == 0 && has_num)
+    {
+        c->paperw_twips = (int)num;
+        return 0;
+    }
+
+    if (strcmp(word, "paperh") == 0 && has_num)
+    {
+        c->paperh_twips = (int)num;
+        return 0;
+    }
+
     if (strcmp(word, "uc") == 0)
     {
         c->st.uc = (int)num;
@@ -811,6 +857,27 @@ int rtf_import(struct Ed *ed, FILE *fp, char *err, size_t errsz, char *warn, siz
         if (hyph_out)
             *hyph_out = c.hyph_detected;
 
+        /* Convert twips to columns; margin_left is direct, margin_right is computed from the page width (captured or letter default) */
+        if (c.margl_twips > 0)
+            ed->margin_left = (c.margl_twips + ed->twips_per_col / 2) / ed->twips_per_col;
+
+        if (c.margr_twips > 0)
+        {
+            int page_w = (c.paperw_twips > 0) ? c.paperw_twips : 12240;
+            int text_tw = page_w - c.margl_twips - c.margr_twips;
+
+            if (text_tw > 0)
+                ed->margin_right = ed->margin_left + (text_tw + ed->twips_per_col / 2) / ed->twips_per_col;
+        }
+
+        /* Preserve page geometry/margins in twips for lossless round-trip */
+        ed->page_w_tw = c.paperw_twips;
+        ed->page_h_tw = c.paperh_twips;
+        ed->margin_top_tw = c.margt_twips;
+        ed->margin_bottom_tw = c.margb_twips;
+        ed->margin_left_tw = c.margl_twips;
+        ed->margin_right_tw = c.margr_twips;
+
         rc = 0;
     }
 
@@ -860,6 +927,10 @@ int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, i
     int row;
     int i;
     int at_para_start = 1;
+    int page_w;
+    int page_h;
+    int margt;
+    int margb;
 
     if (!ed || !fp)
         return -1;
@@ -872,6 +943,49 @@ int rtf_export_with_font(const struct Ed *ed, FILE *fp, const char *font_name, i
     else
     {
         if (fputs("{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1{\\fonttbl{\\f0\\fnil Default;}}\n", fp) == EOF)
+            return -1;
+    }
+
+    /* Page geometry: paper size+margins; captured import values or Letter defaults */
+    page_w = (ed->page_w_tw > 0) ? ed->page_w_tw : 12240;
+    page_h = (ed->page_h_tw > 0) ? ed->page_h_tw : 15840;
+    margt = (ed->margin_top_tw > 0) ? ed->margin_top_tw : 1440;
+    margb = (ed->margin_bottom_tw > 0) ? ed->margin_bottom_tw : 1440;
+
+    if (fprintf(fp, "\\paperw%d\\paperh%d\\margt%d\\margb%d\n", page_w, page_h, margt, margb) < 0)
+        return -1;
+
+    /* Left/right margins: prefer captured twips, fall back to column-derived */
+    if (ed->margin_left > 0 || ed->margin_right > ed->margin_left)
+    {
+        int left_tw, right_tw;
+
+        if (ed->margin_left_tw > 0)
+            left_tw = ed->margin_left_tw;
+        else
+            left_tw = ed->margin_left * ed->twips_per_col;
+
+        if (ed->margin_right_tw > 0)
+        {
+            right_tw = ed->margin_right_tw;
+        }
+        else
+        {
+            right_tw = 1440;
+
+            if (ed->margin_right > ed->margin_left)
+            {
+                int page_w = (ed->page_w_tw > 0) ? ed->page_w_tw : 12240;
+                int span = ed->margin_right - ed->margin_left;
+
+                right_tw = page_w - left_tw - span * ed->twips_per_col;
+
+                if (right_tw < 0)
+                    right_tw = 0;
+            }
+        }
+
+        if (fprintf(fp, "\\margl%d\\margr%d\n", left_tw, right_tw) < 0)
             return -1;
     }
 

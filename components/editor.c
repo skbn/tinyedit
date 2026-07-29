@@ -1678,6 +1678,7 @@ Ed *ed_new(void)
     ed->insert_mode = 1;
     ed->undo_max = 50;
     ed->pending_row = -1;
+    ed->twips_per_col = 120; /* fallback; overridden from config at tab creation */
 
 #if defined(PLATFORM_AMIGA)
     /* Lines come from a pool, one exec allocation per puddle instead of per line */

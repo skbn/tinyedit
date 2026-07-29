@@ -227,6 +227,15 @@ extern int COLORS;
 #ifndef KEY_ALT_CTRL
 #define KEY_ALT_CTRL(c) (0xB00 + ((unsigned int)(c) & 0xFF))
 #endif
+#ifndef KEY_ALT_F
+#define KEY_ALT_F(n) (0xD00 + ((unsigned int)(n) & 0xFF))
+#endif
+#ifndef KEY_SHIFT_ALT_F
+#define KEY_SHIFT_ALT_F(n) (0xE00 + ((unsigned int)(n) & 0xFF))
+#endif
+#ifndef KEY_SHIFT_CTRL_F
+#define KEY_SHIFT_CTRL_F(n) (0xF00 + ((unsigned int)(n) & 0xFF))
+#endif
 #ifndef KEY_CLEFT
 #define KEY_CLEFT 0x7F3
 #endif

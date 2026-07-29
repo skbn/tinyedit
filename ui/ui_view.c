@@ -436,10 +436,10 @@ int view_cursor_justify_shift(Ed *ed, int width)
 
     seg_len = seg_end - seg_start;
 
-    /* Reserve matches painter: tail of soft-hyphenated line reserves 1 col */
+    /* Reserve for hyphen glyph when this sub-row ends on a soft break */
     hyph_reserve = (seg_end == len && ln->brk == LB_HYPHEN) ? 1 : 0;
 
-    /* Need seg_len+1 entries because we may query offsets[seg_len] below */
+    /* Need seg_len+1 slots because we read offsets[seg_len] for past-end cursor */
     if (seg_len <= 0 || seg_len + 1 > (int)(sizeof(offsets) / sizeof(offsets[0])))
         return 0;
 

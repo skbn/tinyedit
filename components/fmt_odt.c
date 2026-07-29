@@ -64,8 +64,10 @@ static const char ODT_STYLES_PROLOG[] =
 static const char ODT_STYLES_MID[] =
     "/></style:default-style>"
     "<style:style style:name=\"Standard\" style:family=\"paragraph\"/>"
-    "</office:styles>"
-    "</office:document-styles>";
+    "</office:styles>";
+
+/* Written after any optional automatic-styles/master-styles block */
+static const char ODT_STYLES_TAIL[] = "</office:document-styles>";
 
 /* content.xml prolog and epilog */
 static const char ODT_CONTENT_PROLOG[] =
@@ -129,6 +131,17 @@ typedef struct
 
     /* Hyphenation detected in styles during import */
     int hyph_detected;
+
+    /* Page geometry in hundredths of millimetre; 0 = not seen */
+    int pg_margin_left_hmm;
+    int pg_margin_right_hmm;
+    int pg_margin_top_hmm;
+    int pg_margin_bottom_hmm;
+    int pg_width_hmm;
+    int pg_height_hmm;
+
+    /* Set once first page-layout captured so later ones don't override it */
+    int pg_layout_seen;
 } OdtReadCtx;
 
 typedef struct
@@ -284,6 +297,73 @@ static const char *odt_find_attr(const XlEvent *ev, const char *name)
     }
 
     return NULL;
+}
+
+/* Parse ODF length ("2.54cm"/"1in"/"25.4mm"/"72pt") to hundredths of mm; 0=invalid */
+static int odt_parse_length_hmm(const char *s)
+{
+    double v = 0.0;
+    int digits = 0;
+    int sign = 1;
+    int i = 0;
+    int frac_div = 0;
+    double result_mm;
+    int hmm;
+
+    if (!s)
+        return 0;
+
+    if (s[0] == '-')
+    {
+        sign = -1;
+        i++;
+    }
+
+    while (s[i] >= '0' && s[i] <= '9')
+    {
+        v = v * 10.0 + (double)(s[i] - '0');
+        digits++;
+        i++;
+    }
+
+    if (s[i] == '.')
+    {
+        i++;
+        frac_div = 1;
+
+        while (s[i] >= '0' && s[i] <= '9')
+        {
+            v = v * 10.0 + (double)(s[i] - '0');
+            frac_div *= 10;
+            digits++;
+            i++;
+        }
+    }
+
+    if (!digits)
+        return 0;
+
+    if (frac_div > 0)
+        v /= (double)frac_div;
+
+    v *= (double)sign;
+
+    if (strcmp(s + i, "cm") == 0)
+        result_mm = v * 10.0;
+    else if (strcmp(s + i, "mm") == 0)
+        result_mm = v;
+    else if (strcmp(s + i, "in") == 0)
+        result_mm = v * 25.4;
+    else if (strcmp(s + i, "pt") == 0)
+        result_mm = v * 25.4 / 72.0;
+    else if (strcmp(s + i, "pc") == 0)
+        result_mm = v * 25.4 / 6.0;
+    else
+        return 0;
+
+    hmm = (int)(result_mm * 100.0 + (result_mm >= 0 ? 0.5 : -0.5));
+
+    return hmm;
 }
 
 /* Map fo:text-align value to EA_ALIGN_* */
@@ -462,6 +542,51 @@ static int odt_read_cb(void *user, const XlEvent *ev)
             return 0;
         }
 
+        /* Page-layout properties; first with real margins wins (LibreOffice emits an empty default first) */
+        if (strcmp(ev->tag, "style:page-layout-properties") == 0)
+        {
+            const char *ml = NULL;
+            const char *mr = NULL;
+            const char *mt = NULL;
+            const char *mb = NULL;
+            const char *pw = NULL;
+            const char *ph = NULL;
+
+            if (rc->pg_layout_seen)
+                return 0;
+
+            ml = odt_find_attr(ev, "fo:margin-left");
+            mr = odt_find_attr(ev, "fo:margin-right");
+            mt = odt_find_attr(ev, "fo:margin-top");
+            mb = odt_find_attr(ev, "fo:margin-bottom");
+            pw = odt_find_attr(ev, "fo:page-width");
+            ph = odt_find_attr(ev, "fo:page-height");
+
+            if (ml)
+                rc->pg_margin_left_hmm = odt_parse_length_hmm(ml);
+
+            if (mr)
+                rc->pg_margin_right_hmm = odt_parse_length_hmm(mr);
+
+            if (mt)
+                rc->pg_margin_top_hmm = odt_parse_length_hmm(mt);
+
+            if (mb)
+                rc->pg_margin_bottom_hmm = odt_parse_length_hmm(mb);
+
+            if (pw)
+                rc->pg_width_hmm = odt_parse_length_hmm(pw);
+
+            if (ph)
+                rc->pg_height_hmm = odt_parse_length_hmm(ph);
+
+            /* Only mark seen when we captured at least one real attribute */
+            if (ml || mr || mt || mb || pw || ph)
+                rc->pg_layout_seen = 1;
+
+            return 0;
+        }
+
         /* Body content */
         if (strcmp(ev->tag, "text:p") == 0)
         {
@@ -592,7 +717,7 @@ int odt_import(struct Ed *ed, const char *path, char *err, size_t errsz, int *hy
     ctx.first_para = 1;
     ctx.run_start_col = 0;
 
-    /* First pass: find content.xml and parse it */
+    /* Find content.xml and parse it */
     while (zip_next_entry(zr, name, sizeof(name)) > 0)
     {
         if (strcmp(name, "content.xml") != 0)
@@ -626,9 +751,62 @@ int odt_import(struct Ed *ed, const char *path, char *err, size_t errsz, int *hy
         return -1;
     }
 
+    /* Styles.xml has page-layout margins; reopen (zip walks forward only) */
+    fp = fopen(path, "rb");
+
+    if (fp)
+    {
+        zr = zip_open_read(fp);
+
+        if (zr)
+        {
+            while (zip_next_entry(zr, name, sizeof(name)) > 0)
+            {
+                if (strcmp(name, "styles.xml") != 0)
+                    continue;
+
+                xl_parse(odt_xl_read, zr, odt_read_cb, &ctx);
+
+                break;
+            }
+
+            zip_close_read(zr);
+        }
+
+        fclose(fp);
+    }
+
     /* Set hyph_out if detected during import */
     if (rc == 0 && hyph_out && ctx.hyph_detected)
         *hyph_out = 1;
+
+    /* Convert page geometry from hundredths of mm to columns and twips */
+    if (rc == 0 && ctx.pg_margin_left_hmm > 0)
+    {
+        int hmm_per_col = (int)((long)2540 * ed->twips_per_col / 1440);
+
+        ed->margin_left = (ctx.pg_margin_left_hmm + hmm_per_col / 2) / hmm_per_col;
+
+        if (ctx.pg_margin_right_hmm > 0)
+        {
+            int page_w = (ctx.pg_width_hmm > 0) ? ctx.pg_width_hmm : 21000;
+            int text_hmm = page_w - ctx.pg_margin_left_hmm - ctx.pg_margin_right_hmm;
+
+            if (text_hmm > 0)
+                ed->margin_right = ed->margin_left + (text_hmm + hmm_per_col / 2) / hmm_per_col;
+        }
+    }
+
+    /* Preserve page geometry/margins in twips for round-trip (twips = hmm * 1440 / 2540) */
+    if (rc == 0)
+    {
+        ed->page_w_tw = (ctx.pg_width_hmm > 0) ? (int)((long)ctx.pg_width_hmm * 1440 / 2540) : 0;
+        ed->page_h_tw = (ctx.pg_height_hmm > 0) ? (int)((long)ctx.pg_height_hmm * 1440 / 2540) : 0;
+        ed->margin_top_tw = (ctx.pg_margin_top_hmm > 0) ? (int)((long)ctx.pg_margin_top_hmm * 1440 / 2540) : 0;
+        ed->margin_bottom_tw = (ctx.pg_margin_bottom_hmm > 0) ? (int)((long)ctx.pg_margin_bottom_hmm * 1440 / 2540) : 0;
+        ed->margin_left_tw = (ctx.pg_margin_left_hmm > 0) ? (int)((long)ctx.pg_margin_left_hmm * 1440 / 2540) : 0;
+        ed->margin_right_tw = (ctx.pg_margin_right_hmm > 0) ? (int)((long)ctx.pg_margin_right_hmm * 1440 / 2540) : 0;
+    }
 
     return rc == 0 ? 0 : -1;
 }
@@ -1301,6 +1479,68 @@ int odt_export(const struct Ed *ed, const char *path, const TeConfig *cfg, char 
     if (zip_write_entry(zw, (const unsigned char *)mid_ptr, mid_len) < 0)
     {
         odt_seterr(err, errsz, "ZIP write failed on styles.xml");
+
+        zip_close_write(zw);
+        fclose(fp);
+        return -1;
+    }
+
+    /* Emit page-layout/master-styles for margins; captured import values or A4 defaults */
+    if (ed->margin_left > 0 || ed->margin_right > ed->margin_left)
+    {
+        char page_buf[512];
+        int hmm_per_col = (int)((long)2540 * ed->twips_per_col / 1440);
+        int left_hmm, right_hmm;
+
+        /* Convert captured twips to hmm (1 twip = 2540/1440 hmm) */
+        int pw_hmm = (ed->page_w_tw > 0) ? (int)((long)ed->page_w_tw * 2540 / 1440) : 21000;
+        int ph_hmm = (ed->page_h_tw > 0) ? (int)((long)ed->page_h_tw * 2540 / 1440) : 29700;
+        int mt_hmm = (ed->margin_top_tw > 0) ? (int)((long)ed->margin_top_tw * 2540 / 1440) : 2000;
+        int mb_hmm = (ed->margin_bottom_tw > 0) ? (int)((long)ed->margin_bottom_tw * 2540 / 1440) : 2000;
+
+        /* Prefer exact twips captured on import; fall back to column-derived */
+        if (ed->margin_left_tw > 0)
+            left_hmm = (int)((long)ed->margin_left_tw * 2540 / 1440);
+        else
+            left_hmm = ed->margin_left * hmm_per_col;
+
+        if (ed->margin_right_tw > 0)
+        {
+            right_hmm = (int)((long)ed->margin_right_tw * 2540 / 1440);
+        }
+        else
+        {
+            right_hmm = 2540;
+
+            if (ed->margin_right > ed->margin_left)
+            {
+                int span = ed->margin_right - ed->margin_left;
+
+                right_hmm = pw_hmm - left_hmm - span * hmm_per_col;
+
+                if (right_hmm < 0)
+                    right_hmm = 0;
+            }
+        }
+
+        n = snprintf(page_buf, sizeof(page_buf), "<office:automatic-styles><style:page-layout style:name=\"pgL1\"><style:page-layout-properties fo:page-width=\"%d.%02dcm\" fo:page-height=\"%d.%02dcm\" fo:margin-left=\"%d.%02dmm\" fo:margin-right=\"%d.%02dmm\" fo:margin-top=\"%d.%02dmm\" fo:margin-bottom=\"%d.%02dmm\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"pgL1\"/></office:master-styles>", pw_hmm / 1000, (pw_hmm / 10) % 100, ph_hmm / 1000, (ph_hmm / 10) % 100, left_hmm / 100, left_hmm % 100, right_hmm / 100, right_hmm % 100, mt_hmm / 100, mt_hmm % 100, mb_hmm / 100, mb_hmm % 100);
+
+        if (n > 0 && n < (int)sizeof(page_buf))
+        {
+            if (zip_write_entry(zw, (const unsigned char *)page_buf, n) < 0)
+            {
+                odt_seterr(err, errsz, "ZIP write failed on page-layout");
+
+                zip_close_write(zw);
+                fclose(fp);
+                return -1;
+            }
+        }
+    }
+
+    if (zip_write_entry(zw, (const unsigned char *)ODT_STYLES_TAIL, (int)(sizeof(ODT_STYLES_TAIL) - 1)) < 0)
+    {
+        odt_seterr(err, errsz, "ZIP write failed on styles tail");
 
         zip_close_write(zw);
         fclose(fp);
